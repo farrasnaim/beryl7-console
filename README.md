@@ -4,7 +4,30 @@ A hand-built web console for the GL.iNet Beryl 7 (GL-MT3600BE) travel router run
 
 It replaces day-to-day use of LuCI and the vendor UI for the things a travel router actually does: watching who is connected, joining hotel Wi-Fi, tethering a phone, routing devices through WireGuard tunnels, and adjusting the radios — while leaving LuCI untouched at `/cgi-bin/luci/` for everything else.
 
-> Built for one specific router on one specific network, then published because someone else might need it. Read the code before deploying it — it is small enough that you can.
+Built for one specific router, but it does not assume that router: radios, wireless interfaces, and networks are all discovered at runtime, so a stock dual-band OpenWrt box should work unedited. Read the code before deploying it — it is small enough that you can.
+
+## Quick start
+
+On a freshly flashed OpenWrt router, from a machine on the same network:
+
+```sh
+ssh-copy-id root@192.168.1.1     # if you haven't already
+git clone https://github.com/farrasnaim/beryl7-console.git
+cd beryl7-console
+./install.sh 192.168.1.1         # your router's address
+```
+
+It asks once for a password to protect config changes, then prints the URL. Open `http://192.168.1.1/dashboard/`.
+
+That is the whole install. Everything else in this README is explanation, not further steps:
+
+- **Optional packages** unlock the VPN and USB-uplink pages — see [Requirements](#requirements). The installer names the ones you're missing; nothing breaks without them.
+- **Name your devices** by editing `/etc/dashboard/classmap` on the router, so the client list shows "My Laptop" instead of a MAC.
+- **Change the write password later** with `sed -i 's/"changeme"/"newpassword"/' /www/cgi-bin/*-api`.
+- **Re-run `./install.sh`** any time to upgrade; it keeps your classmap and password.
+- **[Back up before you reflash](#backup-and-restore)** — `./backup.sh <router>` captures the config *and* the console in one file.
+
+Read [Security model](#security-model) before putting this on a network you don't control.
 
 ## The pages
 
@@ -58,6 +81,8 @@ Points worth knowing:
 
 ```
 install.sh                   first-time install / upgrade, idempotent
+backup.sh                    pull a full restore bundle off the router
+restore.sh                   put a bundle back onto a fresh router
 www/
   os.css                     design system: tokens, themes, accents, components
   os.js                      shared runtime: nav, theming, dialogs, topology, polling
@@ -102,7 +127,7 @@ Every script carries a header comment explaining what it does and, more importan
 
 **Firmware.** Vanilla OpenWrt 25.12 (developed on GL's OpenWrt-based stock firmware, then migrated). uhttpd with CGI enabled — the stock configuration.
 
-**Packages.**
+**Packages.** Nothing is required — the console installs and runs on stock OpenWrt. Each package below unlocks one page or panel, and the installer tells you which are missing rather than refusing to continue.
 
 | Needed by | Packages |
 |---|---|
@@ -111,6 +136,18 @@ Every script carries a header comment explaining what it does and, more importan
 | Traffic panel | `vnstat2` |
 | Travel DNS hotplug | `https-dns-proxy` (the hotplug is a no-op without it) |
 | Everything else | stock OpenWrt (`iw`, `ubus`, `uci`, `nftables`, BusyBox) |
+
+On OpenWrt 24.10 and newer (`apk`):
+
+```sh
+apk update && apk add pbr wireguard-tools kmod-wireguard vnstat2 https-dns-proxy
+```
+
+On older releases (`opkg`):
+
+```sh
+opkg update && opkg install pbr wireguard-tools kmod-wireguard vnstat2 https-dns-proxy
+```
 
 ## Installation
 
@@ -172,9 +209,32 @@ To survive sysupgrades, append the installed paths to `/etc/sysupgrade.conf` —
 
 </details>
 
-## Security model — read this before deploying
+## Backup and restore
 
-This console is designed for a **trusted home LAN** and makes deliberate trade-offs you should understand:
+Two scripts, because a router you rely on will eventually be reset, reflashed, or upgraded.
+
+```sh
+./backup.sh 192.168.8.1                             # -> backups/beryl7-<host>-<date>.tar.gz
+./restore.sh 192.168.1.1 backups/beryl7-....tar.gz  # onto a fresh router
+```
+
+`backup.sh` uses OpenWrt's own `sysupgrade -b`, which honours `/etc/sysupgrade.conf` — and `install.sh` puts every console path in there. So one tarball holds **both** your router's configuration (networks, SSIDs, firewall, pbr policies, static leases) **and** the console, and it stays correct as the console grows. It saves the installed package list alongside it.
+
+`restore.sh` installs the packages **first**, then restores the configuration. That order is the whole point of the script: `/etc/config/pbr` means nothing until `pbr` exists, and netifd discards WireGuard interfaces it has no protocol handler for — restore first and your tunnels vanish silently.
+
+> **The bundle contains WireGuard private keys, Wi-Fi passphrases, and the console's write password.** `backups/` is gitignored here. Keep yours in a *private* repository or encrypted storage — never a public one.
+
+A full recovery from bare firmware is then:
+
+1. Flash OpenWrt, set a root password, install your SSH key (`ssh-copy-id root@192.168.1.1`).
+2. `./restore.sh 192.168.1.1 backups/beryl7-....tar.gz`
+3. The router reboots onto your old address with your configuration and the console already in place.
+
+If you only want the console back and not the old configuration, run `./install.sh <router>` instead — that is the clean-slate path.
+
+## Security model
+
+**Read this before putting the console on a network you do not control.** It is designed for a **trusted home LAN** and makes deliberate trade-offs you should understand:
 
 - **Reading is unauthenticated.** Anyone on the LAN can see the dashboard. On the original network this is enforced at the firewall: guest and IoT zones have `input REJECT`, WAN is `DROP`, so only trusted-LAN clients can reach the pages at all. Replicate that or accept that everyone on your network can watch it.
 - **Writes are gated by a single shared password**, checked server-side only (it never appears in HTML or JS). `install.sh` prompts for it. It ships as `changeme`, so if you installed by hand — **change it before using the console**:

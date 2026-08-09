@@ -2,3 +2,9 @@ Thumbs.db
 .DS_Store
 *.prenav
 *.bak
+
+# Restore bundles hold WireGuard private keys, Wi-Fi passphrases and the
+# console's write password. They must never reach a public repository.
+backups/
+*.tar.gz
+*.packages

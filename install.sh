@@ -32,32 +32,38 @@ command -v ssh >/dev/null 2>&1 || { echo "ssh not found in PATH"; exit 1; }
 command -v tar >/dev/null 2>&1 || { echo "tar not found in PATH"; exit 1; }
 [ -f "$SRC/www/os.css" ] || { echo "run this from the repository root"; exit 1; }
 
+# -n on every ssh that is not being fed a pipe: without it ssh reads the
+# script's own stdin, which swallows the password typed at the prompt below.
 say "Checking the router"
-BOARD=$(ssh -o ConnectTimeout=10 "$TARGET" '. /usr/share/libubox/jshn.sh 2>/dev/null
-    ubus call system board 2>/dev/null | sed -n "s/.*\"model\": \"\([^\"]*\)\".*/\1/p" | head -n1') || {
+BOARD=$(ssh -n -o ConnectTimeout=10 "$TARGET" \
+    'ubus call system board 2>/dev/null | sed -n "s/.*\"model\": \"\([^\"]*\)\".*/\1/p" | head -n1') || {
     echo "cannot reach $TARGET over SSH."
     echo "check the address, and that your key is installed (ssh-copy-id $TARGET)."
     exit 1
 }
 ok "model: ${BOARD:-unknown}"
+ok "OpenWrt: $(ssh -n "$TARGET" '. /etc/openwrt_release 2>/dev/null; echo "${DISTRIB_RELEASE:-unknown}"')"
 
-MISSING=$(ssh "$TARGET" 'for c in uci ubus iw nft; do command -v $c >/dev/null 2>&1 || echo $c; done')
+MISSING=$(ssh -n "$TARGET" 'for c in uci ubus iw nft; do command -v $c >/dev/null 2>&1 || echo $c; done')
 [ -z "$MISSING" ] || warn "missing commands on the router: $MISSING"
 
+# Optional packages: report, never fail. OpenWrt moved from opkg to apk, so ask
+# whichever one this build actually has.
 for pkg in pbr wireguard-tools vnstat2; do
-    ssh "$TARGET" "opkg list-installed 2>/dev/null | grep -q '^$pkg ' || apk info -e $pkg >/dev/null 2>&1" \
-        || warn "optional package not installed: $pkg (the matching page will be limited)"
+    ssh -n "$TARGET" "if command -v apk >/dev/null 2>&1; then apk info -e '$pkg' >/dev/null 2>&1;
+                      else opkg list-installed 2>/dev/null | grep -q \"^$pkg \"; fi" \
+        || warn "not installed: $pkg — the matching page will be limited (see the README)"
 done
 
 # ------------------------------------------------------------------- upload --
 say "Uploading"
-ssh "$TARGET" 'rm -rf /tmp/beryl7 && mkdir -p /tmp/beryl7'
+ssh -n "$TARGET" 'rm -rf /tmp/beryl7 && mkdir -p /tmp/beryl7'
 tar -C "$SRC" -cf - www usr etc | ssh "$TARGET" 'tar -xf - -C /tmp/beryl7'
 ok "staged in /tmp/beryl7"
 
 # ------------------------------------------------------------------ install --
 say "Installing"
-ssh "$TARGET" 'set -e
+ssh -n "$TARGET" 'set -e
 S=/tmp/beryl7
 
 # Web pages and CGI. The console never replaces LuCI: it installs alongside it
@@ -130,7 +136,7 @@ rm -rf /tmp/beryl7'
 # server-side only and never reaches the browser, but it does sit in these
 # files in plain text, so it must not stay at the shipped placeholder.
 say "Write password"
-STILL_DEFAULT=$(ssh "$TARGET" 'grep -l "^PASSWORD=\"changeme\"$" /www/cgi-bin/*-api 2>/dev/null | wc -l')
+STILL_DEFAULT=$(ssh -n "$TARGET" 'grep -l "^PASSWORD=\"changeme\"$" /www/cgi-bin/*-api 2>/dev/null | wc -l')
 if [ "$STILL_DEFAULT" -gt 0 ]; then
     printf '  choose a password for config changes (input hidden): '
     stty -echo 2>/dev/null || true
@@ -144,8 +150,8 @@ if [ "$STILL_DEFAULT" -gt 0 ]; then
         case $PW in
             *[\"\\/\&]*) echo "  avoid \" \\ / and & in the password; set it manually instead"; exit 1 ;;
         esac
-        ssh "$TARGET" "sed -i 's|^PASSWORD=\"changeme\"\$|PASSWORD=\"$PW\"|' /www/cgi-bin/*-api"
-        ok "password set in $(ssh "$TARGET" 'grep -l "^PASSWORD=" /www/cgi-bin/*-api | wc -l') files"
+        ssh -n "$TARGET" "sed -i 's|^PASSWORD=\"changeme\"\$|PASSWORD=\"$PW\"|' /www/cgi-bin/*-api"
+        ok "password set in $(ssh -n "$TARGET" 'grep -l "^PASSWORD=" /www/cgi-bin/*-api | wc -l') files"
     fi
 else
     ok "already set — left untouched"
@@ -154,7 +160,7 @@ fi
 # --------------------------------------------------------------------- check --
 say "Verifying"
 for ep in dashboard-api rate-api vpn-api repeater-api tethering-api settings-api; do
-    CODE=$(ssh "$TARGET" "uclient-fetch -q -O /dev/null http://127.0.0.1/cgi-bin/$ep 2>&1 && echo 200 || echo ERR")
+    CODE=$(ssh -n "$TARGET" "uclient-fetch -q -O /dev/null http://127.0.0.1/cgi-bin/$ep 2>&1 && echo 200 || echo ERR")
     printf '  %-14s %s\n' "$ep" "$CODE"
 done
 
