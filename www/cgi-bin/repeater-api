@@ -11,7 +11,6 @@
 # path returns 2.4 GHz results regardless of which iface is asked. Uplinks are
 # therefore discovered on 2.4 GHz; a 5 GHz uplink must be entered manually.
 
-PASSWORD="changeme"
 POST_MAX=8192
 
 esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -255,8 +254,8 @@ fi
 
 # ============================ ADD UPLINK ============================
 if [ "$ACTION" = "add" ]; then
-    # No router password, by explicit user choice: joining an uplink is a travel
-    # convenience and typing an admin password at a hotel desk is friction for no
+    # No router password anywhere in this console, by explicit user choice:
+    # joining an uplink is a travel convenience and an admin prompt is friction for no
     # gain. guard_post still enforces the origin check, and guest/iot are
     # input=REJECT so this endpoint is only reachable from the trusted LAN.
     SSID=$(qs_get_dec ssid)

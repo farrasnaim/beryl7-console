@@ -7,8 +7,8 @@
 #     ./install.sh 192.168.8.1        # ...or wherever your router actually is
 #     ROUTER=router.lan ./install.sh  # same thing via the environment
 #
-# It is safe to re-run: every step is idempotent, and it refuses to clobber a
-# password you have already set.
+# It is safe to re-run: every step is idempotent and preserves the device
+# names you have set in /etc/dashboard/classmap.
 #
 # Deliberately uses `tar | ssh` rather than scp: OpenWrt's dropbear ships
 # without an sftp server, so `scp` fails on a stock install while this works
@@ -32,8 +32,8 @@ command -v ssh >/dev/null 2>&1 || { echo "ssh not found in PATH"; exit 1; }
 command -v tar >/dev/null 2>&1 || { echo "tar not found in PATH"; exit 1; }
 [ -f "$SRC/www/os.css" ] || { echo "run this from the repository root"; exit 1; }
 
-# -n on every ssh that is not being fed a pipe: without it ssh reads the
-# script's own stdin, which swallows the password typed at the prompt below.
+# -n on every ssh that is not being fed a pipe, so ssh cannot consume the
+# script's own stdin.
 say "Checking the router"
 BOARD=$(ssh -n -o ConnectTimeout=10 "$TARGET" \
     'ubus call system board 2>/dev/null | sed -n "s/.*\"model\": \"\([^\"]*\)\".*/\1/p" | head -n1') || {
@@ -131,32 +131,6 @@ done
 echo "  . sysupgrade.conf updated"
 rm -rf /tmp/beryl7'
 
-# ------------------------------------------------------------------ password --
-# The write password gates every config-changing action. It is compared
-# server-side only and never reaches the browser, but it does sit in these
-# files in plain text, so it must not stay at the shipped placeholder.
-say "Write password"
-STILL_DEFAULT=$(ssh -n "$TARGET" 'grep -l "^PASSWORD=\"changeme\"$" /www/cgi-bin/*-api 2>/dev/null | wc -l')
-if [ "$STILL_DEFAULT" -gt 0 ]; then
-    printf '  choose a password for config changes (input hidden): '
-    stty -echo 2>/dev/null || true
-    read -r PW
-    stty echo 2>/dev/null || true
-    printf '\n'
-    if [ -z "$PW" ]; then
-        warn "left at the default 'changeme' — anyone on your LAN can change settings."
-        warn "set it later with:  sed -i 's/\"changeme\"/\"yourpassword\"/' /www/cgi-bin/*-api"
-    else
-        case $PW in
-            *[\"\\/\&]*) echo "  avoid \" \\ / and & in the password; set it manually instead"; exit 1 ;;
-        esac
-        ssh -n "$TARGET" "sed -i 's|^PASSWORD=\"changeme\"\$|PASSWORD=\"$PW\"|' /www/cgi-bin/*-api"
-        ok "password set in $(ssh -n "$TARGET" 'grep -l "^PASSWORD=" /www/cgi-bin/*-api | wc -l') files"
-    fi
-else
-    ok "already set — left untouched"
-fi
-
 # --------------------------------------------------------------------- check --
 say "Verifying"
 for ep in dashboard-api rate-api vpn-api repeater-api tethering-api settings-api; do
@@ -169,3 +143,7 @@ echo "  open  http://$ROUTER/dashboard/"
 echo "  LuCI is untouched at  http://$ROUTER/cgi-bin/luci/"
 echo
 echo "  Next: edit /etc/dashboard/classmap to give your devices names and icons."
+echo
+echo "  NOTE: the console has no login. Anyone who can reach $ROUTER over HTTP can"
+echo "  read it AND change settings. That is intentional for a trusted home LAN —"
+echo "  make sure your firewall keeps guest/IoT networks and the WAN away from it."

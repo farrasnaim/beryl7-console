@@ -467,11 +467,15 @@ function dialog(opts) {
 /* okText names the action being authorised ("Restart", "Delete") — a confirm
    button that says what happens beats a generic "Authorise". danger paints it
    red for destructive actions, matching the button that opened the dialog. */
-function askPassword(title, body, okText, danger) {
+/* Confirmation, not authentication. The console is unauthenticated by design
+   (see the README's security model): it is reachable only from the trusted LAN,
+   where the firewall — not a password field — is what keeps other people out.
+   These dialogs exist so a consequential action states its consequence first;
+   they guard against a misclick, not against an intruder.
+   Resolves true when confirmed, null when dismissed. */
+function askConfirm(title, body, okText, danger) {
     return dialog({
-        title: title, body: body, okText: okText || 'Confirm', danger: !!danger,
-        field: { label: 'Router password', type: 'password',
-                 placeholder: '••••••••', emptyMsg: 'Enter the password to continue.' }
+        title: title, body: body, okText: okText || 'Confirm', danger: !!danger
     });
 }
 
@@ -1169,7 +1173,7 @@ global.OS = {
     sourcesList: sourcesList, failoverControl: failoverControl,
     sv: sv, svtext: svtext, gem: gem, quality: quality, stateWord: stateWord,
     scale: scale, rssiScale: rssiScale, spectrum: spectrum, topology: topology,
-    toast: toast, dialog: dialog, askPassword: askPassword,
+    toast: toast, dialog: dialog, askConfirm: askConfirm,
     Transport: Transport, post: post, act: act,
     buildShell: buildShell, stage: stage, flagTab: flagTab, dockAction: dockAction,
     tp: null

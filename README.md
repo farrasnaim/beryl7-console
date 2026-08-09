@@ -6,6 +6,8 @@ It replaces day-to-day use of LuCI and the vendor UI for the things a travel rou
 
 Built for one specific router, but it does not assume that router: radios, wireless interfaces, and networks are all discovered at runtime, so a stock dual-band OpenWrt box should work unedited. Read the code before deploying it — it is small enough that you can.
 
+> **No login.** This is internal tooling for a network you control — a personal router, its owner, and a few trusted people. Anyone who can reach it over HTTP can change settings. Keep it off the internet and away from your guest and IoT networks. [Security model](#security-model) explains exactly what that means and what is still enforced.
+
 ## Quick start
 
 On a freshly flashed OpenWrt router, from a machine on the same network:
@@ -17,14 +19,13 @@ cd beryl7-console
 ./install.sh 192.168.1.1         # your router's address
 ```
 
-It asks once for a password to protect config changes, then prints the URL. Open `http://192.168.1.1/dashboard/`.
+It prints the URL when it's done. Open `http://192.168.1.1/dashboard/` — there is no login, by design; see [Security model](#security-model).
 
 That is the whole install. Everything else in this README is explanation, not further steps:
 
 - **Optional packages** unlock the VPN and USB-uplink pages — see [Requirements](#requirements). The installer names the ones you're missing; nothing breaks without them.
 - **Name your devices** by editing `/etc/dashboard/classmap` on the router, so the client list shows "My Laptop" instead of a MAC.
-- **Change the write password later** with `sed -i 's/"changeme"/"newpassword"/' /www/cgi-bin/*-api`.
-- **Re-run `./install.sh`** any time to upgrade; it keeps your classmap and password.
+- **Re-run `./install.sh`** any time to upgrade; it keeps the device names you set.
 - **[Back up before you reflash](#backup-and-restore)** — `./backup.sh <router>` captures the config *and* the console in one file.
 
 Read [Security model](#security-model) before putting this on a network you don't control.
@@ -56,7 +57,7 @@ The UI follows a deliberately quiet design language: warm graphite surfaces, a s
 ```
 browser ── 5s poll ──► /cgi-bin/<page>-api ── JSON state snapshot
         ── 1s poll ──► /cgi-bin/rate-api   ── counters + ping only
-        ── POST ─────► /cgi-bin/<page>-api ── writes (password-gated)
+        ── POST ─────► /cgi-bin/<page>-api ── writes (POST + same-origin only)
 
 cron (1 min) ──► dashmon   ── telemetry ring buffers in /tmp
              ──► apwatch   ── Wi-Fi AP watchdog (recovers a wedged radio)
@@ -165,10 +166,9 @@ The script:
 - copies the pages, CGI, helper daemons, and hotplug scripts, then sets the executable bits (`cp` does not preserve them reliably, and a non-executable CGI returns 403 while a non-executable hotplug script is ignored *silently*);
 - seeds `/etc/dashboard/classmap` only if you don't already have one;
 - adds the cron entries and the `/etc/sysupgrade.conf` lines idempotently, so re-running never duplicates them;
-- prompts once for the write password and writes it into the CGIs;
 - fetches every endpoint from the router itself to confirm the install is live.
 
-Re-run it any time to upgrade — it preserves your classmap and your password.
+Re-run it any time to upgrade — it preserves the device names in your classmap.
 
 Then open `http://<router>/dashboard/`. LuCI is untouched at `http://<router>/cgi-bin/luci/`.
 
@@ -198,9 +198,6 @@ crontab -l > /tmp/cron; cat /tmp/beryl7/etc/crontabs/root >> /tmp/cron; crontab 
 mkdir -p /etc/dashboard
 cp /tmp/beryl7/etc/dashboard/classmap.example /etc/dashboard/classmap
 
-# set the write password — see Security below
-sed -i 's/"changeme"/"your-password"/' /www/cgi-bin/*-api
-
 # optional: load-based CPU scaling
 /etc/init.d/cpugovernor enable && /etc/init.d/cpugovernor start
 ```
@@ -222,7 +219,7 @@ Two scripts, because a router you rely on will eventually be reset, reflashed, o
 
 `restore.sh` installs the packages **first**, then restores the configuration. That order is the whole point of the script: `/etc/config/pbr` means nothing until `pbr` exists, and netifd discards WireGuard interfaces it has no protocol handler for — restore first and your tunnels vanish silently.
 
-> **The bundle contains WireGuard private keys, Wi-Fi passphrases, and the console's write password.** `backups/` is gitignored here. Keep yours in a *private* repository or encrypted storage — never a public one.
+> **The bundle contains WireGuard private keys and Wi-Fi passphrases.** `backups/` is gitignored here. Keep yours in a *private* repository or encrypted storage — never a public one.
 
 A full recovery from bare firmware is then:
 
@@ -234,18 +231,26 @@ If you only want the console back and not the old configuration, run `./install.
 
 ## Security model
 
-**Read this before putting the console on a network you do not control.** It is designed for a **trusted home LAN** and makes deliberate trade-offs you should understand:
+**There is no login. Anyone who can reach the router over HTTP can read the console and change settings.**
 
-- **Reading is unauthenticated.** Anyone on the LAN can see the dashboard. On the original network this is enforced at the firewall: guest and IoT zones have `input REJECT`, WAN is `DROP`, so only trusted-LAN clients can reach the pages at all. Replicate that or accept that everyone on your network can watch it.
-- **Writes are gated by a single shared password**, checked server-side only (it never appears in HTML or JS). `install.sh` prompts for it. It ships as `changeme`, so if you installed by hand — **change it before using the console**:
+That is a deliberate choice, not an oversight. This was built for a personal travel router used by its owner and a few friends on a network they control — never reachable from the internet. On that network, a password prompt in front of every action was pure friction: it protected against nobody who wasn't already inside, while making the phone-in-one-hand case (join a hotel Wi-Fi, restart a wedged radio) slower every single time.
 
-  ```sh
-  sed -i 's/PASSWORD="changeme"/PASSWORD="your-password-here"/' /www/cgi-bin/*-api
-  ```
+**The boundary is the firewall, not the UI.** That is where the decision has to hold:
 
-- **Some write actions intentionally skip the password** — VPN connect/disconnect and repeater join were judged low-risk-high-friction on a personal router. Grep the CGIs for `pw` handling and tighten to taste.
-- **No TLS.** uhttpd serves plain HTTP on the LAN. The password crosses the wire in cleartext, which is acceptable on a physically-controlled home network and not acceptable anywhere else.
-- **Never expose this to the WAN or a VPS.** No sessions, no rate limiting, no account lockout. It is not that kind of software.
+- WAN input `DROP`, so nothing from the internet ever reaches port 80.
+- Guest and IoT zones `input REJECT`, so devices you don't trust — a friend's laptop, a smart plug — cannot reach the console either.
+- Only the trusted LAN can load it, and everyone on the trusted LAN is assumed to be allowed to run the router.
+- No port forwards to the router's own web server. Ever.
+
+If you cannot say all four of those about your network, do not install this until you can.
+
+**What is still enforced**, because it defends against something a firewall cannot:
+
+- **Writes are POST-only and same-origin checked.** Without this, any web page you happened to be visiting could quietly reconfigure your router through your own browser — your LAN position, borrowed. The origin check refuses it, and a `GET ?action=…` write is rejected outright. This is not the password in another form; it stops a completely different attack, and it stays.
+- **Destructive actions still confirm**, stating the consequence first — deleting a tunnel, turning a radio off, rebooting. That guards against a misclick, not an intruder.
+- **No TLS.** uhttpd serves plain HTTP. Fine on a network you physically control, unacceptable anywhere else.
+
+**If you want it locked down**, the honest answer is not to bolt a password onto these scripts — put uhttpd behind HTTP basic auth, or serve the console only over a WireGuard tunnel into your own LAN. Either is stronger than what was removed.
 
 ## Hardware notes and gotchas
 

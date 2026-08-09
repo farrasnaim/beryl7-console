@@ -6,11 +6,11 @@
 #   config wireguard_wgX        public_key, endpoint_host/port, allowed_ips, PSK
 # Per-device routing is delegated to `pbr` (policy-based routing) keyed by MAC.
 #
-# SECURITY: this endpoint handles PRIVATE KEYS, so every write action is
-# password-gated *and* origin-checked. Private keys are never echoed back —
-# list output returns public metadata only.
+# SECURITY: this endpoint handles PRIVATE KEYS. Writes are POST-only and
+# same-origin checked; there is no password, because the console is
+# unauthenticated on the trusted LAN by design (see the README). Private keys
+# are never echoed back — list output returns public metadata only.
 
-PASSWORD="changeme"
 POST_MAX=65536          # larger than the dashboard's: a .conf is pasted in full
 
 esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -228,7 +228,8 @@ if [ "$ACTION" = "add" ]; then
     # toggle: speed over friction on a trusted LAN). guard_post still enforces the
     # origin check, so a hostile page cannot POST a tunnel in from another tab, and
     # guest/iot are input=REJECT so they can't reach this endpoint at all.
-    # `del` KEEPS its password: adding is trivially reversible, deleting is not.
+    # Deleting is the one irreversible action here, so the UI states what is
+    # lost and asks for confirmation before calling it.
     NAME=$(qs_get_dec name)
     CONF=$(qs_get_dec conf)
     [ -n "$CONF" ] || { printf '{"ok":false,"error":"empty config"}'; exit 0; }
@@ -402,7 +403,6 @@ fi
 
 # ============================ DELETE ============================
 if [ "$ACTION" = "del" ]; then
-    [ "$(qs_get pw)" = "$PASSWORD" ] || { printf '{"ok":false,"error":"wrong password"}'; exit 0; }
     NAME=$(qs_get name)
     case "$NAME" in ''|*[!a-zA-Z0-9_-]*) printf '{"ok":false,"error":"bad name"}'; exit 0 ;; esac
     IFACE="wg_$NAME"

@@ -347,14 +347,14 @@ function tunnelDetail(t, s, now, d) {
     delBtn.appendChild(document.createTextNode('Delete'));
     delBtn.addEventListener('click', function (e) {
         e.stopPropagation();
-        OS.askPassword('Delete ' + (t.label || t.name),
+        OS.askConfirm('Delete ' + (t.label || t.name),
             'The tunnel and its keys are removed from the router permanently.' +
             (users.length ? ' ' + users.length + ' device' + (users.length > 1 ? 's are' : ' is') +
              ' currently routed through it and will fall back to the normal uplink.' : ''),
             'Delete', true
-        ).then(function (pw) {
-            if (pw == null) return;
-            OS.act(delBtn, API, { action: 'del', name: t.name, pw: pw },
+        ).then(function (go) {
+            if (!go) return;
+            OS.act(delBtn, API, { action: 'del', name: t.name },
                 { ok: (t.label || t.name) + ' deleted.', delay: 1200 });
         });
     });

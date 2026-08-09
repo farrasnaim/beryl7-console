@@ -16,7 +16,7 @@
     <header class="head head--keep-title">
       <div>
         <h1 class="head__t">Settings</h1>
-        <p class="head__s" id="subtitle">The things worth changing. Every change asks for the router password.</p>
+        <p class="head__s" id="subtitle">The things worth changing. Anything disruptive asks you to confirm first.</p>
       </div>
     </header>
 
@@ -287,11 +287,11 @@ function renderRadio(r) {
     rst.type = 'button';
     rst.style.marginLeft = 'auto';
     rst.addEventListener('click', function () {
-        OS.askPassword('Restart the ' + band + ' radio',
+        OS.askConfirm('Restart the ' + band + ' radio',
             'Every device on ' + band + ' disconnects and reconnects by itself, typically within ' +
-            '15 seconds. Devices on the other band are not affected.', 'Restart').then(function (pw) {
-            if (pw == null) return;
-            OS.act(rst, DASH, { action: r.band === '2g' ? 'fix24g' : 'fix5g', pw: pw },
+            '15 seconds. Devices on the other band are not affected.', 'Restart').then(function (go) {
+            if (!go) return;
+            OS.act(rst, DASH, { action: r.band === '2g' ? 'fix24g' : 'fix5g' },
                 { ok: band + ' radio is restarting.', delay: 4000 });
         });
     });
@@ -320,11 +320,11 @@ function renderRadio(r) {
             : 'Applying reloads the ' + bandLabel(r.band) + ' radio: devices on it drop ' +
               'for 10–15 seconds and rejoin on their own. If this device is one of them, the page loses ' +
               'contact briefly and recovers.';
-        OS.askPassword('Apply ' + bandLabel(r.band) + ' settings', body,
-                       'Apply', turningOff).then(function (pw) {
-            if (pw == null) return;
+        OS.askConfirm('Apply ' + bandLabel(r.band) + ' settings', body,
+                       'Apply', turningOff).then(function (go) {
+            if (!go) return;
             OS.act(ar.apply, API, {
-                action: 'setwifi', pw: pw, radio: r.id,
+                action: 'setwifi', radio: r.id,
                 ssid: ssid.value, key: key.value,
                 channel: chSel.value, htmode: modeSel.value,
                 txpower: txSel.value, enabled: en.input.checked ? 1 : 0
@@ -388,12 +388,12 @@ function renderIot(d) {
 
     ar.reset.addEventListener('click', function () { markDirty('iot', false); renderIot(d); });
     ar.apply.addEventListener('click', function () {
-        OS.askPassword('Apply IoT network settings',
+        OS.askConfirm('Apply IoT network settings',
             'Applying reloads the ' + bandLabel(iot.band) + ' radio briefly — devices on it drop and rejoin on their own.',
-            'Apply', !en.input.checked && !iot.disabled).then(function (pw) {
-            if (pw == null) return;
+            'Apply', !en.input.checked && !iot.disabled).then(function (go) {
+            if (!go) return;
             OS.act(ar.apply, API, {
-                action: 'setiot', pw: pw, ssid: ssid.value, key: key.value,
+                action: 'setiot', ssid: ssid.value, key: key.value,
                 enabled: en.input.checked ? 1 : 0
             }, { ok: 'Applied. The radio is reloading.', delay: 6000, failPrefix: 'Not applied' })
               .then(function (j) { if (j && j.ok) markDirty('iot', false); });
@@ -454,15 +454,15 @@ function loadAcl() {
 }
 
 function setAcl(name, mac, section, ssid, block, btn) {
-    OS.askPassword(block ? 'Block ' + name : 'Unblock ' + name,
+    OS.askConfirm(block ? 'Block ' + name : 'Unblock ' + name,
         block
           ? 'It will be disconnected from “' + ssid + '” immediately and refused when it tries to ' +
             'reassociate. Other networks on this router are unaffected.'
           : 'It will be allowed to associate with “' + ssid + '” again.',
         block ? 'Block' : 'Unblock', block
-    ).then(function (pw) {
-        if (pw == null) return;
-        OS.act(btn, DASH, { action: 'aclset', pw: pw, mac: mac, sec: section, block: block ? 1 : 0 },
+    ).then(function (go) {
+        if (!go) return;
+        OS.act(btn, DASH, { action: 'aclset', mac: mac, sec: section, block: block ? 1 : 0 },
             { ok: block ? 'Blocked. The radio is reloading.' : 'Unblocked.', refresh: false })
           .then(function (j) { if (j && j.ok) setTimeout(loadAcl, 3000); });
     });
@@ -620,10 +620,10 @@ function renderLan(d) {
             ? 'The router moves to ' + ip.value + '. Every device gets a new address, this page goes ' +
               'unreachable, and you must reopen it at http://' + ip.value + '/settings/ — write that down first.'
             : 'DHCP changes apply immediately; devices pick them up when their lease renews.';
-        OS.askPassword('Apply LAN settings', body, 'Apply', moving).then(function (pw) {
-            if (pw == null) return;
+        OS.askConfirm('Apply LAN settings', body, 'Apply', moving).then(function (go) {
+            if (!go) return;
             OS.act(ar.apply, API, {
-                action: 'setlan', pw: pw, ipaddr: ip.value,
+                action: 'setlan', ipaddr: ip.value,
                 start: ds.value, limit: dl.value, leasetime: ls.value
             }, { ok: 'Applied.', delay: 1500, failPrefix: 'Not applied' }).then(function (j) {
                 if (!(j && j.ok)) return;
@@ -698,10 +698,10 @@ function renderSys(d) {
     watch('sys', form, ar.apply);
     ar.reset.addEventListener('click', function () { markDirty('sys', false); renderSys(d); });
     ar.apply.addEventListener('click', function () {
-        OS.askPassword('Apply system settings',
-            'Hostname and time zone update immediately. Nothing disconnects.', 'Apply').then(function (pw) {
-            if (pw == null) return;
-            OS.act(ar.apply, API, { action: 'setsys', pw: pw, hostname: hn.value, zonename: tz.value },
+        OS.askConfirm('Apply system settings',
+            'Hostname and time zone update immediately. Nothing disconnects.', 'Apply').then(function (go) {
+            if (!go) return;
+            OS.act(ar.apply, API, { action: 'setsys', hostname: hn.value, zonename: tz.value },
                    { ok: 'Applied.', delay: 1200, failPrefix: 'Not applied' })
               .then(function (j) { if (j && j.ok) markDirty('sys', false); });
         });
@@ -716,12 +716,12 @@ function renderSys(d) {
     row.appendChild(lbl);
     var rb = el('button', 'btn btn--sm btn--danger', 'Restart router');
     rb.addEventListener('click', function () {
-        OS.askPassword('Restart the router',
+        OS.askConfirm('Restart the router',
             'Everything drops — Wi-Fi, VPN tunnels, the IoT network — while the router boots. ' +
             'This page reconnects on its own when it is back.',
-            'Restart', true).then(function (pw) {
-            if (pw == null) return;
-            post({ action: 'reboot', pw: pw }).then(function () { rebootOverlay(); },
+            'Restart', true).then(function (go) {
+            if (!go) return;
+            post({ action: 'reboot' }).then(function () { rebootOverlay(); },
                 function (e) { OS.toast('Not restarted: ' + e.message + '.', 'bad'); });
         });
     });

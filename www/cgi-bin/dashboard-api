@@ -109,7 +109,6 @@ case "$ACTION" in
 esac
 
 # =========================== WRITE ACTIONS ===========================
-PASSWORD="changeme"
 
 # rename a device / change its class (classmap metadata only)
 #
@@ -187,8 +186,6 @@ fi
 
 # radio restart (fix24g -> radio0, fix5g -> radio1)
 if [ "$ACTION" = "fix24g" ] || [ "$ACTION" = "fix5g" ]; then
-    P=$(qs_get pw)
-    [ "$P" = "$PASSWORD" ] || { printf '{"ok":false,"error":"wrong password"}'; exit 0; }
     [ "$ACTION" = "fix24g" ] && R=radio0 || R=radio1
     ( wifi down "$R" >/dev/null 2>&1; sleep 2; wifi up "$R" >/dev/null 2>&1 ) >/dev/null 2>&1 &
     printf '{"ok":true,"action":"%s"}' "$ACTION"
@@ -197,8 +194,7 @@ fi
 
 # block / unblock a MAC on a specific wifi-iface section
 if [ "$ACTION" = "aclset" ]; then
-    P=$(qs_get pw); MAC=$(qs_get mac); SEC=$(qs_get sec); BLK=$(qs_get block)
-    [ "$P" = "$PASSWORD" ] || { printf '{"ok":false,"error":"wrong password"}'; exit 0; }
+    MAC=$(qs_get mac); SEC=$(qs_get sec); BLK=$(qs_get block)
     MAC=$(printf '%s' "$MAC" | sed 's/%3A/:/g; s/%3a/:/g' | tr 'a-f' 'A-F')
     case "$MAC" in
         [0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]) ;;

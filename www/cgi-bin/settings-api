@@ -6,16 +6,16 @@
 # per-channel maximum width are derived from `iw` at request time, never from
 # a hardcoded Wi-Fi table).
 #
-# Writes are POST + same-origin + router password, because every action here
-# rewrites /etc/config and reloads a service. That is the same bar the other
-# APIs set for config-changing actions (block, radio restart, tunnel delete).
+# Writes are POST + same-origin, because every action here rewrites /etc/config
+# and reloads a service. There is no password: the console is unauthenticated on
+# the trusted LAN by design, and the same-origin check is what stops a web page
+# you happen to be visiting from driving these endpoints through your browser.
 #
 # Validation lives HERE, not in the browser: channel must be one the radio can
 # legally use, the width must fit that channel's contiguous block, the PHY
 # generation must exist on that band. The UI filters for clarity; this file
 # filters for safety.
 
-PASSWORD="changeme"
 POST_MAX=4096
 
 # ---- wireless topology discovery --------------------------------------------
@@ -127,9 +127,6 @@ case "$ACTION" in
     *) [ "$REQUEST_METHOD" = "POST" ] || fail "POST required" ;;
 esac
 [ "$REQUEST_METHOD" = "POST" ] && guard_post
-if [ -n "$ACTION" ]; then
-    [ "$(qs_get_dec pw)" = "$PASSWORD" ] || fail "wrong password"
-fi
 
 # ---------------------------------------------------------------- capability --
 # Channel list with a computed per-channel MAXIMUM width. A width is valid only
