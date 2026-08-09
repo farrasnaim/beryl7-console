@@ -1,0 +1,64 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/31-tethering-clash
+#
+# Refuse a USB uplink whose subnet overlaps something we already route.
+#
+# This is a real hazard, not a theoretical one. Huawei HiLink dongles
+# (E3372h, E8372, ...) hand out 192.168.8.0/24 with themselves as .1 —
+# byte-identical to this router's LAN. An E5577 uses 192.168.9.0/24 and is
+# fine; a lot of generic 5G CPE sticks use 192.168.1.0/24, which collides
+# with the Indosat ONT side instead. Which one you get is not knowable until
+# DHCP has already answered, so the check has to run after ifup and tear the
+# interface back down.
+#
+# Without this, two identical /24s end up in the routing table with equal
+# metrics and LAN traffic starts leaving through the USB port intermittently
+# — the kind of fault that looks like "the internet is randomly broken".
+
+[ "$INTERFACE" = "tethering" ] || exit 0
+[ "$ACTION" = "ifup" ] || exit 0
+
+LOG="logger -t tethering"
+
+# Ask netifd which device actually carries the link rather than reading
+# network.tethering.device: under a modem protocol that option holds a control
+# node (/dev/cdc-wdm0), not something `ip` can be asked about.
+TDEV=$(ubus call network.interface.tethering status 2>/dev/null \
+        | awk -F'"' '/"l3_device"/{print $4; exit}')
+[ -n "$TDEV" ] || TDEV=$(uci -q get network.tethering.device)
+[ -n "$TDEV" ] || exit 0
+[ -e "/sys/class/net/$TDEV" ] || exit 0
+
+TCIDR=$(ip -4 -o addr show dev "$TDEV" 2>/dev/null | awk '{print $4; exit}')
+[ -n "$TCIDR" ] || exit 0
+
+# Every directly-connected IPv4 subnet except the uplink's own. Covers br-lan,
+# br-iot, guest, the ONT-facing eth0 subnet and any active WireGuard peer net.
+LOCALS=$(ip -4 route show scope link 2>/dev/null | awk -v d="$TDEV" '$2=="dev" && $3!=d {print $1}')
+[ -n "$LOCALS" ] || exit 0
+
+# Two CIDRs overlap iff they agree on the first min(prefix_a, prefix_b) bits.
+# Done with integer division because busybox awk has no dependable bitwise ops.
+CLASH=$(printf '%s\n' $LOCALS | awk -v t="$TCIDR" '
+    function ip2int(s,  a){ split(s,a,"."); return a[1]*16777216+a[2]*65536+a[3]*256+a[4] }
+    BEGIN{ split(t,x,"/"); T=ip2int(x[1]); TP=(x[2]==""?32:x[2]+0) }
+    {
+        split($1,y,"/"); L=ip2int(y[1]); LP=(y[2]==""?32:y[2]+0)
+        p  = (TP<LP)?TP:LP
+        sh = 1; for(i=0;i<32-p;i++) sh*=2
+        if (int(T/sh)==int(L/sh)) { print $1; exit }
+    }')
+
+if [ -n "$CLASH" ]; then
+    DEVN=$(ip -4 route show scope link 2>/dev/null | awk -v c="$CLASH" '$1==c{print $3; exit}')
+    printf '%s|%s|%s\n' "$TCIDR" "$CLASH" "${DEVN:-local}" > /tmp/.tethering-clash
+    $LOG "SUBNET CLASH: uplink $TDEV got $TCIDR, overlaps $CLASH on ${DEVN:-local} -> refusing"
+    # Backgrounded: calling ifdown synchronously from inside netifd's own
+    # ifup hotplug handler re-enters netifd.
+    ( sleep 1; ifdown tethering ) >/dev/null 2>&1 &
+    exit 0
+fi
+
+rm -f /tmp/.tethering-clash
+$LOG "uplink $TDEV up on $TCIDR, no subnet conflict"
+exit 0

@@ -1,0 +1,770 @@
+/* ============================================================================
+   BERYL — network console.  Design language: CALIBRATED.
+
+   V1 was clean and generic. It was generic for a structural reason, not a
+   colour one: it was built out of bordered panels with tiny uppercase header
+   bars stacked in a column, which is the grammar of every network appliance
+   ever shipped. V2 removes that grammar.
+
+   1. ONE INSTRUMENT FACE, NOT A GRID OF CARDS.
+      No floating panels. Content sits on a single recessed face with corner
+      ticks, divided into registers by full-bleed rules. Never a box in a box.
+
+   2. EVERY QUANTITY IS SHOWN AGAINST ITS SCALE.
+      A number tells you the value; a number on a calibrated track tells you
+      whether it is good. Signal is plotted on a -90..-20 dBm rule with ticks
+      at the quality boundaries. Channel occupancy is drawn on the real
+      spectrum axis at true position and true width. Dashboards print numbers;
+      instruments show position.
+
+   3. UPPERCASE MEANS ONE THING: STATE.
+      V1 sprayed 9.5px uppercase mono across every label, which is why it read
+      as noise. Here section titles are normal-case sans and metadata is
+      sentence-case mono. Capitals are reserved for state words — EXCELLENT,
+      WEAK, CONGESTED, IDLE — so seeing them now carries information.
+
+   Colour: warm graphite ground, one cool hue — an aquamarine keyed to the
+   mineral the router is named for. The warm/cool tension is the mechanism:
+   the only cool thing on the face is live measured data, so the eye finds it
+   without being told. Amber is caution, red is fault, neither decorates.
+   ========================================================================= */
+
+:root {
+    --bg:#0b0b0c; --face:#121213; --face-2:#171718; --face-3:#1e1e20;
+    --rule:rgba(255,255,255,.072); --rule-2:rgba(255,255,255,.13); --rule-3:rgba(255,255,255,.24);
+    --ink:#f2f1ee;
+    --ink-2:#a3a19c;   /* secondary  — >=6.5:1 on --face-3 */
+    --ink-4:#8a8883;   /* smallest   — >=4.6:1 on --face-3 */
+
+    /* --sig paints graphics, --sig-fg is the text-safe cut, --sig-solid is the
+       fill behind a button label. One token cannot serve all three: a 6px dot,
+       10px text and a filled button have different contrast floors. */
+    --sig:#3fd9be; --sig-fg:#55e2ca; --sig-solid:#3fd9be; --sig-ink:#04231f;
+    --sig-dim:rgba(63,217,190,.15); --sig-line:rgba(63,217,190,.34);
+
+    --caution:#eba13a; --caution-fg:#f2b45f;
+    --fault:#ff5a52;   --fault-fg:#ff7d76;
+    --idle:#5a5955;
+
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px;
+    --r:2px; --r2:4px;
+    --mono:ui-monospace,"SF Mono","Cascadia Mono","Segoe UI Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,-apple-system,"Segoe UI Variable Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;
+    --ease:cubic-bezier(.2,.7,.3,1); --t:150ms;
+    --rail:236px; --maxw:1580px;
+}
+@media (prefers-color-scheme:light){
+  :root{
+    /* Warm paper. Light mode is a printed instrument face, not a white app. */
+    --bg:#eeece7; --face:#faf9f6; --face-2:#f3f1ec; --face-3:#e9e7e1;
+    --rule:rgba(24,22,18,.11); --rule-2:rgba(24,22,18,.18); --rule-3:rgba(24,22,18,.32);
+    --ink:#16150f; --ink-2:#4e4c47; --ink-4:#65635d;
+    --sig:#0b8e7c; --sig-fg:#0a6f61; --sig-solid:#0a6f61; --sig-ink:#ffffff;
+    --sig-dim:rgba(11,142,124,.13); --sig-line:rgba(11,142,124,.32);
+    --caution:#a9700c; --caution-fg:#7f5407;
+    --fault:#c3352c; --fault-fg:#a52a22; --idle:#a5a29a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c; --face:#121213; --face-2:#171718; --face-3:#1e1e20;
+  --rule:rgba(255,255,255,.072); --rule-2:rgba(255,255,255,.13); --rule-3:rgba(255,255,255,.24);
+  --ink:#f2f1ee; --ink-2:#a3a19c; --ink-4:#8a8883;
+  --sig:#3fd9be; --sig-fg:#55e2ca; --sig-solid:#3fd9be; --sig-ink:#04231f;
+  --sig-dim:rgba(63,217,190,.15); --sig-line:rgba(63,217,190,.34);
+  --caution:#eba13a; --caution-fg:#f2b45f; --fault:#ff5a52; --fault-fg:#ff7d76; --idle:#5a5955;
+}
+:root[data-theme="light"]{
+  --bg:#eeece7; --face:#faf9f6; --face-2:#f3f1ec; --face-3:#e9e7e1;
+  --rule:rgba(24,22,18,.11); --rule-2:rgba(24,22,18,.18); --rule-3:rgba(24,22,18,.32);
+  --ink:#16150f; --ink-2:#4e4c47; --ink-4:#65635d;
+  --sig:#0b8e7c; --sig-fg:#0a6f61; --sig-solid:#0a6f61; --sig-ink:#ffffff;
+  --sig-dim:rgba(11,142,124,.13); --sig-line:rgba(11,142,124,.32);
+  --caution:#a9700c; --caution-fg:#7f5407; --fault:#c3352c; --fault-fg:#a52a22; --idle:#a5a29a;
+}
+/* aliases: page code written against the old names keeps resolving */
+:root,:root[data-theme="dark"],:root[data-theme="light"]{
+  --panel:var(--face); --panel-2:var(--face-2); --panel-3:var(--face-3);
+  --line:var(--rule); --line-2:var(--rule-2); --line-3:var(--rule-3);
+  --ink-3:var(--ink-4);
+  --ac:var(--sig); --ac-fg:var(--sig-fg); --ac-solid:var(--sig-solid);
+  --ac-dim:var(--sig-dim); --ac-line:var(--sig-line);
+  --warn:var(--caution); --warn-fg:var(--caution-fg);
+  --bad:var(--fault); --bad-fg:var(--fault-fg);
+}
+
+/* ---- accent: the ONE cool hue is selectable -----------------------------
+   Each accent redefines only the six --sig tokens, so everything downstream
+   (state words, chips, meters, topology links, buttons, focus ring, selection)
+   follows without knowing accents exist. Every value below was verified
+   numerically against every ground it can sit on — fg >=4.5:1 on bg..face-3
+   and on the chip wash, sig >=3:1 for graphics, ink >=4.5:1 on solid — same
+   bar the mint tokens were held to. Semantic amber/red never move.
+   Cascade contract: these sit AFTER the [data-theme] blocks so the bare rule
+   beats them on order; the [data-theme][data-accent] pairs (0,3,0) then pin
+   the explicit-theme cases, mirroring the base theme's own 4-rule matrix. */
+:root[data-accent="maroon"]{
+  --sig:#c9574a; --sig-fg:#de8579; --sig-solid:#b84c40; --sig-ink:#ffffff;
+  --sig-dim:rgba(201,87,74,.15); --sig-line:rgba(201,87,74,.34)}
+@media (prefers-color-scheme:light){:root[data-accent="maroon"]{
+  --sig:#a03a32; --sig-fg:#7e2d27; --sig-solid:#7e2d27; --sig-ink:#ffffff;
+  --sig-dim:rgba(160,58,50,.12); --sig-line:rgba(160,58,50,.32)}}
+:root[data-theme="dark"][data-accent="maroon"]{
+  --sig:#c9574a; --sig-fg:#de8579; --sig-solid:#b84c40; --sig-ink:#ffffff;
+  --sig-dim:rgba(201,87,74,.15); --sig-line:rgba(201,87,74,.34)}
+:root[data-theme="light"][data-accent="maroon"]{
+  --sig:#a03a32; --sig-fg:#7e2d27; --sig-solid:#7e2d27; --sig-ink:#ffffff;
+  --sig-dim:rgba(160,58,50,.12); --sig-line:rgba(160,58,50,.32)}
+
+:root[data-accent="navy"]{
+  --sig:#5f8fd8; --sig-fg:#86abe4; --sig-solid:#5f8fd8; --sig-ink:#0a1626;
+  --sig-dim:rgba(95,143,216,.15); --sig-line:rgba(95,143,216,.34)}
+@media (prefers-color-scheme:light){:root[data-accent="navy"]{
+  --sig:#33568f; --sig-fg:#2b4877; --sig-solid:#2b4877; --sig-ink:#ffffff;
+  --sig-dim:rgba(51,86,143,.12); --sig-line:rgba(51,86,143,.32)}}
+:root[data-theme="dark"][data-accent="navy"]{
+  --sig:#5f8fd8; --sig-fg:#86abe4; --sig-solid:#5f8fd8; --sig-ink:#0a1626;
+  --sig-dim:rgba(95,143,216,.15); --sig-line:rgba(95,143,216,.34)}
+:root[data-theme="light"][data-accent="navy"]{
+  --sig:#33568f; --sig-fg:#2b4877; --sig-solid:#2b4877; --sig-ink:#ffffff;
+  --sig-dim:rgba(51,86,143,.12); --sig-line:rgba(51,86,143,.32)}
+
+:root[data-accent="grey"]{
+  --sig:#97979d; --sig-fg:#b4b4ba; --sig-solid:#b4b4ba; --sig-ink:#131316;
+  --sig-dim:rgba(151,151,157,.15); --sig-line:rgba(151,151,157,.34)}
+@media (prefers-color-scheme:light){:root[data-accent="grey"]{
+  --sig:#67676e; --sig-fg:#4e4e55; --sig-solid:#4e4e55; --sig-ink:#ffffff;
+  --sig-dim:rgba(103,103,110,.12); --sig-line:rgba(103,103,110,.32)}}
+:root[data-theme="dark"][data-accent="grey"]{
+  --sig:#97979d; --sig-fg:#b4b4ba; --sig-solid:#b4b4ba; --sig-ink:#131316;
+  --sig-dim:rgba(151,151,157,.15); --sig-line:rgba(151,151,157,.34)}
+:root[data-theme="light"][data-accent="grey"]{
+  --sig:#67676e; --sig-fg:#4e4e55; --sig-solid:#4e4e55; --sig-ink:#ffffff;
+  --sig-dim:rgba(103,103,110,.12); --sig-line:rgba(103,103,110,.32)}
+
+/* Picker swatches: each accent rendered as it will ACTUALLY look in the theme
+   you are currently in, so the menu previews the result instead of showing a
+   generic colour chip. Same four-rule theme matrix as every other token. */
+:root{--sw-green:#3fd9be; --sw-red:#c9574a; --sw-blue:#5f8fd8; --sw-grey:#97979d}
+@media (prefers-color-scheme:light){
+  :root{--sw-green:#0b8e7c; --sw-red:#a03a32; --sw-blue:#33568f; --sw-grey:#67676e}}
+:root[data-theme="dark"]{--sw-green:#3fd9be; --sw-red:#c9574a; --sw-blue:#5f8fd8; --sw-grey:#97979d}
+:root[data-theme="light"]{--sw-green:#0b8e7c; --sw-red:#a03a32; --sw-blue:#33568f; --sw-grey:#67676e}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:13.5px;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--sig);outline-offset:2px;border-radius:var(--r)}
+::selection{background:var(--sig-dim)}
+.n{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.012em}
+
+.shell{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);min-height:100vh;
+    max-width:var(--maxw);margin:0 auto}
+
+/* ---- rail: the traffic path IS the navigation --------------------------- */
+.spine{position:sticky;top:0;align-self:start;height:100vh;background:var(--bg);
+    border-right:1px solid var(--rule);display:flex;flex-direction:column;overflow:hidden}
+.brand{padding:var(--s5) var(--s4) var(--s4)}
+.brand__mark{display:flex;align-items:center;gap:10px}
+.brand__gem{width:19px;height:19px;flex:none;display:block;color:var(--sig)}
+/* Mixed case, not uppercase: GL.iNet's lowercase i is part of the name, and
+   text-transform would misspell it. Tracking drops to match. */
+.brand__name{font-size:14px;font-weight:600;letter-spacing:-.005em;white-space:nowrap}
+.brand__sub{margin-top:6px;font-family:var(--mono);font-size:10.5px;color:var(--ink-4)}
+.path{flex:1;padding:var(--s2) 0 var(--s4);overflow-y:auto;overflow-x:hidden}
+.pnode{position:relative;display:block;padding:8px var(--s4) 8px 38px;
+    transition:background var(--t) var(--ease)}
+.pnode::before{content:"";position:absolute;left:19px;top:0;bottom:0;width:1px;background:var(--rule-2)}
+.pnode:first-child::before{top:50%} .pnode:last-child::before{bottom:50%}
+/* node marker = a rotated square: a crystal facet, and it reads as a junction
+   on a wiring diagram rather than as a bullet point */
+.pnode__dot{position:absolute;left:15px;top:50%;width:9px;height:9px;margin-top:-4.5px;
+    background:var(--bg);border:1.5px solid var(--rule-3);transform:rotate(45deg);
+    transition:all var(--t) var(--ease)}
+.pnode[data-state="live"] .pnode__dot{border-color:var(--sig);background:var(--sig);
+    box-shadow:0 0 0 3px var(--sig-dim)}
+.pnode[data-state="warn"] .pnode__dot{border-color:var(--caution);background:var(--caution)}
+.pnode[data-state="fault"] .pnode__dot{border-color:var(--fault);background:var(--fault)}
+.pnode--branch{padding-left:56px}
+.pnode--branch .pnode__dot{left:33px}
+.pnode__stub{position:absolute;left:20px;top:50%;width:11px;height:1px;
+    background:var(--rule-2)}
+.pnode__k{font-size:12.5px;font-weight:550;color:var(--ink-2)}
+.pnode__v{font-family:var(--mono);font-size:11px;color:var(--ink-4);margin-top:1px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+a.pnode:hover{background:var(--face)} a.pnode:hover .pnode__k{color:var(--ink)}
+a.pnode.is-active{background:var(--face)}
+a.pnode.is-active::after{content:"";position:absolute;left:0;top:3px;bottom:3px;width:2px;
+    background:var(--sig)}
+a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
+.spine__foot{border-top:1px solid var(--rule);padding:var(--s3) var(--s4);display:flex;
+    align-items:center;gap:var(--s2)}
+
+/* ---- transport ---------------------------------------------------------- */
+.tp{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10.5px;
+    color:var(--ink-4)}
+.tp__led{width:5px;height:5px;flex:none;background:var(--idle);transform:rotate(45deg)}
+.tp[data-tp="live"] .tp__led{background:var(--sig);animation:bpulse 2.6s var(--ease) infinite}
+.tp[data-tp="live"]{color:var(--sig-fg)}
+.tp[data-tp="sync"] .tp__led{background:var(--sig);opacity:.45}
+.tp[data-tp="stale"] .tp__led{background:var(--caution)} .tp[data-tp="stale"]{color:var(--caution-fg)}
+.tp[data-tp="offline"] .tp__led{background:var(--fault)} .tp[data-tp="offline"]{color:var(--fault-fg)}
+@keyframes bpulse{0%,100%{box-shadow:0 0 0 3px var(--sig-dim)}50%{box-shadow:0 0 0 5px transparent}}
+.main[data-stale="1"] .face{opacity:.55;filter:saturate(.35);transition:opacity 260ms var(--ease)}
+
+.iconbtn{width:28px;height:28px;display:grid;place-items:center;background:transparent;
+    border:1px solid transparent;border-radius:var(--r);color:var(--ink-4);cursor:pointer;
+    transition:all var(--t) var(--ease)}
+.iconbtn:hover{color:var(--ink);border-color:var(--rule-2);background:var(--face)}
+.iconbtn.is-active{color:var(--sig-fg);border-color:var(--sig-line)}
+
+/* ---- accent picker ------------------------------------------------------
+   A menu rather than a cycle: four accents is too many to reach by repeated
+   clicking, and a menu can show what each one looks like before you commit.
+   No drop shadow — this console builds depth from the surface scale and
+   hairlines, so the raised sheet is face-3 behind a full-strength rule. */
+.accent{display:inline-flex}
+/* Desktop anchor is the FOOT, not the button. The rail is only 204px of usable
+   width and the accent button sits third from the right, so anchoring the
+   152px sheet to the button overflows the rail by ~52px (into the content, and
+   clipped by .spine's overflow:hidden) with left:0, or off the left edge with
+   right:0. Pinning it to the foot's right padding lands it at 68..220 — inside
+   the rail at both 236px and the 206px narrow-desktop step. */
+.spine__foot{position:relative}
+.accent__pop{position:absolute;z-index:60;min-width:152px;padding:4px;
+    display:flex;flex-direction:column;gap:1px;
+    background:var(--face-3);border:1px solid var(--rule-3);border-radius:var(--r2);
+    bottom:calc(100% + 6px);right:var(--s4);left:auto}
+.accent__pop[hidden]{display:none}   /* needed: display:flex would beat [hidden] */
+.accent__opt{display:flex;align-items:center;gap:9px;width:100%;
+    padding:7px 9px;background:none;border:0;border-radius:var(--r);
+    font-size:12.5px;color:var(--ink-2);text-align:left;cursor:pointer}
+.accent__opt:hover{background:var(--face-2);color:var(--ink)}
+.accent__opt[aria-checked="true"]{color:var(--ink);font-weight:600}
+/* the facet motif again, so a swatch reads as part of this instrument */
+.accent__sw{width:10px;height:10px;flex:none;transform:rotate(45deg)}
+.accent__opt .tick{margin-left:auto;width:13px;height:13px;flex:none;fill:none;
+    stroke:var(--sig-fg);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:0}
+.accent__opt[aria-checked="true"] .tick{opacity:1}
+.accent__sw--green{background:var(--sw-green)} .accent__sw--red{background:var(--sw-red)}
+.accent__sw--blue{background:var(--sw-blue)}   .accent__sw--grey{background:var(--sw-grey)}
+.iconbtn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.6;
+    stroke-linecap:round;stroke-linejoin:round}
+.sun{display:none} :root[data-theme="light"] .sun{display:block}
+:root[data-theme="light"] .moon{display:none}
+@media (prefers-color-scheme:light){:root:not([data-theme]) .sun{display:block}
+  :root:not([data-theme]) .moon{display:none}}
+
+/* ---- the face: one plotted surface with corner ticks -------------------- */
+.main{min-width:0;padding:var(--s5) var(--s5) var(--s7)}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--s4);
+    padding:0 0 var(--s4)}
+.head__t{font-size:23px;font-weight:600;letter-spacing:-.028em;margin:0;line-height:1.1}
+.head__s{color:var(--ink-2);font-size:13.5px;margin-top:6px;max-width:66ch}
+.head__aside{display:flex;align-items:center;gap:var(--s2);flex:none}
+.face{position:relative;background:var(--face);border:1px solid var(--rule);
+    border-radius:var(--r2);margin-bottom:var(--s4)}
+/* Open composition: content directly on the page, no container. The card is
+   reserved for dense row-lists that genuinely need containment — everything
+   else earns hierarchy from scale and whitespace instead of a border. */
+.face--open{background:none;border:0;border-radius:0;margin-bottom:var(--s2)}
+.face--open::before,.face--open::after{display:none}
+.face--open .panel__h{border-top:0;padding-left:0;padding-right:0}
+.face--open .panel__b{padding-left:0;padding-right:0}
+/* free-standing section header, used by open sections */
+.sect{display:flex;align-items:baseline;gap:var(--s3);padding:var(--s5) 0 var(--s3)}
+.sect__t{font-size:16px;font-weight:600;letter-spacing:-.022em}
+.sect__m{font-family:var(--mono);font-size:11px;color:var(--ink-4)}
+.sect__aside{margin-left:auto;display:flex;align-items:center;gap:var(--s2)}
+.face::before,.face::after{content:"";position:absolute;width:9px;height:9px;
+    pointer-events:none;border:1px solid var(--rule-3)}
+.face::before{top:-1px;left:-1px;border-right:0;border-bottom:0}
+.face::after{bottom:-1px;right:-1px;border-left:0;border-top:0}
+
+/* legacy .panel names retained; restyled from card to register */
+.panel{background:none;border:0;border-radius:0;margin:0}
+.panel__h{display:flex;align-items:baseline;gap:var(--s3);
+    padding:var(--s4) var(--s5) var(--s3);border-top:1px solid var(--rule)}
+.face>.panel:first-child>.panel__h,.face>.panel:first-child>.strip{border-top:0}
+.panel__t{font-size:14.5px;font-weight:600;letter-spacing:-.015em;color:var(--ink);
+    text-transform:none;font-family:var(--sans)}
+.panel__aside{margin-left:auto;display:flex;align-items:center;gap:var(--s2)}
+.panel__b{padding:0 var(--s5) var(--s4)}
+/* Two classes on purpose. The density steps at 1220 and 420 restate padding for
+   a selector list that includes bare .panel__b — same specificity, later in the
+   file — so a single-class rule here loses and every flush list quietly gains a
+   12-16px inset below 1220px. Rows draw their own edge-to-edge borders, so that
+   inset reads as a gap down both sides of the list. */
+.panel__b.panel__b--flush{padding:0}
+.grid{display:grid;gap:0}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+/* Two form fields side by side. Separate from .grid because that one is gap:0
+   for laying out bordered panels — fields need a real gutter or the inputs
+   butt straight into each other. */
+.fgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 var(--s4)}
+/* Failover order is one setting shared by both uplink pages. On a wide screen
+   it sits with the sources list it governs; on a phone those pages are long
+   enough already, so it moves to Settings and only one copy is ever visible. */
+.mob-only{display:none}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g-2-1{grid-template-columns:minmax(0,1.55fr) minmax(0,1fr)}
+.grid>.panel+.panel{border-left:1px solid var(--rule)}
+/* Maintenance: actions on the top row, the lists they produce on the bottom.
+   Cells start at the top so a short cell never inherits a tall neighbour's
+   height. */
+.mnt{gap:28px 40px;align-items:start}
+
+/* ---- state word: the only uppercase in the interface -------------------- */
+.sw{font-size:10px;font-weight:650;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--ink-4);white-space:nowrap}
+.sw--ok{color:var(--sig-fg)} .sw--warn{color:var(--caution-fg)}
+.sw--bad{color:var(--fault-fg)} .sw--idle{color:var(--ink-4)}
+
+/* ---- readout ------------------------------------------------------------ */
+.ro{min-width:0}
+.ro__k{font-size:12px;font-weight:500;color:var(--ink-2);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+.ro__v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:27px;
+    font-weight:450;letter-spacing:-.038em;line-height:1.12;margin-top:5px;
+    display:flex;align-items:baseline;gap:4px}
+.ro__u{font-family:var(--mono);font-size:11.5px;font-weight:400;color:var(--ink-4)}
+.ro__m{font-family:var(--mono);font-size:11px;color:var(--ink-4);margin-top:3px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ro--sm .ro__v{font-size:17px}
+.ro[data-state="warn"] .ro__v{color:var(--caution-fg)}
+.ro[data-state="fault"] .ro__v{color:var(--fault-fg)}
+.ro[data-state="good"] .ro__v{color:var(--sig-fg)}
+.strip{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border-top:1px solid var(--rule)}
+.strip--open{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+.strip--open>.ro{padding-left:0;padding-right:var(--s5)}
+.strip--open>.ro+.ro{padding-left:var(--s5)}
+.strip>.ro{padding:var(--s4) var(--s5);border-left:1px solid var(--rule)}
+.strip>.ro:first-child{border-left:0}
+
+/* ---- CALIBRATED SCALE: the core instrument ------------------------------ */
+.scale{position:relative;height:14px;min-width:66px}
+.scale__track{position:absolute;left:0;right:0;top:6px;height:2px;background:var(--rule-2)}
+.scale__fill{position:absolute;left:0;top:6px;height:2px;background:var(--sig);
+    transition:width 400ms var(--ease)}
+.scale[data-tone="warn"] .scale__fill{background:var(--caution)}
+.scale[data-tone="bad"] .scale__fill{background:var(--fault)}
+.scale[data-tone="idle"] .scale__fill{background:var(--idle)}
+.scale__tick{position:absolute;top:1px;width:1px;height:5px;background:var(--rule-2)}
+.scale__m{position:absolute;top:2px;width:9px;height:9px;margin-left:-4.5px;background:var(--sig);
+    transform:rotate(45deg);transition:left 400ms var(--ease);box-shadow:0 0 0 2px var(--face)}
+.row:hover .scale__m,.row[aria-expanded="true"] .scale__m{box-shadow:0 0 0 2px var(--face-2)}
+.scale[data-tone="warn"] .scale__m{background:var(--caution)}
+.scale[data-tone="bad"] .scale__m{background:var(--fault)}
+.scale[data-tone="idle"] .scale__m{background:var(--idle)}
+.scale--sm{height:11px;min-width:54px}
+.scale--sm .scale__track,.scale--sm .scale__fill{top:5px;height:1.5px}
+.scale--sm .scale__tick{top:1px;height:4px}
+.scale--sm .scale__m{top:1.5px;width:7px;height:7px;margin-left:-3.5px}
+
+/* ---- SPECTRUM: true channel occupancy ----------------------------------- */
+.spec{width:100%;display:block}
+.spec .band{fill:var(--sig-dim);stroke:var(--sig);stroke-width:1;vector-effect:non-scaling-stroke}
+.spec .axis,.spec .tick{stroke:var(--rule-2);stroke-width:1;vector-effect:non-scaling-stroke}
+.spec text{fill:var(--ink-4);font-family:var(--mono);font-size:8.5px}
+.spec .lab{fill:var(--sig-fg);font-weight:600;font-size:9px}
+/* spectrum labels live in HTML so the stretched plot cannot deform them */
+.specwrap{position:relative;width:100%}
+.spec-lab{position:absolute;bottom:-1px;transform:translateX(-50%);
+    font-family:var(--mono);font-size:9.5px;color:var(--ink-4);line-height:1}
+.spec-mhz{position:absolute;top:6px;transform:translateX(-50%);
+    font-family:var(--mono);font-size:10px;font-weight:600;color:var(--sig-fg);
+    white-space:nowrap;line-height:1}
+
+/* ---- TOPOLOGY ----------------------------------------------------------- */
+.topo{width:100%;display:block;overflow:visible}
+.topo .link{stroke:var(--rule-2);stroke-width:1.5;fill:none;vector-effect:non-scaling-stroke}
+.topo .link.on{stroke:var(--sig-line)}
+.topo .link.off{stroke:var(--rule);stroke-dasharray:3 4}
+.topo .flow{stroke:var(--sig);stroke-width:1.5;fill:none;stroke-dasharray:5 11;
+    vector-effect:non-scaling-stroke;animation:dashflow 1.7s linear infinite}
+.topo .flow.rev{animation-direction:reverse}
+@keyframes dashflow{to{stroke-dashoffset:-16}}
+.topo .nodebox{fill:var(--face-2);stroke:var(--rule-2);stroke-width:1;vector-effect:non-scaling-stroke}
+.topo .nodebox.on{stroke:var(--sig-line);fill:var(--sig-dim)}
+.topo .nodebox.bad{stroke:var(--fault)}
+.topo .t1{fill:var(--ink);font-family:var(--sans);font-size:11.5px;font-weight:600}
+.topo .t2{fill:var(--ink-4);font-family:var(--mono);font-size:10px}
+.topo .tn{fill:var(--ink);font-family:var(--mono);font-size:14px;font-weight:500}
+.topo .cap{fill:var(--ink-4);font-family:var(--sans);font-size:10px;font-weight:550;
+    letter-spacing:-.005em}
+.topo .capon{fill:var(--sig-fg)}
+
+/* ---- tags --------------------------------------------------------------- */
+.chip{display:inline-flex;align-items:center;gap:6px;flex:none;padding:2px 7px;
+    border-radius:var(--r);border:1px solid var(--rule-2);background:var(--face-2);
+    font-family:var(--mono);font-size:10.5px;color:var(--ink-2);white-space:nowrap}
+.chip::before{content:"";width:2px;align-self:stretch;background:var(--idle);flex:none;margin:1px 0}
+.chip--on{color:var(--sig-fg);border-color:var(--sig-line);background:var(--sig-dim)}
+.chip--on::before{background:var(--sig)}
+.chip--warn{color:var(--caution-fg);border-color:color-mix(in srgb,var(--caution) 34%,transparent);
+    background:color-mix(in srgb,var(--caution) 11%,transparent)}
+.chip--warn::before{background:var(--caution)}
+.chip--bad{color:var(--fault-fg);border-color:color-mix(in srgb,var(--fault) 34%,transparent);
+    background:color-mix(in srgb,var(--fault) 11%,transparent)}
+.chip--bad::before{background:var(--fault)}
+.chip--flat::before{display:none}
+
+/* ---- buttons ------------------------------------------------------------ */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 13px;
+    min-height:32px;border-radius:var(--r);border:1px solid var(--rule-2);background:var(--face-2);
+    color:var(--ink);font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap;
+    transition:all var(--t) var(--ease)}
+.btn:hover:not(:disabled){border-color:var(--rule-3);background:var(--face-3)}
+.btn:active:not(:disabled){transform:translateY(.5px)}
+.btn:disabled{opacity:.42;cursor:not-allowed}
+/* label ink rides the token so accents with dark solids get light labels —
+   this replaced three per-theme rules that hardcoded the two inks */
+.btn--primary{background:var(--sig-solid);border-color:var(--sig-solid);color:var(--sig-ink);font-weight:600}
+.btn--primary:hover:not(:disabled){filter:brightness(1.07);background:var(--sig-solid);
+    border-color:var(--sig-solid)}
+.btn--danger{color:var(--fault-fg);border-color:color-mix(in srgb,var(--fault) 30%,transparent)}
+.btn--danger:hover:not(:disabled){background:color-mix(in srgb,var(--fault) 12%,transparent);
+    border-color:var(--fault)}
+.btn--ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
+.btn--ghost:hover:not(:disabled){color:var(--ink);background:var(--face-2);border-color:var(--rule)}
+.btn--sm{padding:4px 9px;min-height:26px;font-size:11.5px}
+.btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round;flex:none}
+.btn.is-busy{position:relative;color:transparent!important;pointer-events:none}
+.btn.is-busy::after{content:"";position:absolute;left:50%;top:50%;width:16px;height:1.5px;
+    margin:-.75px 0 0 -8px;background:var(--ink-2);animation:march 900ms var(--ease) infinite}
+@keyframes march{0%{transform:scaleX(.15);opacity:.35}50%{transform:scaleX(1);opacity:1}
+  100%{transform:scaleX(.15);opacity:.35}}
+
+/* ---- rows --------------------------------------------------------------- */
+.tbl__group{display:flex;align-items:center;gap:var(--s2);padding:7px var(--s5);
+    background:var(--face-2);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);
+    position:sticky;top:0;z-index:2}
+.tbl__group:first-child{border-top:0}
+.tbl__gk{font-size:12px;font-weight:600;color:var(--ink-2)}
+.tbl__gn{font-family:var(--mono);font-size:11px;color:var(--ink-4);margin-left:auto}
+.row{display:grid;align-items:center;gap:var(--s3);padding:9px var(--s5);
+    border-bottom:1px solid var(--rule);cursor:pointer;position:relative;
+    transition:background var(--t) var(--ease)}
+.row:hover{background:var(--face-2)}
+.row[aria-expanded="true"]{background:var(--face-2)}
+.row[aria-expanded="true"]::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
+    background:var(--sig)}
+.row:last-child{border-bottom:0}
+.row__id{display:flex;align-items:center;gap:11px;min-width:0}
+.row__ico{width:28px;height:28px;flex:none;display:grid;place-items:center;
+    border:1px solid var(--rule);border-radius:var(--r);color:var(--ink-2);background:var(--face-2)}
+.row__ico svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5;
+    stroke-linecap:round;stroke-linejoin:round}
+.row__title{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap}
+.row__nm{font-size:13.5px;font-weight:550;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;max-width:100%;letter-spacing:-.008em}
+.row__sub{font-family:var(--mono);font-size:11px;color:var(--ink-4);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+.row__num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px;
+    text-align:right;white-space:nowrap}
+.row__cap{font-family:var(--mono);font-size:10.5px;color:var(--ink-4)}
+.row__title .chip{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.row--pick{grid-template-columns:minmax(0,1fr) auto}
+.row--pick .select{width:auto;min-width:190px;max-width:240px}
+@media (max-width:560px){.row--pick{grid-template-columns:minmax(0,1fr);gap:var(--s2)}
+  .row--pick .select{width:100%;min-width:0;max-width:none}}
+.det{border-bottom:1px solid var(--rule);background:var(--face-2);
+    padding:var(--s4) var(--s5) var(--s5)}
+.det[hidden]{display:none}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:5px var(--s4)}
+.kv dt{font-size:11.5px;color:var(--ink-4);white-space:nowrap}
+.kv dd{margin:0;font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;
+    word-break:break-all}
+
+/* ---- forms -------------------------------------------------------------- */
+.field{margin-bottom:var(--s3)}
+.label{display:block;font-size:12px;font-weight:500;color:var(--ink-2);margin-bottom:6px}
+.input,.select,.ta{width:100%;padding:8px 10px;min-height:34px;background:var(--bg);
+    border:1px solid var(--rule-2);border-radius:var(--r);color:var(--ink);
+    font-family:var(--mono);font-size:12.5px;
+    transition:border-color var(--t) var(--ease),box-shadow var(--t) var(--ease)}
+.input:focus,.select:focus,.ta:focus{border-color:var(--sig);box-shadow:0 0 0 3px var(--sig-dim);
+    outline:none}
+.ta{min-height:130px;resize:vertical;line-height:1.55}
+.select{cursor:pointer}
+.hint{font-size:12px;color:var(--ink-4);margin-top:5px;line-height:1.5}
+
+/* ---- empty / skeleton / notice ------------------------------------------ */
+.empty{padding:var(--s6) var(--s5);text-align:center}
+.empty__i{width:36px;height:36px;margin:0 auto var(--s3);color:var(--ink-4);
+    border:1px dashed var(--rule-2);border-radius:var(--r);display:grid;place-items:center}
+.empty__i svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.5;
+    stroke-linecap:round;stroke-linejoin:round}
+.empty__t{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.empty__s{font-size:12.5px;color:var(--ink-4);margin:5px auto 0;max-width:48ch;line-height:1.55}
+.sk{height:9px;border-radius:1px;background:var(--face-3);position:relative;overflow:hidden}
+.sk::after{content:"";position:absolute;inset:0;
+    background:linear-gradient(90deg,transparent,var(--rule),transparent);animation:sweep 1.5s infinite}
+@keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.note{display:flex;gap:10px;padding:11px var(--s3);border-radius:var(--r);
+    border:1px solid var(--rule-2);background:var(--face-2);font-size:12.5px;line-height:1.5;
+    align-items:flex-start}
+.note svg{width:15px;height:15px;flex:none;margin-top:1px;fill:none;stroke:currentColor;
+    stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.note--warn{color:var(--caution-fg);border-color:color-mix(in srgb,var(--caution) 30%,transparent);
+    background:color-mix(in srgb,var(--caution) 9%,transparent)}
+.note--bad{color:var(--fault-fg);border-color:color-mix(in srgb,var(--fault) 30%,transparent);
+    background:color-mix(in srgb,var(--fault) 9%,transparent)}
+.note--on{color:var(--sig-fg);border-color:var(--sig-line);background:var(--sig-dim)}
+.note b{font-weight:600}
+
+/* ---- toast / dialog ----------------------------------------------------- */
+.toasts{position:fixed;right:var(--s4);bottom:var(--s4);z-index:90;display:flex;
+    flex-direction:column;gap:var(--s2);pointer-events:none;max-width:min(390px,calc(100vw - 32px))}
+.toast{pointer-events:auto;display:flex;gap:10px;align-items:flex-start;padding:11px var(--s3);
+    border-radius:var(--r);border:1px solid var(--rule-2);background:var(--face-3);font-size:12.5px;
+    line-height:1.45;animation:rise 200ms var(--ease)}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}}
+.toast__b{width:2px;align-self:stretch;background:var(--idle);flex:none}
+.toast--ok .toast__b{background:var(--sig)}
+.toast--bad .toast__b{background:var(--fault)}
+.toast--warn .toast__b{background:var(--caution)}
+.veil{position:fixed;inset:0;z-index:100;display:none;background:rgba(0,0,0,.6);
+    backdrop-filter:blur(2px);align-items:center;justify-content:center;padding:var(--s4)}
+.veil.on{display:flex;animation:fade 140ms var(--ease)}
+@keyframes fade{from{opacity:0}}
+.dlg{width:100%;max-width:470px;max-height:86vh;overflow-y:auto;background:var(--face);
+    border:1px solid var(--rule-2);border-radius:var(--r2);animation:pop 180ms var(--ease)}
+@keyframes pop{from{opacity:0;transform:translateY(10px) scale(.985)}}
+.dlg__h{padding:var(--s4) var(--s5);border-bottom:1px solid var(--rule)}
+.dlg__t{font-size:15.5px;font-weight:600;letter-spacing:-.015em}
+.dlg__b{padding:var(--s4) var(--s5)}
+.dlg__f{padding:var(--s3) var(--s5);border-top:1px solid var(--rule);display:flex;gap:var(--s2);
+    justify-content:flex-end}
+
+/* ---- charts ------------------------------------------------------------- */
+.chart{width:100%;display:block}
+.chart .trace{fill:none;stroke:var(--sig);stroke-width:1.5;stroke-linejoin:round;
+    vector-effect:non-scaling-stroke}
+.chart .fill{fill:var(--sig-dim);stroke:none}
+.chart .trace-2{fill:none;stroke:var(--ink-4);stroke-width:1.25;vector-effect:non-scaling-stroke}
+.chart .fill-2{fill:var(--rule);stroke:none}
+.chart .axis{stroke:var(--rule-2);stroke-width:1;vector-effect:non-scaling-stroke}
+.cap{display:flex;justify-content:space-between;gap:var(--s2);font-family:var(--mono);
+    font-size:10.5px;color:var(--ink-4);margin-top:7px}
+.cap>span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.cap>span:first-child,.cap>span:last-child{flex:none}
+
+/* ---- segmented control --------------------------------------------------- */
+.seg{display:flex;border:1px solid var(--rule-2);border-radius:var(--r);overflow:hidden}
+.seg .btn{border:0;border-radius:0;background:transparent}
+.seg .btn+.btn{border-left:1px solid var(--rule-2)}
+.seg .btn[aria-pressed="true"]{background:var(--sig-dim);color:var(--sig-fg);font-weight:600}
+
+/* ---- expanded client: the radio link is a distinct subsection ------------ */
+.det__wifi{margin-top:14px;padding:12px 14px;border-left:2px solid var(--sig-line);
+    background:var(--face);border-radius:0 var(--r) var(--r) 0}
+.det__wifi .adv>summary{padding-left:0;padding-right:0}
+
+/* ---- VPN route rows: current route always visible; on mobile the selector
+   appears on tap instead of consuming a full-width block per device --------- */
+.row--route{grid-template-columns:minmax(0,1fr) auto;cursor:default}
+.row--route .routeline{display:none;font-family:var(--mono);font-size:11px;
+    color:var(--ink-4);margin-top:2px}
+.row--route .routeline--vpn{color:var(--sig-fg)}
+.row--route .rcaret{display:none}
+.row--route .select{width:auto;min-width:190px;max-width:240px}
+@media (max-width:640px){
+  .row--route{cursor:pointer;row-gap:8px}
+  .row--route .routeline{display:block}
+  /* once the selector is open it shows the same value, so the summary line
+     would just print the route twice, two lines apart */
+  .row--route[aria-expanded="true"] .routeline{display:none}
+  .row--route .rcaret{display:block;width:6px;height:6px;flex:none;
+      border-right:1.5px solid var(--ink-4);border-bottom:1.5px solid var(--ink-4);
+      transform:rotate(-45deg);transition:transform var(--t) var(--ease)}
+  .row--route[aria-expanded="true"] .rcaret{transform:rotate(45deg)}
+  .row--route .select{display:none}
+  .row--route[aria-expanded="true"] .select{display:block;grid-column:1/-1;
+      width:100%;max-width:none}
+}
+
+/* ---- open radio band ---------------------------------------------------- */
+.radioband{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+    gap:var(--s5) var(--s6)}
+.radioband .lane{min-width:0}
+
+/* ---- misc --------------------------------------------------------------- */
+.mut{color:var(--ink-2)} .dim{color:var(--ink-4)}
+.rowsep{height:1px;background:var(--rule);margin:var(--s3) 0}
+.stack{display:flex;flex-direction:column;gap:var(--s3)}
+.inline{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.push{margin-left:auto}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.adv>summary{list-style:none;cursor:pointer;padding:var(--s4) var(--s5);font-size:12.5px;
+    font-weight:500;color:var(--ink-2);display:flex;align-items:center;gap:8px;
+    border-top:1px solid var(--rule)}
+.adv>summary::-webkit-details-marker{display:none}
+.adv>summary::after{content:"";width:5px;height:5px;margin-left:auto;
+    border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;
+    transform:rotate(45deg) translate(-2px,-2px);transition:transform var(--t) var(--ease)}
+.adv[open]>summary::after{transform:rotate(225deg)}
+.adv>summary:hover{color:var(--ink)}
+.face>.adv:first-child>summary{border-top:0}
+.meter{display:flex;gap:2px;height:10px;align-items:stretch}
+.meter i{flex:1;background:var(--rule);transition:background var(--t) var(--ease)}
+.meter i.on{background:var(--sig)}
+.meter[data-tone="warn"] i.on{background:var(--caution)}
+.meter[data-tone="bad"] i.on{background:var(--fault)}
+.meter[data-tone="idle"] i.on{background:var(--idle)}
+.meter--sm{height:7px;gap:1.5px}
+
+/* ============================ responsive ================================= */
+.mobilebar,.topline{display:none}
+@media (max-width:1220px){
+  :root{--rail:206px}
+  .main{padding:var(--s4) var(--s4) var(--s7)}
+  .g-2-1{grid-template-columns:minmax(0,1fr)}
+  .grid>.panel+.panel{border-left:0}
+  .grid>.panel+.panel>.panel__h{border-top:1px solid var(--rule)}
+  .panel__h,.panel__b,.strip>.ro,.tbl__group,.row,.det,.empty,.adv>summary{
+    padding-left:var(--s4);padding-right:var(--s4)}
+  .dlg__h,.dlg__b,.dlg__f{padding-left:var(--s4);padding-right:var(--s4)}
+}
+@media (max-width:900px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .spine{display:none}
+  .main{padding:0 0 calc(84px + env(safe-area-inset-bottom))}
+  .topline{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4);
+    border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--bg);z-index:20}
+  .head{padding:var(--s4);flex-direction:column;align-items:flex-start;gap:var(--s3)}
+  .head__t{font-size:21px} .head__aside{width:100%}
+  /* The tab bar already names the page, so the title and its subtitle are a
+     screenful of repetition before you reach anything useful. Only the pixels
+     go — the <h1> stays in the accessibility tree. The header itself must
+     survive because it also carries the page's primary action (Add tunnel,
+     Scan). Settings opts out with .head--keep-title: it lives in the topline,
+     not the tab bar, so nothing else would name it. */
+  /* The header keeps a top pad even when empty — it is the only thing standing
+     between the sticky topline and the first content (the topology on
+     Overview), and the page reads as cramped without it. */
+  .head:not(.head--keep-title){padding:var(--s4) 0 0;gap:0}
+  .head:not(.head--keep-title) .head__t{position:absolute;width:1px;height:1px;
+    padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  .head:not(.head--keep-title) .head__s{display:none}
+  /* Bottom pad so the action never butts into the first card, and the action
+     sits on the right — where a control belongs, not leading the page. */
+  .head:not(.head--keep-title) .head__aside{padding:0 var(--s4) var(--s3);
+    justify-content:flex-end}
+  /* action docked into a panel header: sized to sit on the title's line
+     without stretching the row, and pinned to the trailing edge */
+  .head__aside.is-docked{display:none}
+  /* the topline sits at the top and right-aligned, so the sheet drops instead
+     of rising, and hugs the right edge so it cannot leave the viewport. Here
+     it anchors to the BUTTON — the topline is full width, so pinning to the
+     bar would strand the menu far from the control that opened it. */
+  .accent{position:relative}
+  .accent__pop{bottom:auto;top:calc(100% + 6px);left:auto;right:0}
+  .mob-only{display:block}
+  .desk-only{display:none}
+  .panel__h .hslot{display:inline-flex;align-items:center;margin-left:var(--s2)}
+  .panel__h--act{align-items:center}
+  .panel__aside .btn{min-height:30px;padding:5px 10px;font-size:11.5px}
+  .panel__aside .btn svg{width:13px;height:13px}
+  .face{border-left:0;border-right:0;border-radius:0;margin-bottom:0}
+  .face::before,.face::after{display:none}
+  .strip{grid-auto-flow:row;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-columns:auto}
+  .strip>.ro{border-left:0;border-top:1px solid var(--rule);padding:var(--s3) var(--s4)}
+  .strip>.ro:nth-child(-n+2){border-top:0}
+  .strip>.ro:nth-child(even){border-left:1px solid var(--rule)}
+  .ro__v{font-size:21px}
+  .g2,.g3{grid-template-columns:minmax(0,1fr)}
+  /* single column: each list follows the control that fills it, so
+     "Currently blocked" sits under Block and Traffic today closes the section */
+  .mnt{gap:24px}
+  .mnt-restart{order:1} .mnt-block{order:2} .mnt-blocked{order:3} .mnt-traffic{order:4}
+  .mobilebar{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;
+    bottom:0;z-index:50;background:color-mix(in srgb,var(--face) 93%,transparent);
+    backdrop-filter:blur(14px);border-top:1px solid var(--rule);
+    padding-bottom:env(safe-area-inset-bottom)}
+  .mtab{display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 4px 8px;
+    color:var(--ink-4);min-height:54px;justify-content:center;position:relative}
+  .mtab svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.6;
+    stroke-linecap:round;stroke-linejoin:round}
+  .mtab span{font-size:10px;font-weight:550;white-space:nowrap}
+  .mtab.is-active{color:var(--sig-fg)}
+  .mtab.is-active::before{content:"";position:absolute;top:0;left:24%;right:24%;height:2px;
+    background:var(--sig)}
+  .mtab__dot{position:absolute;top:7px;right:50%;margin-right:-17px;width:5px;height:5px;
+    background:var(--caution);transform:rotate(45deg)}
+  /* toasts sit under the sticky header, not over the list or the nav */
+  .toasts{left:var(--s3);right:var(--s3);top:58px;bottom:auto;max-width:none}
+  .toast{padding:9px 11px;font-size:12px}
+  .veil{align-items:flex-end;padding:0}
+  .dlg{max-width:none;border-radius:var(--r2) var(--r2) 0 0;max-height:88vh;
+    animation:sheet 220ms var(--ease)}
+  @keyframes sheet{from{transform:translateY(100%)}}
+  .dlg__f{position:sticky;bottom:0;background:var(--face)}
+  /* iOS zooms the page when a TEXT field under 16px takes focus, and does not
+     zoom back out. That is worth avoiding exactly where it bites every time —
+     the password dialog, which every write action opens. Everywhere else the
+     console keeps its own type size: a <select> opens a picker rather than a
+     keyboard so it never triggers the zoom at all, and the page's few text
+     fields are edited rarely. Blanket 16px here made input values the largest
+     text on the page, above even the panel titles. */
+  .input,.select,.ta{font-size:13.5px;min-height:38px}
+  .dlg .input,.dlg .ta{font-size:16px;min-height:42px}
+  .fgrid{grid-template-columns:minmax(0,1fr)}
+  /* explanatory asides earn their space on a wide screen; on a phone they are
+     just a wall of text between you and the controls */
+  .note--deskonly{display:none}
+  .btn{min-height:40px} .btn--sm{min-height:38px;padding:8px 12px}
+  .kv{grid-template-columns:minmax(0,1fr);gap:1px var(--s3)} .kv dd{margin-bottom:8px}
+}
+@media (max-width:900px){
+  /* open sections carry the page-edge padding that .main gave up */
+  .face--open{padding:0 var(--s4);margin-bottom:var(--s3)}
+  /* Cards stack edge to edge on a phone (margin-bottom:0), so an open section
+     following one gets no separation from it — restore the same 28px break
+     every other section boundary has. */
+  .face + .face--open{margin-top:var(--s3)}
+  .face--open .sect{padding-left:0;padding-right:0}
+  .sect{padding:var(--s4) var(--s4) var(--s2)}
+  .radioband{gap:var(--s4)}
+  .empty{padding:var(--s4) var(--s4) var(--s5)}
+  .empty__i{width:30px;height:30px;margin-bottom:var(--s2)}
+  .det{padding:var(--s3) var(--s4) var(--s4)}
+  .det__wifi{padding:10px 12px}
+  .seg{width:100%} .seg .btn{flex:1;min-width:0}
+  /* metric strip: 2x2 plus a full-width fifth cell */
+  .strip>.ro:nth-child(5):last-child{grid-column:1/-1;border-left:0}
+  .strip--open>.ro{padding:var(--s3) var(--s2) var(--s3) 0}
+  .strip--open>.ro:nth-child(even){padding-left:var(--s3)}
+}
+@media (max-width:640px){
+  /* THE ENTITY ROW REFLOW: identity keeps the full line, state stays at the
+     right edge, the signal instrument gets its own line underneath. Inline
+     desktop grids are author-level, so the overrides are !important on
+     purpose — this is the one sanctioned use. */
+  .row--entity{grid-template-columns:minmax(0,1fr) auto !important;
+      grid-template-areas:"a b" "c c";row-gap:6px}
+  .row--entity>.re-id{grid-area:a}
+  .row--entity>.re-state{grid-area:b}
+  .row--entity>.re-sig{grid-area:c;display:flex !important;align-items:center;
+      gap:10px;margin-left:39px}
+  .row--entity>.re-sig:empty{display:none !important}
+  .re-sig .scale{flex:1;max-width:230px;width:auto !important}
+  .re-caret{display:none}
+  .re-id .row__sub{white-space:normal}
+  .re-id .row__nm{white-space:normal}
+}
+@media (max-width:420px){
+  .panel__h,.panel__b,.strip>.ro,.tbl__group,.row,.det,.empty,.adv>summary{
+    padding-left:var(--s3);padding-right:var(--s3)}
+  .head{padding:var(--s3)} .head__t{font-size:19px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important}
+}
+@media print{.spine,.mobilebar,.toasts{display:none}}

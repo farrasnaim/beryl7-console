@@ -1,0 +1,56 @@
+#!/bin/sh
+# /usr/sbin/dashmon — 1-minute telemetry collector for the dashboard.
+# Ring buffers live in /tmp (RAM): no flash wear, lost on reboot by design.
+
+LAT=/tmp/.wanlat
+PRES=/tmp/.presence
+SNAP=/tmp/.dashmon.sta
+now=$(date +%s)
+
+# ---- WAN latency probe (router-originated => always via WAN, never the VPN) ----
+out=$(ping -c3 -W1 -q 1.1.1.1 2>/dev/null)
+avg=$(printf '%s\n' "$out" | awk -F/ '/round-trip/{printf "%.1f", $4}')
+loss=$(printf '%s\n' "$out" | awk -F, '/packet loss/{gsub(/[^0-9]/,"",$3); print $3}')
+[ -n "$avg" ] || avg=-1
+[ -n "$loss" ] || loss=100
+echo "$now $avg $loss" >> "$LAT"
+tail -n 240 "$LAT" > "$LAT.n" && mv "$LAT.n" "$LAT"
+
+# ---- internet-status LED (white:status) ----
+# At-a-glance health with no phone needed: DARK when the internet is fine, BLINK
+# when it is not. Reflects real reachability (this same 1.1.1.1 probe), so it
+# works whatever the uplink is — Ethernet, repeater or tethering. The blue status
+# LED is left alone. Reversible: `echo none >…/trigger; echo 0 >…/brightness`.
+LED=/sys/class/leds/white:status
+if [ -d "$LED" ]; then
+    if [ "$loss" = "100" ]; then
+        # offline — fast blink for attention
+        [ "$(cat "$LED/trigger" 2>/dev/null | grep -o '\[timer\]')" = "[timer]" ] || echo timer > "$LED/trigger" 2>/dev/null
+        echo 200 > "$LED/delay_on"  2>/dev/null
+        echo 200 > "$LED/delay_off" 2>/dev/null
+    else
+        # online — dark and quiet
+        echo none > "$LED/trigger" 2>/dev/null
+        echo 0 > "$LED/brightness" 2>/dev/null
+    fi
+fi
+
+# ---- presence: join/leave events (band moves are deliberately NOT events) ----
+cur=$(for i in /sys/class/net/phy0.*; do
+        ifc=${i##*/}
+        case "$ifc" in phy0.0-*) b=2.4 ;; phy0.1-*) b=5 ;; *) b=- ;; esac
+        iw dev "$ifc" station dump 2>/dev/null | awk -v b="$b" '/^Station/{print $2, b}'
+      done | sort -u)
+if [ -f "$SNAP" ]; then
+    prev=$(cat "$SNAP")
+    printf '%s\n' "$cur" | while read -r mac band; do
+        [ -n "$mac" ] || continue
+        printf '%s\n' "$prev" | grep -q "^$mac " || echo "$now join $mac $band" >> "$PRES"
+    done
+    printf '%s\n' "$prev" | while read -r mac band; do
+        [ -n "$mac" ] || continue
+        printf '%s\n' "$cur" | grep -q "^$mac " || echo "$now leave $mac $band" >> "$PRES"
+    done
+    [ -f "$PRES" ] && tail -n 50 "$PRES" > "$PRES.n" && mv "$PRES.n" "$PRES"
+fi
+printf '%s\n' "$cur" > "$SNAP"

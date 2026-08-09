@@ -1,0 +1,562 @@
+#!/bin/sh
+# /www/cgi-bin/vpn-api  —  WireGuard tunnel manager (vanilla OpenWrt).
+#
+# Parses a Proton/standard wg-quick .conf into netifd's `wireguard` proto:
+#   config interface 'wgX'      proto wireguard, private_key, addresses, dns
+#   config wireguard_wgX        public_key, endpoint_host/port, allowed_ips, PSK
+# Per-device routing is delegated to `pbr` (policy-based routing) keyed by MAC.
+#
+# SECURITY: this endpoint handles PRIVATE KEYS, so every write action is
+# password-gated *and* origin-checked. Private keys are never echoed back —
+# list output returns public metadata only.
+
+PASSWORD="changeme"
+POST_MAX=65536          # larger than the dashboard's: a .conf is pasted in full
+
+esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+BODY=""
+if [ "$REQUEST_METHOD" = "POST" ]; then
+    CL="${CONTENT_LENGTH:-0}"; case "$CL" in ''|*[!0-9]*) CL=0 ;; esac
+    [ "$CL" -gt "$POST_MAX" ] && { printf '{"ok":false,"error":"body too large"}'; exit 0; }
+    [ "$CL" -gt 0 ] && BODY=$(dd bs=1 count="$CL" 2>/dev/null)
+fi
+
+# URL-decode in awk, not sed: busybox sed drops the backslash in a `\\x\1`
+# replacement, so the classic sed+printf%b trick silently returns the string
+# with its escapes stripped (verified on this router) and every parsed field
+# comes back empty. awk builds the byte directly from the hex pair instead.
+urldec() {
+    printf '%s' "$1" | awk '
+    BEGIN{ for(i=0;i<16;i++){ h=sprintf("%X",i); H[h]=i; H[tolower(h)]=i } }
+    {
+      gsub(/\+/," ")
+      s=$0; n=length(s); out=""
+      for(i=1;i<=n;i++){
+        c=substr(s,i,1)
+        if(c=="%" && i+2<=n){
+          a=substr(s,i+1,1); b=substr(s,i+2,1)
+          if((a in H) && (b in H)){ out=out sprintf("%c",H[a]*16+H[b]); i+=2; continue }
+        }
+        out=out c
+      }
+      printf "%s", out
+    }'
+}
+qs_get() {
+    printf '%s' "${QUERY_STRING}&${BODY}" | tr '&' '\n' \
+      | awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}'
+}
+qs_get_dec() { urldec "$(qs_get "$1")"; }
+
+guard_post() {
+    [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
+    gp_src="${HTTP_ORIGIN:-$HTTP_REFERER}"
+    gp_src="${gp_src#*://}"; gp_src="${gp_src%%[:/]*}"
+    gp_ok=0
+    case "$gp_src" in
+        "") gp_ok=0 ;;
+        localhost|127.0.0.1|::1) gp_ok=1 ;;
+        *) for gp_ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
+             [ "$gp_ip" = "$gp_src" ] && { gp_ok=1; break; }
+           done ;;
+    esac
+    [ "$gp_ok" = 1 ] || { printf '{"ok":false,"error":"bad origin"}'; exit 0; }
+}
+
+# Re-apply pbr safely.
+#
+# pbr validates every ENABLED policy at startup and bails out completely on the
+# first one whose interface it can't resolve ("has an unknown interface!"), so a
+# single policy pointing at a disconnected tunnel takes down policy routing for
+# every other device too. Before restarting, park any policy whose target link is
+# absent (enabled -> 0, remembered via a marker) and revive it once the link is
+# back. Only dashboard-created policies (dash_*) are ever touched.
+sync_pbr() {
+    idx=0; any=0
+    while [ "$idx" -lt 64 ]; do
+        pname=$(uci -q get pbr.@policy[$idx].name) || break
+        [ -n "$pname" ] || break
+        case "$pname" in
+            dash_*)
+                piface=$(uci -q get pbr.@policy[$idx].interface)
+                if [ -n "$piface" ] && ip link show "$piface" >/dev/null 2>&1; then
+                    uci set pbr.@policy[$idx].enabled='1'; any=1
+                else
+                    uci set pbr.@policy[$idx].enabled='0'
+                fi ;;
+        esac
+        idx=$((idx+1))
+    done
+    # nothing left to route -> stop pbr rather than leave stale marks behind
+    if [ "$any" = "1" ]; then
+        uci set pbr.config.enabled='1'; uci commit pbr
+        /etc/init.d/pbr enable >/dev/null 2>&1
+        /etc/init.d/pbr restart >/dev/null 2>&1
+    else
+        uci set pbr.config.enabled='0'; uci commit pbr
+        /etc/init.d/pbr stop >/dev/null 2>&1
+    fi
+}
+
+# Rebuild the per-device VPN DNS directives.
+#
+# Goal: a VPN'd device must resolve through ITS tunnel, not the ISP. The router's
+# resolver list holds both, and dnsmasq answers from whichever replies first —
+# always the on-link ISP one — so a VPN'd client kept leaking DNS and geo-CDNs
+# (BBC iPlayer) steered it home despite a correct foreign exit IP.
+#
+# Mechanism: `dhcp-mac=set:<tag>,<mac>` + `dhcp-option=tag:<tag>,6,<dns>`. uci's
+# `config host` was the obvious route but OpenWrt's dnsmasq init only emits
+# dhcp-host for entries that carry an IP, so an ip-less tagging host silently
+# produced no dhcp-host line at all. dhcp-mac needs no static lease.
+#
+# /etc/dnsmasq.conf is already pulled in via conf-file and lives on persistent
+# storage, so a delimited block there survives reboots and sysupgrade.
+DNSMASQ_CONF=/etc/dnsmasq.conf
+VPNDNS_NFT=/etc/nftables.d/30-beryl-vpndns.nft
+VPNDNS_BEGIN="# --- BEGIN vpn-dns (managed by vpn-api, do not edit) ---"
+VPNDNS_END="# --- END vpn-dns ---"
+
+rebuild_vpn_dns() {
+    # Single implementation, shared with vpnwatch: /usr/sbin/beryl-vpndns.
+    # vpnwatch pauses a policy when its tunnel stops answering, and the DNS
+    # redirect has to disappear with it — otherwise the released device keeps
+    # pointing at a resolver inside a dead tunnel and loses DNS entirely, which
+    # is precisely the failure "keep it online" mode exists to avoid.
+    [ -x /usr/sbin/beryl-vpndns ] && /usr/sbin/beryl-vpndns
+
+    # Retire the old DHCP-option block if an older build left one behind: a
+    # stale option 6 pointing into a dead tunnel breaks DNS until lease renewal.
+    if grep -q "$VPNDNS_BEGIN" "$DNSMASQ_CONF" 2>/dev/null; then
+        awk -v b="$VPNDNS_BEGIN" -v e="$VPNDNS_END" '
+            $0==b { skip=1; next } $0==e { skip=0; next } !skip { print }
+        ' "$DNSMASQ_CONF" > "$DNSMASQ_CONF.clean" 2>/dev/null
+        mv "$DNSMASQ_CONF.clean" "$DNSMASQ_CONF"
+        /etc/init.d/dnsmasq restart >/dev/null 2>&1
+    fi
+}
+
+ACTION=$(qs_get action)
+# Writes MUST be POST. These endpoints are passwordless by design, so the
+# same-origin check in guard_post (which only runs on POST) is the ONLY thing
+# standing between a mutation and a hostile page — but nothing forced a write to
+# BE a POST, so `GET ?action=del` slipped past the guard entirely. Default-deny:
+# anything other than the read/status path (empty action) requires POST, which
+# then triggers guard_post below.
+case "$ACTION" in
+    "") ;;
+    *) [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; } ;;
+esac
+[ "$REQUEST_METHOD" = "POST" ] && guard_post
+
+# ============================ VPN FAIL MODE (travel policy) ============================
+# What should happen to a VPN-routed device when its tunnel is unreachable?
+#   closed (default) — block its traffic. Never leaks, but the device has NO
+#                      internet and no obvious reason why. Right for home.
+#   open             — let it fall back to the normal uplink so it stays online.
+#                      Traffic that was meant to be tunnelled is NOT protected.
+# Deliberately a stored, explicit choice: silently switching a kill-switch off
+# would be a security change made on the owner's behalf.
+FAILMODE_FILE=/etc/dashboard/vpn-failmode
+if [ "$ACTION" = "failmode" ]; then
+    m=$(qs_get_dec mode)
+    case "$m" in
+        open|closed) ;;
+        *) printf '{"ok":false,"error":"mode must be open or closed"}'; exit 0 ;;
+    esac
+    mkdir -p /etc/dashboard 2>/dev/null
+    printf '%s' "$m" > "$FAILMODE_FILE"
+    # Leaving "open" means any auto-pause it performed must be undone now, or a
+    # device would stay un-tunnelled after the owner asked for protection again.
+    if [ "$m" = "closed" ] && [ -s /etc/dashboard/vpn-autopaused ]; then
+        _i=0; _ch=0
+        while [ "$_i" -lt 64 ]; do
+            _pn=$(uci -q get pbr.@policy[$_i].name 2>/dev/null) || break
+            [ -n "$_pn" ] || break
+            if grep -qxF "$_pn" /etc/dashboard/vpn-autopaused 2>/dev/null; then
+                _if=$(uci -q get pbr.@policy[$_i].interface 2>/dev/null)
+                [ -n "$_if" ] && ip link show "$_if" >/dev/null 2>&1 && \
+                    { uci set pbr.@policy[$_i].enabled='1'; _ch=1; }
+            fi
+            _i=$((_i+1))
+        done
+        : > /etc/dashboard/vpn-autopaused
+        [ "$_ch" = "1" ] && { uci commit pbr; ( /etc/init.d/pbr reload >/dev/null 2>&1 ) & }
+    fi
+    logger -t vpn-api "VPN fail mode set to '$m'"
+    printf '{"ok":true,"action":"failmode","mode":"%s"}' "$m"
+    exit 0
+fi
+
+# ============================ PAUSE ALL (travel rescue) ============================
+# One tap to get every VPN-routed device back online. With pbr strict_enforcement=1
+# a device pinned to a down tunnel is fail-closed — no internet, no clue why. This
+# is the common hotel case (VPN blocked, or before captive-portal sign-in). Disables
+# every dash_ policy so those devices fall straight back to the normal uplink. The
+# tunnels themselves are left intact; re-enable per device from the VPN page after
+# you have working internet. Passwordless by design (same rule as connect/disconnect);
+# guard_post still enforces same-origin.
+if [ "$ACTION" = "pauseall" ]; then
+    idx=0; touched=0
+    while [ "$idx" -lt 64 ]; do
+        pname=$(uci -q get pbr.@policy[$idx].name 2>/dev/null) || break
+        [ -n "$pname" ] || break
+        case "$pname" in
+            dash_*)
+                if [ "$(uci -q get pbr.@policy[$idx].enabled 2>/dev/null)" = "1" ]; then
+                    uci set pbr.@policy[$idx].enabled='0'; touched=$((touched+1))
+                fi ;;
+        esac
+        idx=$((idx+1))
+    done
+    if [ "$touched" -gt 0 ]; then
+        uci commit pbr
+        ( /etc/init.d/pbr reload >/dev/null 2>&1 || /etc/init.d/pbr restart >/dev/null 2>&1 ) &
+        logger -t vpn-api "pauseall: disabled $touched device VPN policy(ies) — travel rescue"
+    fi
+    printf '{"ok":true,"action":"pauseall","paused":%s}' "$touched"
+    exit 0
+fi
+
+# ============================ ADD ============================
+if [ "$ACTION" = "add" ]; then
+    # No password here, by explicit user choice (same call as the dashboard's VPN
+    # toggle: speed over friction on a trusted LAN). guard_post still enforces the
+    # origin check, so a hostile page cannot POST a tunnel in from another tab, and
+    # guest/iot are input=REJECT so they can't reach this endpoint at all.
+    # `del` KEEPS its password: adding is trivially reversible, deleting is not.
+    NAME=$(qs_get_dec name)
+    CONF=$(qs_get_dec conf)
+    [ -n "$CONF" ] || { printf '{"ok":false,"error":"empty config"}'; exit 0; }
+
+    # --- parse the wg-quick .conf (section-aware) ---
+    P=$(printf '%s\n' "$CONF" | awk '
+        BEGIN{ sec="" }
+        { sub(/\r$/,""); line=$0
+          sub(/^[ \t]+/,"",line); sub(/[ \t]+$/,"",line)
+          if (line == "") next
+          # Providers name the server in the first comment under [Peer]
+          # (Proton: "# US-CA#151"). Grab it as the human label. Later comments in
+          # that section are boilerplate ("# Uncomment the following line…"), so
+          # only the first one counts, and instructional/config-looking lines are
+          # rejected outright.
+          if (line ~ /^#/) {
+              if (sec == "peer" && plabel == "") {
+                  c = substr(line, 2)
+                  sub(/^[ \t]+/,"",c); sub(/[ \t]+$/,"",c)
+                  if (c != "" && length(c) <= 48 && c !~ /=/ && \
+                      c !~ /^[Uu]ncomment/ && c !~ /^[Kk]ey /)
+                      plabel = c
+              }
+              next
+          }
+          # NOTE: bracket class must be written [][] — busybox awk does NOT honour
+          # the escapes in [\[\]], leaving sec as "[interface]" so no section ever
+          # matches and every parsed field silently comes back empty.
+          if (line ~ /^\[.*\]$/) { sec=tolower(line); gsub(/[][]/,"",sec); next }
+          eq=index(line,"="); if (eq==0) next
+          k=substr(line,1,eq-1); v=substr(line,eq+1)
+          gsub(/[ \t]/,"",k); k=tolower(k)
+          sub(/^[ \t]+/,"",v); sub(/[ \t]+$/,"",v)
+          if (sec=="interface") {
+              if (k=="privatekey") ipk=v
+              else if (k=="address") iaddr=v
+              else if (k=="dns") idns=v
+              else if (k=="mtu") imtu=v
+              else if (k=="listenport") ilp=v
+          } else if (sec=="peer") {
+              if (k=="publickey") ppk=v
+              else if (k=="endpoint") pep=v
+              else if (k=="allowedips") paip=v
+              else if (k=="presharedkey") ppsk=v
+              else if (k=="persistentkeepalive") pka=v
+          }
+        }
+        END{ printf "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n", ipk,iaddr,idns,imtu,ppk,pep,paip,ppsk,pka,plabel }')
+    IPK=$(printf '%s' "$P" | sed -n 1p)
+    IADDR=$(printf '%s' "$P" | sed -n 2p)
+    IDNS=$(printf '%s' "$P" | sed -n 3p)
+    IMTU=$(printf '%s' "$P" | sed -n 4p)
+    PPK=$(printf '%s' "$P" | sed -n 5p)
+    PEP=$(printf '%s' "$P" | sed -n 6p)
+    PAIP=$(printf '%s' "$P" | sed -n 7p)
+    PPSK=$(printf '%s' "$P" | sed -n 8p)
+    PKA=$(printf '%s' "$P" | sed -n 9p)
+    PLABEL=$(printf '%s' "$P" | sed -n 10p)
+
+    # ---- display label vs interface name ----
+    # LABEL is what the UI shows (full "US-CA#151"). NAME becomes the uci section
+    # and therefore the Linux interface "wg_<name>", which the kernel caps at 15
+    # chars total (IFNAMSIZ) — hence the 12-char budget here. They are deliberately
+    # decoupled so a long provider name never breaks interface creation.
+    LABEL="$PLABEL"
+    [ -n "$LABEL" ] || LABEL="$NAME"
+    [ -n "$LABEL" ] || LABEL="${PEP%:*}"
+
+    if [ -z "$NAME" ]; then
+        # derive from the label: keep alnum, everything else -> "_", squeeze, trim
+        NAME=$(printf '%s' "$LABEL" | tr -c 'a-zA-Z0-9' '_' \
+               | sed 's/__*/_/g; s/^_//; s/_$//' | cut -c1-12 | sed 's/_$//')
+    fi
+    case "$NAME" in ''|*[!a-zA-Z0-9_-]*) NAME="" ;; esac
+    [ -n "$NAME" ] || NAME="wg$(date +%s | cut -c6-)"
+    [ ${#NAME} -gt 12 ] && NAME=$(printf '%s' "$NAME" | cut -c1-12 | sed 's/_$//')
+
+    # uniquify rather than rejecting: two servers can share a label
+    BASE="$NAME"; n=2
+    while [ -n "$(uci -q get network.wg_$NAME)" ]; do
+        suf="_$n"
+        NAME="$(printf '%s' "$BASE" | cut -c1-$((12 - ${#suf})) | sed 's/_$//')$suf"
+        n=$((n+1))
+        [ "$n" -gt 20 ] && { printf '{"ok":false,"error":"too many tunnels with that name"}'; exit 0; }
+    done
+    IFACE="wg_$NAME"
+
+    [ -n "$IPK" ] || { printf '{"ok":false,"error":"no PrivateKey in [Interface]"}'; exit 0; }
+    [ -n "$PPK" ] || { printf '{"ok":false,"error":"no PublicKey in [Peer]"}'; exit 0; }
+    [ -n "$PEP" ] || { printf '{"ok":false,"error":"no Endpoint in [Peer]"}'; exit 0; }
+    # base64 key sanity (44 chars ending '=')
+    case "$IPK" in *[!A-Za-z0-9+/=]*) printf '{"ok":false,"error":"malformed PrivateKey"}'; exit 0 ;; esac
+    case "$PPK" in *[!A-Za-z0-9+/=]*) printf '{"ok":false,"error":"malformed PublicKey"}'; exit 0 ;; esac
+
+    EHOST="${PEP%:*}"; EPORT="${PEP##*:}"
+    case "$EPORT" in ''|*[!0-9]*) EPORT=51820 ;; esac
+    [ -n "$PAIP" ] || PAIP="0.0.0.0/0"
+    [ -n "$IMTU" ] || IMTU=1420
+
+    # --- write the interface ---
+    uci set network.$IFACE=interface
+    uci set network.$IFACE.proto='wireguard'
+    uci set network.$IFACE.private_key="$IPK"
+    uci set network.$IFACE.mtu="$IMTU"
+    # netifd ignores options it doesn't know, so this rides along harmlessly and
+    # gets preserved by config backup/sysupgrade.
+    uci set network.$IFACE.label="$LABEL"
+    uci -q delete network.$IFACE.addresses
+    old_ifs="$IFS"; IFS=','
+    for a in $IADDR; do
+        a=$(printf '%s' "$a" | tr -d ' ')
+        [ -n "$a" ] && uci add_list network.$IFACE.addresses="$a"
+    done
+    IFS="$old_ifs"
+    [ -n "$IDNS" ] && uci set network.$IFACE.dns="$(printf '%s' "$IDNS" | tr -d ' ' | tr ',' ' ')"
+    # keep it down until the user explicitly connects
+    uci set network.$IFACE.disabled='1'
+    uci set network.$IFACE.auto='0'
+
+    # --- write the peer ---
+    PSEC="wgpeer_$NAME"
+    uci set network.$PSEC=wireguard_$IFACE
+    uci set network.$PSEC.public_key="$PPK"
+    uci set network.$PSEC.endpoint_host="$EHOST"
+    uci set network.$PSEC.endpoint_port="$EPORT"
+    uci set network.$PSEC.route_allowed_ips='0'
+    [ -n "$PPSK" ] && uci set network.$PSEC.preshared_key="$PPSK"
+    [ -n "$PKA" ] && uci set network.$PSEC.persistent_keepalive="$PKA"
+    uci -q delete network.$PSEC.allowed_ips
+    old_ifs="$IFS"; IFS=','
+    for a in $PAIP; do
+        a=$(printf '%s' "$a" | tr -d ' ')
+        [ -n "$a" ] && uci add_list network.$PSEC.allowed_ips="$a"
+    done
+    IFS="$old_ifs"
+
+    # --- firewall: put it in a masquerading wg zone (create once) ---
+    ZONE=""
+    for z in $(uci -q show firewall | sed -n 's/^firewall\.\(@zone\[[0-9]*\]\)\.name=.wg.$/\1/p'); do ZONE="$z"; done
+    if [ -z "$ZONE" ]; then
+        ZONE=$(uci add firewall zone)
+        uci set firewall.$ZONE.name='wg'
+        uci set firewall.$ZONE.input='REJECT'
+        uci set firewall.$ZONE.output='ACCEPT'
+        uci set firewall.$ZONE.forward='REJECT'
+        uci set firewall.$ZONE.masq='1'
+        uci set firewall.$ZONE.mtu_fix='1'
+        for src in lan iot guest; do
+            f=$(uci add firewall forwarding)
+            uci set firewall.$f.src="$src"
+            uci set firewall.$f.dest='wg'
+        done
+    fi
+    cur=$(uci -q get firewall.$ZONE.network)
+    case " $cur " in *" $IFACE "*) ;; *) uci add_list firewall.$ZONE.network="$IFACE" ;; esac
+
+    uci commit network; uci commit firewall
+    /etc/init.d/firewall reload >/dev/null 2>&1 &
+    printf '{"ok":true,"action":"add","name":"%s","label":"%s","iface":"%s","endpoint":"%s:%s"}' \
+        "$(esc "$NAME")" "$(esc "$LABEL")" "$(esc "$IFACE")" "$(esc "$EHOST")" "$EPORT"
+    exit 0
+fi
+
+# ============================ DELETE ============================
+if [ "$ACTION" = "del" ]; then
+    [ "$(qs_get pw)" = "$PASSWORD" ] || { printf '{"ok":false,"error":"wrong password"}'; exit 0; }
+    NAME=$(qs_get name)
+    case "$NAME" in ''|*[!a-zA-Z0-9_-]*) printf '{"ok":false,"error":"bad name"}'; exit 0 ;; esac
+    IFACE="wg_$NAME"
+    [ -n "$(uci -q get network.$IFACE)" ] || { printf '{"ok":false,"error":"not found"}'; exit 0; }
+    ifdown "$IFACE" >/dev/null 2>&1
+    uci -q delete network.$IFACE
+    uci -q delete network.wgpeer_$NAME
+    # drop from the wg firewall zone
+    for z in $(uci -q show firewall | sed -n 's/^firewall\.\(@zone\[[0-9]*\]\)\.name=.wg.$/\1/p'); do
+        uci -q del_list firewall.$z.network="$IFACE"
+    done
+    # drop any pbr rules bound to it
+    for r in $(uci -q show pbr | sed -n "s/^pbr\.\(@policy\[[0-9]*\]\)\.interface='$IFACE'$/\1/p"); do
+        uci -q delete pbr.$r
+    done
+    uci commit network; uci commit firewall; uci commit pbr
+    ( /etc/init.d/firewall reload >/dev/null 2>&1; sync_pbr ) >/dev/null 2>&1 &
+    printf '{"ok":true,"action":"del","name":"%s"}' "$(esc "$NAME")"
+    exit 0
+fi
+
+# ============================ UP / DOWN ============================
+if [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ]; then
+    NAME=$(qs_get name)
+    case "$NAME" in ''|*[!a-zA-Z0-9_-]*) printf '{"ok":false,"error":"bad name"}'; exit 0 ;; esac
+    IFACE="wg_$NAME"
+    [ -n "$(uci -q get network.$IFACE)" ] || { printf '{"ok":false,"error":"not found"}'; exit 0; }
+    # pbr refuses to start if ANY enabled policy points at an interface it can't
+    # see, and it aborts wholesale rather than skipping that one policy. So the
+    # tunnel state and pbr must be resequenced together: bring the link up (or
+    # down) FIRST, wait for it to settle, then re-apply pbr. Without this, setting
+    # a device route before connecting left pbr dead and all traffic on plain WAN.
+    if [ "$ACTION" = "up" ]; then
+        uci set network.$IFACE.disabled='0'; uci set network.$IFACE.auto='1'
+        uci commit network
+        ( ifup "$IFACE" >/dev/null 2>&1
+          i=0
+          while [ $i -lt 15 ]; do
+              ip link show "$IFACE" >/dev/null 2>&1 && break
+              i=$((i+1)); sleep 1
+          done
+          sleep 1
+          sync_pbr ) >/dev/null 2>&1 &
+    else
+        uci set network.$IFACE.disabled='1'; uci set network.$IFACE.auto='0'
+        uci commit network
+        ( ifdown "$IFACE" >/dev/null 2>&1; sleep 2; sync_pbr ) >/dev/null 2>&1 &
+    fi
+    printf '{"ok":true,"action":"%s","name":"%s"}' "$ACTION" "$(esc "$NAME")"
+    exit 0
+fi
+
+# ============ ASSIGN / UNASSIGN A DEVICE (pbr policy by MAC) ============
+if [ "$ACTION" = "route" ]; then
+    MAC=$(qs_get_dec mac); NAME=$(qs_get name)
+    MAC=$(printf '%s' "$MAC" | tr 'a-f' 'A-F')
+    case "$MAC" in
+        [0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]) ;;
+        *) printf '{"ok":false,"error":"bad mac"}'; exit 0 ;;
+    esac
+    # remove any existing policy for this MAC first (a device routes one way)
+    for r in $(uci -q show pbr | grep -i "src_addr='$MAC'" | sed -n 's/^pbr\.\(@policy\[[0-9]*\]\)\..*$/\1/p' | sort -ru); do
+        uci -q delete pbr.$r
+    done
+    # ---- tear down any previous IPv6 block for this MAC ----
+    # (per-device DNS is regenerated wholesale by rebuild_vpn_dns at the end)
+    for r in $(uci -q show firewall | sed -n "s/^firewall\.\(@rule\[[0-9]*\]\)\.name='vpn6_$MAC'\$/\1/p" | sort -r); do
+        uci -q delete firewall.$r
+    done
+
+    WARN=""
+    if [ -n "$NAME" ]; then
+        case "$NAME" in *[!a-zA-Z0-9_-]*) printf '{"ok":false,"error":"bad name"}'; exit 0 ;; esac
+        IFACE="wg_$NAME"
+        [ -n "$(uci -q get network.$IFACE)" ] || { printf '{"ok":false,"error":"tunnel not found"}'; exit 0; }
+        p=$(uci add pbr policy)
+        uci set pbr.$p.name="dash_$MAC"
+        uci set pbr.$p.src_addr="$MAC"
+        uci set pbr.$p.interface="$IFACE"
+        # sync_pbr decides the final enabled state from whether the link exists,
+        # so a route set before connecting no longer wedges pbr.
+        uci set pbr.$p.enabled='1'
+        ip link show "$IFACE" >/dev/null 2>&1 || \
+            WARN="tunnel is not connected — press Connect to activate this route"
+
+        VDNS=$(uci -q get network.$IFACE.dns | awk '{print $1}')
+
+        # ---- close the IPv6 bypass ----
+        # pbr only marks IPv4 (ipv6_enabled=0) and these Proton tunnels carry no
+        # IPv6 address, so any v6 traffic would exit via the ISP in clear. Today
+        # the LAN is ULA-only so nothing can actually get out, but the moment a
+        # real prefix appears that becomes a silent full-traffic leak. Reject v6
+        # egress for VPN'd devices; they fall back to IPv4, i.e. the tunnel.
+        fr=$(uci add firewall rule)
+        uci set firewall.$fr.name="vpn6_$MAC"
+        uci set firewall.$fr.src='lan'
+        uci set firewall.$fr.dest='wan'
+        uci set firewall.$fr.family='ipv6'
+        uci set firewall.$fr.src_mac="$MAC"
+        uci set firewall.$fr.target='REJECT'
+        uci commit firewall
+    fi
+    uci commit pbr; uci commit firewall
+    # sync_pbr first (it settles the enabled flags rebuild_vpn_dns reads from)
+    ( sync_pbr; rebuild_vpn_dns; /etc/init.d/firewall reload >/dev/null 2>&1 ) >/dev/null 2>&1 &
+    printf '{"ok":true,"action":"route","mac":"%s","tunnel":"%s","dns":"%s","warn":"%s"}' \
+        "$(esc "$MAC")" "$(esc "$NAME")" "$(esc "$VDNS")" "$(esc "$WARN")"
+    exit 0
+fi
+
+# ============================ LIST (read) ============================
+# Public metadata only — private keys are deliberately never emitted.
+TUNS=""
+for s in $(uci -q show network | sed -n "s/^network\.\([A-Za-z0-9_-]*\)=interface$/\1/p"); do
+    [ "$(uci -q get network.$s.proto)" = "wireguard" ] || continue
+    nm="${s#wg_}"
+    lbl=$(uci -q get network.$s.label); [ -n "$lbl" ] || lbl="$nm"
+    dis=$(uci -q get network.$s.disabled); [ -n "$dis" ] || dis=0
+    addrs=$(uci -q get network.$s.addresses | tr ' ' ',')
+    dns=$(uci -q get network.$s.dns | tr ' ' ',')
+    mtu=$(uci -q get network.$s.mtu)
+    ph=$(uci -q get network.wgpeer_$nm.endpoint_host)
+    pp=$(uci -q get network.wgpeer_$nm.endpoint_port)
+    aips=$(uci -q get network.wgpeer_$nm.allowed_ips | tr ' ' ',')
+    pub=$(uci -q get network.wgpeer_$nm.public_key)
+    # runtime state
+    up=false; rx=0; tx=0; hs=0
+    if ip link show "$s" >/dev/null 2>&1; then
+        up=true
+        line=$(wg show "$s" dump 2>/dev/null | sed -n 2p)
+        if [ -n "$line" ]; then
+            hs=$(printf '%s' "$line" | awk '{print $5}')
+            rx=$(printf '%s' "$line" | awk '{print $6}')
+            tx=$(printf '%s' "$line" | awk '{print $7}')
+        fi
+    fi
+    case "$hs" in ''|*[!0-9]*) hs=0 ;; esac
+    case "$rx" in ''|*[!0-9]*) rx=0 ;; esac
+    case "$tx" in ''|*[!0-9]*) tx=0 ;; esac
+    TUNS="$TUNS${TUNS:+,}{\"name\":\"$(esc "$nm")\",\"label\":\"$(esc "$lbl")\",\"iface\":\"$(esc "$s")\",\"disabled\":$( [ "$dis" = "1" ] && echo true || echo false ),\"up\":$up,\"addresses\":\"$(esc "$addrs")\",\"dns\":\"$(esc "$dns")\",\"mtu\":\"$(esc "$mtu")\",\"endpoint\":\"$(esc "$ph"):$(esc "$pp")\",\"allowed_ips\":\"$(esc "$aips")\",\"public_key\":\"$(esc "$pub")\",\"rx\":$rx,\"tx\":$tx,\"handshake\":$hs}"
+done
+
+POLS=""
+idx=0
+while :; do
+    p=$(uci -q get pbr.@policy[$idx] 2>/dev/null) || break
+    [ -n "$p" ] || break
+    sa=$(uci -q get pbr.@policy[$idx].src_addr)
+    inf=$(uci -q get pbr.@policy[$idx].interface)
+    en=$(uci -q get pbr.@policy[$idx].enabled)
+    case "$sa" in
+        [0-9A-Fa-f][0-9A-Fa-f]:*)
+            POLS="$POLS${POLS:+,}{\"mac\":\"$(esc "$sa")\",\"iface\":\"$(esc "$inf")\",\"enabled\":$( [ "$en" = "0" ] && echo false || echo true )}" ;;
+    esac
+    idx=$((idx+1))
+    [ "$idx" -gt 64 ] && break
+done
+
+FM=$(cat "$FAILMODE_FILE" 2>/dev/null); case "$FM" in open|closed) ;; *) FM=closed ;; esac
+AUTOP=$(grep -c . /etc/dashboard/vpn-autopaused 2>/dev/null); case "$AUTOP" in ''|*[!0-9]*) AUTOP=0 ;; esac
+printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"failmode":"%s","autopaused":%s,"tunnels":[%s],"policies":[%s]}' \
+    "$(date +%s)" \
+    "$( [ "$(uci -q get pbr.config.enabled)" = "1" ] && echo true || echo false )" \
+    "$FM" "$AUTOP" \
+    "$TUNS" "$POLS"

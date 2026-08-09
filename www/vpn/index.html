@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>VPN — Beryl 7</title>
+<link rel="stylesheet" href="/os.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="spine"></aside>
+  <main class="main">
+    <div class="topline"></div>
+
+    <header class="head">
+      <div>
+        <h1 class="head__t">VPN</h1>
+        <p class="head__s" id="subtitle">Decide which devices leave through a tunnel and which go straight out.</p>
+      </div>
+      <div class="head__aside">
+        <button class="btn btn--primary" id="addBtn"></button>
+      </div>
+    </header>
+
+    <div id="alerts"></div>
+
+    <!-- The routed path, drawn directly on the page. -->
+    <div class="face--open">
+      <div style="overflow-x:auto;scrollbar-width:none">
+        <div id="vpnmap" style="padding:4px 0 10px"></div>
+      </div>
+    </div>
+
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h">
+          <span class="panel__t">Tunnels</span>
+          <div class="panel__aside"><span class="row__cap" id="tunCount"></span><span class="hslot" id="actSlot"></span></div>
+        </div>
+        <div class="panel__b panel__b--flush" id="tunnels">
+          <div class="panel__b" style="padding:16px 24px"><div class="sk" style="width:60%"></div>
+            <div class="sk" style="width:44%;margin-top:10px"></div></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h">
+          <span class="panel__t">Device routing</span>
+          <div class="panel__aside">
+            <span class="row__cap" id="polCount"></span>
+            <button class="btn btn--ghost btn--sm" id="rescanDev" title="Scan for devices" aria-label="Scan for devices"></button>
+          </div>
+        </div>
+        <div class="panel__b panel__b--flush" id="devices"></div>
+      </section>
+    </div>
+
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h"><span class="panel__t">If a tunnel goes down</span></div>
+        <div class="panel__b" id="failmode" style="padding-top:4px"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<nav class="mobilebar" aria-label="Sections"></nav>
+
+<script src="/os.js"></script>
+<script>
+(function () {
+'use strict';
+var API = '/cgi-bin/vpn-api', DASH = '/cgi-bin/dashboard-api';
+var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
+
+OS.buildShell('/vpn/');
+
+var devices = [];        /* from dashboard-api, fetched rarely on purpose */
+var routeOpen = {};      /* mac -> selector expanded (mobile), survives polls */
+var devicesLoaded = false;
+var expanded = {};
+var last = null;
+
+$('#addBtn').appendChild(OS.icon('plus'));
+$('#addBtn').appendChild(document.createTextNode('Add tunnel'));
+OS.dockAction('#actSlot');
+$('#rescanDev').appendChild(OS.icon('search'));
+
+/* vertical routed map for phones: same vocabulary, chain runs down */
+var MQMAP = matchMedia('(max-width: 640px)');
+if (MQMAP.addEventListener) MQMAP.addEventListener('change', function () {
+    /* the route rows carry mobile-only interaction attributes, so they have to
+       be rebuilt on a breakpoint change too — not just the map */
+    if (last) { renderMap(last); renderDevices(last); }
+});
+function renderMapV(d) {
+    var box = $('#vpnmap'); clear(box);
+    var now = d.ts || Math.floor(Date.now() / 1e3);
+    var pol = (d.policies || []).filter(function (p) { return p.enabled; });
+    var byIface = {};
+    pol.forEach(function (p) { (byIface[p.iface] = byIface[p.iface] || []).push(p.mac.toUpperCase()); });
+    var used = (d.tunnels || []).filter(function (t) { return byIface[t.iface]; })
+        .sort(function (a, b) { return (a.label || a.name).localeCompare(b.label || b.name); });
+    if (!used.length) {
+        var e = OS.emptyState('Nothing is routed through a tunnel',
+            'Every device is using the normal uplink. Pick a tunnel for a device below and its ' +
+            'path is drawn here.', 'routing');
+        e.style.padding = '4px 0 12px';
+        box.appendChild(e);
+        return;
+    }
+    function nameOf(mac) {
+        var v = devices.filter(function (x) { return x.mac === mac; })[0];
+        return v ? v.name : mac;
+    }
+    var sv = OS.sv, svtext = OS.svtext;
+    var W = 360, LX = 34, NW = W - LX - 14, cx = LX + 20;
+    var H = 0;
+    used.forEach(function (t) { H += byIface[t.iface].length * 20 + 14 + 34 + 14 + 44 + 14 + 30 + 22; });
+    var s2 = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, 'class': 'topo',
+                         preserveAspectRatio: 'xMidYMin meet' });
+    s2.style.width = '100%'; s2.style.height = 'auto';
+    var y = 4;
+    used.forEach(function (t) {
+        var macs = byIface[t.iface];
+        var up = !t.disabled && t.up && t.handshake && (now - t.handshake) <= 200;
+        var cls = up ? 'on' : 'off';
+        macs.forEach(function (m) {
+            s2.appendChild(sv('path', { 'class': 'link ' + cls,
+                d: 'M' + cx + ' ' + (y + 6) + ' H' + (cx + 16) }));
+            s2.appendChild(svtext(cx + 24, y + 10, nameOf(m), 't1'));
+            y += 20;
+        });
+        var trunkTop = y - 14;
+        y += 6;
+        s2.appendChild(sv('path', { 'class': 'link ' + cls,
+            d: 'M' + cx + ' ' + trunkTop + ' V' + (y + 0) }));
+        if (up) s2.appendChild(sv('path', { 'class': 'flow',
+            d: 'M' + cx + ' ' + trunkTop + ' V' + (y + 34 + 14 + 44 + 14) }));
+        s2.appendChild(sv('rect', { 'class': 'nodebox on', x: LX, y: y, width: 110, height: 30, rx: 2 }));
+        s2.appendChild(svtext(LX + 12, y + 19, 'Beryl 7', 't1'));
+        y += 30;
+        s2.appendChild(sv('path', { 'class': 'link ' + cls, d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
+        y += 14;
+        s2.appendChild(sv('rect', { 'class': 'nodebox ' + (up ? 'on' : 'bad'),
+            x: LX, y: y, width: NW, height: 44, rx: 2 }));
+        s2.appendChild(svtext(LX + 12, y + 18, t.label || t.name, 't1'));
+        s2.appendChild(svtext(LX + 12, y + 34,
+            up ? 'handshake ' + OS.ago(t.handshake, now)
+               : (t.disabled ? 'off' : 'no handshake'), 't2'));
+        y += 44;
+        s2.appendChild(sv('path', { 'class': 'link ' + cls, d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
+        y += 14;
+        var ep = (t.endpoint || '').split(':')[0];
+        s2.appendChild(svtext(LX, y + 12, ep || 'endpoint', 't1'));
+        s2.appendChild(svtext(LX, y + 27, up ? 'to the internet' : 'unreachable', 't2'));
+        y += 30 + 22;
+    });
+    box.appendChild(s2);
+}
+
+/* ------------------------------------------------------------ routed map -- */
+function renderMap(d) {
+    if (MQMAP.matches) { renderMapV(d); return; }
+    var box = $('#vpnmap'); clear(box);
+    var now = d.ts || Math.floor(Date.now() / 1e3);
+    var pol = (d.policies || []).filter(function (p) { return p.enabled; });
+    var byIface = {};
+    pol.forEach(function (p) { (byIface[p.iface] = byIface[p.iface] || []).push(p.mac.toUpperCase()); });
+    var used = (d.tunnels || []).filter(function (t) { return byIface[t.iface]; })
+        .sort(function (a, b) { return (a.label || a.name).localeCompare(b.label || b.name); });
+
+    if (!used.length) {
+        var e = OS.emptyState('Nothing is routed through a tunnel',
+            'Every device is using the normal uplink. Pick a tunnel for a device below and its ' +
+            'path is drawn here.', 'routing');
+        e.style.padding = '8px 0 16px';
+        box.appendChild(e);
+        return;
+    }
+    function nameOf(mac) {
+        var v = devices.filter(function (x) { return x.mac === mac; })[0];
+        return v ? v.name : mac;
+    }
+
+    var sv = OS.sv, svtext = OS.svtext;
+    var W = 940, rowH = 48;
+    var lanes = used.map(function (t) { return { t: t, macs: byIface[t.iface] }; });
+    var H = 26 + lanes.reduce(function (a, L) {
+        return a + Math.max(rowH, L.macs.length * 22 + 26); }, 0);
+    var s2 = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, 'class': 'topo',
+                         preserveAspectRatio: 'xMinYMid meet' });
+    s2.style.height = H + 'px'; s2.style.minWidth = '620px';
+
+    var y = 20;
+    var colDev = 16, colRouter = 296, colTun = 462, colNet = 756;
+    s2.appendChild(svtext(colDev, 10, 'Device', 'cap'));
+    s2.appendChild(svtext(colRouter, 10, 'Router', 'cap'));
+    s2.appendChild(svtext(colTun, 10, 'Tunnel', 'cap'));
+    s2.appendChild(svtext(colNet + 8, 10, 'Exit', 'cap'));
+
+    lanes.forEach(function (L) {
+        var t = L.t;
+        var up = !t.disabled && t.up && t.handshake && (now - t.handshake) <= 200;
+        var laneH = Math.max(rowH, L.macs.length * 22 + 26);
+        var mid = y + laneH / 2;
+        var cls = up ? 'on' : 'off';
+
+        L.macs.forEach(function (m, i) {
+            var ty = y + 14 + i * 22;
+            s2.appendChild(svtext(colDev, ty + 4, nameOf(m), 't1'));
+            s2.appendChild(sv('path', { 'class': 'link ' + cls,
+                d: 'M' + (colDev + 236) + ' ' + ty + ' H' + colRouter }));
+            if (up) s2.appendChild(sv('path', { 'class': 'flow',
+                d: 'M' + (colDev + 236) + ' ' + ty + ' H' + colRouter }));
+        });
+
+        s2.appendChild(sv('rect', { 'class': 'nodebox on', x: colRouter, y: mid - 14,
+            width: 92, height: 28, rx: 2 }));
+        s2.appendChild(svtext(colRouter + 10, mid + 4, 'Beryl 7', 't1'));
+        s2.appendChild(sv('path', { 'class': 'link ' + cls,
+            d: 'M' + (colRouter + 92) + ' ' + mid + ' H' + colTun }));
+        if (up) s2.appendChild(sv('path', { 'class': 'flow',
+            d: 'M' + (colRouter + 92) + ' ' + mid + ' H' + colTun }));
+
+        s2.appendChild(sv('rect', { 'class': 'nodebox ' + (up ? 'on' : 'bad'),
+            x: colTun, y: mid - 20, width: 218, height: 40, rx: 2 }));
+        s2.appendChild(svtext(colTun + 12, mid - 2, t.label || t.name, 't1'));
+        s2.appendChild(svtext(colTun + 12, mid + 13,
+            up ? 'handshake ' + OS.ago(t.handshake, now)
+               : (t.disabled ? 'off' : 'no handshake'), 't2'));
+
+        s2.appendChild(sv('path', { 'class': 'link ' + cls,
+            d: 'M' + (colTun + 218) + ' ' + mid + ' H' + colNet }));
+        if (up) s2.appendChild(sv('path', { 'class': 'flow',
+            d: 'M' + (colTun + 218) + ' ' + mid + ' H' + colNet }));
+
+        var ep = (t.endpoint || '').split(':')[0];
+        s2.appendChild(svtext(colNet + 8, mid - 2, ep || 'endpoint', 't1'));
+        s2.appendChild(svtext(colNet + 8, mid + 13,
+            up ? 'to the internet' : 'unreachable', 't2'));
+        y += laneH;
+    });
+    box.appendChild(s2);
+}
+
+/* --------------------------------------------------------------- tunnels - */
+function handshakeAge(t, now) {
+    if (!t.handshake) return null;
+    return now - t.handshake;
+}
+/* Live state is a state word, exactly like every other list row in the console
+   (clients, scan results, internet sources). Chips are reserved for inline
+   labels attached to a name — VPN, guest, Wi-Fi 7, 160 MHz. */
+function tunnelState(t, now) {
+    if (t.disabled) return { k: 'off', word: ['OFF', 'idle'], tone: 'idle' };
+    var a = handshakeAge(t, now);
+    if (!t.up) return { k: 'down', word: ['DOWN', 'bad'], tone: 'bad' };
+    if (a == null) return { k: 'connecting', word: ['CONNECTING', 'warn'], tone: 'warn' };
+    if (a > 200) return { k: 'stale', word: ['NO HANDSHAKE', 'bad'], tone: 'bad' };
+    return { k: 'up', word: ['CONNECTED', 'ok'], tone: null };
+}
+
+function renderTunnels(d) {
+    var box = $('#tunnels'); clear(box);
+    var now = d.ts || Math.floor(Date.now() / 1e3);
+    /* alphabetical everywhere a tunnel is listed, so the same server is always
+       in the same place whatever order the router returns them in */
+    var list = (d.tunnels || []).slice().sort(function (a, b) {
+        return (a.label || a.name).localeCompare(b.label || b.name);
+    });
+    setTxt($('#tunCount'), list.length ? list.length + ' configured' : '');
+
+    if (!list.length) {
+        box.appendChild(OS.emptyState('No tunnels yet',
+            'Use Add tunnel above to paste a WireGuard configuration or upload the .conf file. ' +
+            'Every device on this page can then route through it.',
+            'routing'));
+        return;
+    }
+    list.forEach(function (t) {
+        var s = tunnelState(t, now);
+        var r = el('div', 'row');
+        r.style.gridTemplateColumns = 'minmax(0,1fr) auto auto';
+        r.setAttribute('role', 'button'); r.setAttribute('tabindex', '0');
+        r.setAttribute('aria-expanded', expanded[t.name] ? 'true' : 'false');
+
+        var id = el('div', 'row__id');
+        var ic = el('div', 'row__ico'); ic.appendChild(OS.icon('routing'));
+        if (s.k === 'up') { ic.style.borderColor = 'var(--ac-line)'; ic.style.color = 'var(--ac-fg)'; }
+        id.appendChild(ic);
+        var txt = el('div'); txt.style.minWidth = '0';
+        txt.appendChild(el('div', 'row__nm', t.label || t.name));
+        /* endpoint only: MTU is a diagnostic, not something you scan a list by.
+           It stays in the expanded detail. */
+        var ep = (t.endpoint || '').split(':')[0];
+        txt.appendChild(el('div', 'row__sub', ep));
+        id.appendChild(txt);
+        r.appendChild(id);
+
+        var mid = el('div');
+        mid.appendChild(OS.stateWord(s.word[0], s.word[1]));
+        r.appendChild(mid);
+
+        var right = el('div'); right.style.cssText = 'text-align:right;min-width:88px';
+        var a = handshakeAge(t, now);
+        if (!t.disabled && t.up && a != null) {
+            right.appendChild(el('div', 'row__num', '↓ ' + OS.bytes(t.rx)));
+            right.appendChild(el('div', 'row__cap', 'handshake ' + OS.ago(t.handshake, now)));
+        } else {
+            /* no second line: the state chip beside it already says off/down/
+               connecting — repeating it here doubled the same word on one row */
+            right.appendChild(el('div', 'row__num', '—'));
+        }
+        r.appendChild(right);
+
+        function toggle() { expanded[t.name] = !expanded[t.name]; render(last); }
+        r.addEventListener('click', toggle);
+        r.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+        box.appendChild(r);
+        if (expanded[t.name]) box.appendChild(tunnelDetail(t, s, now, d));
+    });
+}
+
+function tunnelDetail(t, s, now, d) {
+    var box = el('div', 'det');
+    var acts = el('div', 'inline'); acts.style.marginBottom = '14px';
+
+    var toggleBtn = el('button', 'btn btn--sm' + (t.disabled ? ' btn--primary' : ''));
+    toggleBtn.appendChild(OS.icon('power'));
+    toggleBtn.appendChild(document.createTextNode(t.disabled ? 'Connect' : 'Disconnect'));
+    toggleBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        OS.act(toggleBtn, API, { action: t.disabled ? 'up' : 'down', name: t.name },
+            { ok: t.disabled ? 'Connecting ' + (t.label || t.name) + '…' : (t.label || t.name) + ' disconnected.',
+              delay: 2200 });
+    });
+    acts.appendChild(toggleBtn);
+
+    var users = (d.policies || []).filter(function (p) { return p.iface === t.iface && p.enabled; });
+    var delBtn = el('button', 'btn btn--sm btn--danger');
+    delBtn.appendChild(OS.icon('x'));
+    delBtn.appendChild(document.createTextNode('Delete'));
+    delBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        OS.askPassword('Delete ' + (t.label || t.name),
+            'The tunnel and its keys are removed from the router permanently.' +
+            (users.length ? ' ' + users.length + ' device' + (users.length > 1 ? 's are' : ' is') +
+             ' currently routed through it and will fall back to the normal uplink.' : ''),
+            'Delete', true
+        ).then(function (pw) {
+            if (pw == null) return;
+            OS.act(delBtn, API, { action: 'del', name: t.name, pw: pw },
+                { ok: (t.label || t.name) + ' deleted.', delay: 1200 });
+        });
+    });
+    acts.appendChild(delBtn);
+    box.appendChild(acts);
+
+    if (s.k === 'stale') {
+        var n = OS.note('The interface is up but the peer has not completed a handshake in ' +
+            OS.dur(now - t.handshake) + '. Devices pinned to this tunnel have no internet unless ' +
+            'the fallback below is set to keep them online.', 'bad');
+        n.style.marginBottom = '14px';
+        box.appendChild(n);
+    }
+
+    var dl = el('dl', 'kv');
+    function kv(k, v) {
+        if (v == null || v === '') return;
+        dl.appendChild(el('dt', null, k)); dl.appendChild(el('dd', null, String(v)));
+    }
+    kv('Interface', t.iface);
+    kv('Endpoint', t.endpoint);
+    kv('Addresses', (t.addresses || '').split(',').join('   '));
+    kv('DNS', (t.dns || '').split(',').join('   '));
+    kv('Allowed IPs', (t.allowed_ips || '').split(',').join('   '));
+    kv('MTU', t.mtu);
+    kv('Peer public key', t.public_key);
+    kv('Transferred', '↓ ' + OS.bytes(t.rx) + '   ↑ ' + OS.bytes(t.tx));
+    kv('Last handshake', t.handshake ? OS.ago(t.handshake, now) : 'never');
+    kv('Devices routed', users.length ? users.length : 'none');
+    box.appendChild(dl);
+    return box;
+}
+
+/* -------------------------------------------------------- device routing - */
+function loadDevices(force) {
+    if (devicesLoaded && !force) return Promise.resolve();
+    /* Device identity changes on the scale of minutes, tunnel state on the
+       scale of seconds. Fetching this once (and after a write) instead of on
+       every poll is the single biggest CPU saving on this page. */
+    return fetch(DASH, { cache: 'no-store' }).then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d || !d.ok) return;
+            var seen = {}, out = [];
+            (d.aps || []).forEach(function (a) {
+                /* IoT never routes through a VPN. Match the zone AND the SSID:
+                   the zone catches anything placed in iot, the name still holds
+                   if that SSID is ever moved onto another network. */
+                if (a.network === 'iot') return;
+                if ((a.info && a.info.ssid) === 'localhost') return;
+                ((a.assoc && a.assoc.results) || []).forEach(function (c) {
+                    var m = String(c.mac).toUpperCase();
+                    if (seen[m]) return; seen[m] = 1;
+                    push(m, a.band === '5g' ? '5 GHz' : '2.4 GHz', d);
+                });
+            });
+            (d.wired || []).forEach(function (w) {
+                var m = String(w.mac || '').toUpperCase();
+                if (!m || seen[m]) return; seen[m] = 1;
+                push(m, w.link === 'wired' ? 'Ethernet' : 'Not connected', d);
+            });
+            function push(m, how, d) {
+                var cm = (d.classmap || {})[m] || {}, h = (d.hosts || {})[m] || {},
+                    L = (d.leases || {})[m] || null;
+                out.push({
+                    mac: m, how: how, cls: cm.class || 'default',
+                    name: cm.name || (L && L.name && L.name !== '*' ? L.name : null) ||
+                          (h.name ? String(h.name).replace(/\.lan$/, '') : null) || m,
+                    ip: (L && L.ip) || cm.ip || (h.ipaddrs && h.ipaddrs[0]) || ''
+                });
+            }
+            out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+            devices = out; devicesLoaded = true;
+
+            /* This page has no uplink data of its own, which left the rail's
+               Uplink row as a placeholder here and live on every other page.
+               The device fetch already carries the answer, so name it — same
+               three words the Overview and USB pages use. It refreshes with
+               the device list rather than with the 10s poll, which is why the
+               row is filled from a known-good read rather than guessed. */
+            var UPN = { wan: 'Ethernet', wwan: 'Wi-Fi',
+                        tethering: 'USB', none: 'None' };
+            var ua = (d.uplink && d.uplink.active) || 'none';
+            OS.stage('source', UPN[ua] || ua, ua === 'none' ? 'fault' : 'live');
+        }).catch(function () { /* the tunnel view still works without it */ });
+}
+
+function renderDevices(d) {
+    var box = $('#devices'); clear(box);
+    /* Until the device fetch lands, `devices` is legitimately empty — rendering
+       the empty state here flashed "No devices to route" on every page load. */
+    if (!devicesLoaded) {
+        var sk = el('div', 'panel__b');
+        ['58%', '44%'].forEach(function (w) {
+            var b = el('div', 'sk'); b.style.width = w; b.style.marginBottom = '10px';
+            sk.appendChild(b);
+        });
+        box.appendChild(sk);
+        return;
+    }
+    var pol = {};
+    (d.policies || []).forEach(function (p) { if (p.enabled) pol[p.mac.toUpperCase()] = p.iface; });
+    var n = Object.keys(pol).length;
+    setTxt($('#polCount'), n ? n + ' routed through a tunnel' : 'all direct');
+
+    var tuns = (d.tunnels || []).slice().sort(function (a, b) {
+        return (a.label || a.name).localeCompare(b.label || b.name);
+    });
+    /* Offline devices are dropped: you cannot meaningfully route something that
+       is not here. The exception is a device that still HOLDS a policy — hiding
+       that would strand a rule with no way to clear it. */
+    var routable = devices.filter(function (v) {
+        return v.how !== 'Not connected' || pol[v.mac];
+    });
+    renderDevices.shown = routable.length;
+
+    if (!routable.length) {
+        box.appendChild(OS.emptyState('No devices to route',
+            'Connected devices on the main and guest networks appear here. Offline devices are ' +
+            'left out, and smart-home devices are excluded entirely — they never route through ' +
+            'a tunnel.', 'dev'));
+        return;
+    }
+    routable.forEach(function (v) {
+        var cur = pol[v.mac] || '';
+        var curT = tuns.filter(function (t) { return t.iface === cur; })[0];
+        var r = el('div', 'row row--route');
+        /* only a disclosure control on mobile; on desktop the select is resident
+           and the row is not interactive, so it must not claim to be */
+        if (MQMAP.matches) {
+            r.setAttribute('role', 'button');
+            r.setAttribute('tabindex', '0');
+            r.setAttribute('aria-expanded', routeOpen[v.mac] ? 'true' : 'false');
+        }
+
+        var id = el('div', 'row__id');
+        var ic = el('div', 'row__ico'); ic.appendChild(OS.icon(OS.CLASS_ICON[v.cls] || 'dev'));
+        if (cur) { ic.style.borderColor = 'var(--ac-line)'; ic.style.color = 'var(--ac-fg)'; }
+        id.appendChild(ic);
+        var txt = el('div'); txt.style.minWidth = '0';
+        txt.appendChild(el('div', 'row__nm', v.name));
+        txt.appendChild(el('div', 'row__sub', (v.ip || v.mac) + '  ·  ' + v.how));
+        /* the current route is always on the row; the selector is summoned */
+        txt.appendChild(el('div', 'routeline' + (curT ? ' routeline--vpn' : ''),
+            curT ? (curT.label || curT.name) + ' · VPN' : 'Direct · normal uplink'));
+        id.appendChild(txt);
+        r.appendChild(id);
+        r.appendChild(el('i', 'rcaret'));
+
+        var sel = el('select', 'select');
+        sel.setAttribute('aria-label', 'Internet route for ' + v.name);
+        sel.addEventListener('click', function (e) { e.stopPropagation(); });
+        var o0 = el('option', null, 'Direct · normal uplink'); o0.value = '';
+        sel.appendChild(o0);
+        tuns.forEach(function (t) {
+            var o = el('option', null, (t.label || t.name) + (t.disabled ? '  (off)' : ''));
+            o.value = t.name;
+            if (t.iface === cur) o.selected = true;
+            sel.appendChild(o);
+        });
+        sel.addEventListener('change', function () {
+            var name = sel.value, lbl = sel.options[sel.selectedIndex].textContent;
+            sel.disabled = true;
+            OS.post(API, { action: 'route', mac: v.mac, name: name }).then(function (j) {
+                sel.disabled = false;
+                if (j && j.ok) {
+                    delete routeOpen[v.mac];
+                    OS.toast(name
+                        ? v.name + ' now routes through ' + lbl.replace(/\s+\(off\)$/, '') + '.'
+                        : v.name + ' is back on the normal uplink.', 'ok');
+                    OS.tp.refresh(700);
+                } else {
+                    OS.toast('Could not change the route: ' + ((j && j.error) || 'unknown error') + '.', 'bad');
+                    OS.tp.refresh(200);
+                }
+            });
+        });
+        r.appendChild(sel);
+        function toggleRoute() {
+            if (!MQMAP.matches) return;
+            routeOpen[v.mac] = !routeOpen[v.mac];
+            r.setAttribute('aria-expanded', routeOpen[v.mac] ? 'true' : 'false');
+        }
+        r.addEventListener('click', toggleRoute);
+        r.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRoute(); }
+        });
+        box.appendChild(r);
+    });
+}
+
+/* ----------------------------------------------------------- fail-mode --- */
+function renderFailmode(d) {
+    var box = $('#failmode'); clear(box);
+    var mode = d.failmode === 'open' ? 'open' : 'closed';
+
+    var opts = [
+        ['closed', 'Block the device',
+         'Nothing leaks. A device pinned to a dead tunnel simply has no internet until the tunnel ' +
+         'recovers. This is the safe default.'],
+        ['open', 'Keep it online without the tunnel',
+         'If the tunnel stops answering for three minutes, the router temporarily sends the device ' +
+         'back to the normal uplink so it keeps working, then restores the tunnel route ' +
+         'automatically. Traffic is not private during that window.']
+    ];
+    opts.forEach(function (o) {
+        var lab = el('label');
+        lab.style.cssText = 'display:flex;gap:12px;align-items:flex-start;padding:12px;' +
+            'border:1px solid ' + (mode === o[0] ? 'var(--ac-line)' : 'var(--line-2)') + ';' +
+            'background:' + (mode === o[0] ? 'var(--ac-dim)' : 'transparent') + ';' +
+            'border-radius:var(--r);cursor:pointer;margin-bottom:8px';
+        var i = el('input'); i.type = 'radio'; i.name = 'fm'; i.value = o[0];
+        i.checked = mode === o[0];
+        i.style.cssText = 'margin:2px 0 0;flex:none;width:16px;height:16px;accent-color:var(--ac)';
+        lab.appendChild(i);
+        var t = el('div');
+        var b = el('div', null, o[1]); b.style.cssText = 'font-size:13px;font-weight:600;margin-bottom:3px';
+        t.appendChild(b);
+        var hh = el('div', 'hint', o[2]);
+        /* the selected card sits on --ac-dim, which lifts the ground enough that
+           --ink-3 drops to 3.5:1 — this line is prose, so it takes --ink-2. */
+        hh.style.cssText = 'margin-top:0;color:var(--ink-2)';
+        t.appendChild(hh);
+        lab.appendChild(t);
+        i.addEventListener('change', function () {
+            if (!i.checked) return;
+            OS.post(API, { action: 'failmode', mode: o[0] }).then(function (j) {
+                if (j && j.ok) { OS.toast('Fallback set to “' + o[1] + '”.', 'ok'); OS.tp.refresh(400); }
+                else { OS.toast('Could not change it: ' + ((j && j.error) || 'unknown error') + '.', 'bad'); OS.tp.refresh(200); }
+            });
+        });
+        box.appendChild(lab);
+    });
+
+    if (d.autopaused) {
+        var n = OS.note('Per-device routing is paused because a tunnel stopped responding. ' +
+            'It resumes on its own as soon as the handshake returns.', 'warn');
+        n.style.marginTop = '4px';
+        box.appendChild(n);
+    }
+
+    box.appendChild(el('div', 'rowsep'));
+    var row = el('div', 'inline');
+    var lbl = el('div');
+    lbl.style.cssText = 'font-size:12.5px;color:var(--ink-2);flex:1;min-width:200px';
+    lbl.textContent = 'Stuck with no internet away from home? This drops every device back to the ' +
+                      'normal uplink in one step.';
+    row.appendChild(lbl);
+    var pb = el('button', 'btn btn--sm');
+    pb.textContent = 'Pause all routing';
+    pb.addEventListener('click', function () {
+        OS.dialog({
+            title: 'Pause all VPN routing',
+            body: 'Every device goes back to the normal uplink immediately. Tunnels stay configured — ' +
+                  'set each device back afterwards from the list above.',
+            okText: 'Pause'
+        }).then(function (go) {
+            if (!go) return;
+            OS.act(pb, API, { action: 'pauseall' }, { ok: 'All devices are back on the normal uplink.' });
+        });
+    });
+    row.appendChild(pb);
+    box.appendChild(row);
+}
+
+/* -------------------------------------------------------------- add flow - */
+$('#addBtn').addEventListener('click', function () {
+    var wrap = el('div');
+    var f1 = el('div', 'field');
+    f1.appendChild(el('label', 'label', 'Name'));
+    var i1 = el('input', 'input');
+    i1.placeholder = 'UK London 640';
+    f1.appendChild(i1);
+    f1.appendChild(el('div', 'hint', 'Optional — leave it blank and the name is taken from the ' +
+        '.conf file, or from the filename when you upload one.'));
+    wrap.appendChild(f1);
+    var f2 = el('div', 'field');
+    f2.appendChild(el('label', 'label', 'WireGuard configuration'));
+    var ta = el('textarea', 'ta');
+    ta.placeholder = '[Interface]\nPrivateKey = …\nAddress = 10.2.0.2/32\nDNS = 10.2.0.1\n\n[Peer]\nPublicKey = …\nEndpoint = 1.2.3.4:51820\nAllowedIPs = 0.0.0.0/0, ::/0';
+    ta.spellcheck = false;
+    f2.appendChild(ta);
+
+    /* the .conf can be uploaded or dropped instead of pasted; the tunnel name
+       is read from the filename when the name field is still empty */
+    function readConf(file) {
+        if (!file) return;
+        var rd = new FileReader();
+        rd.onload = function () {
+            ta.value = String(rd.result || '');
+            if (!i1.value.trim()) {
+                i1.value = file.name.replace(/\.(conf|txt)$/i, '');
+            }
+            OS.toast('Loaded ' + file.name + '.', 'ok');
+        };
+        rd.onerror = function () { OS.toast('Could not read ' + file.name + '.', 'bad'); };
+        rd.readAsText(file);
+    }
+    var fi = el('input'); fi.type = 'file';
+    fi.accept = '.conf,.txt,text/plain'; fi.style.display = 'none';
+    fi.addEventListener('change', function () { readConf(fi.files && fi.files[0]); fi.value = ''; });
+    var upRow = el('div', 'inline'); upRow.style.marginTop = '8px';
+    var ub = el('button', 'btn btn--sm'); ub.type = 'button';
+    ub.appendChild(OS.icon('plus'));
+    ub.appendChild(document.createTextNode('Upload .conf file'));
+    ub.addEventListener('click', function () { fi.click(); });
+    upRow.appendChild(ub); upRow.appendChild(fi);
+    f2.appendChild(upRow);
+
+    /* The drop target is the WHOLE dialog, not just the textarea. Dropping a
+       file onto a browser is navigation by default, so a near-miss used to
+       replace the page with the .conf and silently lose the dialog — which
+       looks exactly like "I dropped it and nothing happened". */
+    function armDrop(zone) {
+        ['dragover', 'dragenter'].forEach(function (ev) {
+            zone.addEventListener(ev, function (e) {
+                e.preventDefault(); e.stopPropagation();
+                ta.style.borderColor = 'var(--sig)';
+                ta.style.boxShadow = '0 0 0 3px var(--sig-dim)';
+            });
+        });
+        ['dragleave', 'drop'].forEach(function (ev) {
+            zone.addEventListener(ev, function (e) {
+                if (ev === 'drop') {
+                    e.preventDefault(); e.stopPropagation();
+                    readConf(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+                }
+                ta.style.borderColor = ''; ta.style.boxShadow = '';
+            });
+        });
+    }
+    armDrop(ta);
+    setTimeout(function () {
+        var dlg = document.querySelector('.veil.on .dlg');
+        if (dlg) armDrop(dlg);
+    }, 0);
+
+    f2.appendChild(el('div', 'hint', 'Paste the whole .conf, upload it, or drag the file onto the box. ' +
+        'The private key is written straight to the router and never shown again.'));
+    wrap.appendChild(f2);
+
+    OS.dialog({
+        title: 'Add a WireGuard tunnel', body: wrap, okText: 'Add',
+        /* Stays open until the router actually accepts it. The old flow closed
+           first and reported by toast, so a rejected config vanished along with
+           everything the user had pasted. */
+        onSubmit: function () {
+            var nm = i1.value.trim(), cf = ta.value.trim();
+            if (!cf) return 'Paste the configuration, or upload the .conf file.';
+            if (!/\[Interface\]/i.test(cf) || !/PrivateKey/i.test(cf)) {
+                return 'That does not look like a WireGuard .conf — no [Interface] ' +
+                       'section or PrivateKey found.';
+            }
+            /* name is optional: the router derives it from the provider comment
+               in the .conf, and the upload path fills it from the filename */
+            return OS.post(API, { action: 'add', name: nm, conf: cf }).then(function (j) {
+                if (j && j.ok) {
+                    OS.toast((j.label || j.name || nm || 'Tunnel') + ' added.', 'ok');
+                    OS.tp.refresh(400);
+                    return true;
+                }
+                return 'The router refused it: ' + ((j && j.error) || 'unknown error');
+            });
+        }
+    });
+});
+$('#rescanDev').addEventListener('click', function () {
+    var b = this; b.classList.add('is-busy');
+    loadDevices(true).then(function () {
+        b.classList.remove('is-busy');
+        renderDevices.shown = 0;
+        if (last) { renderDevices(last); renderMap(last); }
+        /* count what the list actually shows, not everything the router knows */
+        var n = renderDevices.shown;
+        OS.toast(n === 1 ? '1 device found.' : n + ' devices found.', 'ok');
+    });
+});
+
+/* ----------------------------------------------------------------- boot -- */
+function render(d) {
+    if (!d || !d.ok) return;
+    last = d;
+    var alerts = $('#alerts'); clear(alerts);
+    /* pbr stops itself when no device is routed — that is the correct resting
+       state, not a fault. Alarming about it while the tunnel list is empty made
+       a normal idle page look broken. Only warn when something actually needs
+       pbr and it is not running. */
+    var wantsPbr = (d.policies || []).some(function (p) { return p.enabled; });
+    if (d.pbr_enabled === false && wantsPbr) {
+        var n = OS.note('Per-device routing is not running, so tunnel rules are not being ' +
+            'applied. Every device is going out through the normal uplink.', 'bad');
+        n.style.marginBottom = '12px';
+        alerts.appendChild(n);
+    }
+    var now = d.ts || Math.floor(Date.now() / 1e3);
+    var dead = (d.tunnels || []).filter(function (t) {
+        return !t.disabled && tunnelState(t, now).tone === 'bad';
+    });
+    if (dead.length) {
+        var n2 = OS.note(dead.map(function (t) { return t.label || t.name; }).join(', ') +
+            (dead.length > 1 ? ' are not passing traffic.' : ' is not passing traffic.') +
+            (d.failmode === 'open'
+                ? ' Devices on it will be released to the normal uplink automatically.'
+                : ' Devices pinned to it have no internet until it recovers.'), 'warn');
+        n2.style.marginBottom = '12px';
+        alerts.appendChild(n2);
+    }
+
+    var upCount = (d.tunnels || []).filter(function (t) { return !t.disabled && t.up; }).length;
+    var routed = (d.policies || []).filter(function (p) { return p.enabled; }).length;
+    OS.stage('routing', routed ? routed + ' tunnelled' : 'Direct',
+             dead.length ? 'fault' : routed ? 'live' : '');
+    setTxt($('#subtitle'), (d.tunnels || []).length
+        ? upCount + ' of ' + d.tunnels.length + ' tunnel' + (d.tunnels.length === 1 ? '' : 's') +
+          ' connected. ' + (routed ? routed + ' device' + (routed === 1 ? ' is' : 's are') +
+          ' routed through one.' : 'No device is using one.')
+        : 'Add a WireGuard configuration to start routing devices through a tunnel.');
+
+    renderMap(d);
+    renderTunnels(d);
+    renderDevices(d);
+    renderFailmode(d);
+}
+
+loadDevices().then(function () { if (last) { renderDevices(last); renderMap(last); } });
+/* 10s, matching the original: vpn-api costs ~310ms of router wall time per
+   call, and nothing here changes faster than a handshake interval. */
+OS.tp = new OS.Transport(API, render, { interval: 10000 });
+OS.tp.start();
+})();
+</script>
+</body>
+</html>

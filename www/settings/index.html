@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Settings — Beryl 7</title>
+<link rel="stylesheet" href="/os.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="spine"></aside>
+  <main class="main">
+    <div class="topline"></div>
+
+    <header class="head head--keep-title">
+      <div>
+        <h1 class="head__t">Settings</h1>
+        <p class="head__s" id="subtitle">The things worth changing. Every change asks for the router password.</p>
+      </div>
+    </header>
+
+    <!-- WIRELESS: the two radios side by side, each a self-contained form. -->
+    <div class="sect">
+      <span class="sect__t">Wireless</span>
+      <span class="sect__m" id="wifiMeta"></span>
+    </div>
+    <div class="face">
+      <div class="grid g2">
+        <section class="panel" id="p-radio0">
+          <div class="panel__h"><span class="panel__t">2.4 GHz</span>
+            <div class="panel__aside" id="st-radio0"></div></div>
+          <div class="panel__b" id="b-radio0"><div class="sk" style="width:60%"></div>
+            <div class="sk" style="width:45%;margin-top:10px"></div></div>
+        </section>
+        <section class="panel" id="p-radio1">
+          <div class="panel__h"><span class="panel__t">5 GHz</span>
+            <div class="panel__aside" id="st-radio1"></div></div>
+          <div class="panel__b" id="b-radio1"><div class="sk" style="width:60%"></div>
+            <div class="sk" style="width:45%;margin-top:10px"></div></div>
+        </section>
+      </div>
+      <section class="panel" style="border-top:1px solid var(--line)">
+        <div class="panel__h"><span class="panel__t">IoT network</span>
+          <div class="panel__aside" id="st-iot"></div></div>
+        <div class="panel__b" id="b-iot"></div>
+      </section>
+      <section class="panel" style="border-top:1px solid var(--line)">
+        <div class="panel__h"><span class="panel__t">Blocked devices</span>
+          <div class="panel__aside"><span class="row__cap" id="st-acl"></span></div></div>
+        <div class="panel__b" id="b-acl"></div>
+      </section>
+    </div>
+
+    <div class="sect"><span class="sect__t">Network</span></div>
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h"><span class="panel__t">LAN and DHCP</span>
+          <div class="panel__aside" id="st-lan"></div></div>
+        <div class="panel__b" id="b-lan"></div>
+      </section>
+      <!-- Phone only: on a wide screen this lives with the sources list it
+           governs, on the two uplink pages. -->
+      <section class="panel mob-only">
+        <div class="panel__h"><span class="panel__t">Internet sources</span></div>
+        <div class="panel__b" id="b-failover" style="padding-top:4px"></div>
+      </section>
+    </div>
+
+    <div class="sect"><span class="sect__t">System</span></div>
+    <div class="face">
+      <section class="panel">
+        <div class="panel__b" id="b-sys" style="padding-top:16px"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<nav class="mobilebar" aria-label="Sections"></nav>
+
+<script src="/os.js"></script>
+<script>
+(function () {
+'use strict';
+var API = '/cgi-bin/settings-api';
+var DASH = '/cgi-bin/dashboard-api';   /* owns radio restart + the MAC filter */
+var TETH = '/cgi-bin/tethering-api';   /* owns the uplink metrics */
+var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
+
+OS.buildShell('/settings/');
+
+var last = null;
+var dirty = {};          /* panel id -> true while the form differs from the router */
+
+function markDirty(id, on) {
+    dirty[id] = !!on;
+    var st = $('#st-' + id);
+    if (st) {
+        var cap = $('.unsaved', st);
+        if (on && !cap) {
+            var c = el('span', 'row__cap unsaved', 'unsaved changes');
+            c.style.color = 'var(--caution-fg)';
+            st.insertBefore(c, st.firstChild);
+        } else if (!on && cap) cap.parentNode.removeChild(cap);
+    }
+}
+function anyDirty() { for (var k in dirty) if (dirty[k]) return true; return false; }
+window.addEventListener('beforeunload', function (e) {
+    if (anyDirty()) { e.preventDefault(); e.returnValue = ''; }
+});
+
+/* ---------------------------------------------------------------- helpers -- */
+function field(labelTxt, input, hint) {
+    var f = el('div', 'field');
+    f.appendChild(el('label', 'label', labelTxt));
+    f.appendChild(input);
+    if (hint) f.appendChild(el('div', 'hint', hint));
+    return f;
+}
+function checkRow(labelTxt, checked) {
+    var lab = el('label');
+    lab.style.cssText = 'display:flex;gap:10px;align-items:center;cursor:pointer;' +
+        'font-size:12.5px;margin-bottom:14px';
+    var i = el('input'); i.type = 'checkbox'; i.checked = checked;
+    i.style.cssText = 'width:16px;height:16px;accent-color:var(--ac);flex:none;margin:0';
+    lab.appendChild(i);
+    lab.appendChild(el('span', null, labelTxt));
+    return { row: lab, input: i };
+}
+function applyRow() {
+    var row = el('div', 'inline'); row.style.marginTop = '4px';
+    var ap = el('button', 'btn btn--sm', 'Apply'); ap.type = 'button';
+    var rs = el('button', 'btn btn--ghost btn--sm', 'Reset'); rs.type = 'button';
+    row.appendChild(ap); row.appendChild(rs);
+    return { row: row, apply: ap, reset: rs };
+}
+/* dirty wiring: any input change flips the panel dirty and promotes Apply */
+function watch(panelId, root, applyBtn) {
+    ['input', 'change'].forEach(function (ev) {
+        root.addEventListener(ev, function () {
+            markDirty(panelId, true);
+            applyBtn.className = 'btn btn--primary btn--sm';
+        });
+    });
+}
+function nowLine(parts) {
+    var d = el('div', 'n');
+    d.style.cssText = 'font-size:11.5px;color:var(--ink-2);margin-bottom:12px';
+    d.textContent = parts.filter(Boolean).join('  ·  ');
+    return d;
+}
+function post(params, opts) {
+    return OS.post(API, params).then(function (j) {
+        if (j && j.ok) return j;
+        throw new Error((j && j.error) || 'unknown error');
+    });
+}
+
+/* ---------------------------------------------------------------- wireless -- */
+var GEN_ORDER = ['HT', 'VHT', 'HE', 'EHT'];
+var GEN_WIDTHS = { HT: [20, 40], VHT: [20, 40, 80, 160], HE: [20, 40, 80, 160], EHT: [20, 40, 80, 160] };
+
+/* Every mode the hardware offers at a given channel: widths up to the
+   channel's block limit, generations from the phy's own capability list. */
+function modesFor(radio, chan) {
+    var ci = radio.channels.filter(function (c) { return c.c === +chan; })[0];
+    var maxw = ci ? ci.maxw : 20;
+    var out = [];
+    [20, 40, 80, 160].forEach(function (w) {
+        if (w > maxw) return;
+        var grp = [];
+        GEN_ORDER.forEach(function (g) {
+            if (radio.gens.indexOf(g) < 0) return;
+            if (GEN_WIDTHS[g].indexOf(w) < 0) return;
+            grp.push(g + w);
+        });
+        if (grp.length) out.push({ w: w, modes: grp });
+    });
+    return out;
+}
+function fillModeSelect(sel, radio, chan, want) {
+    clear(sel);
+    var groups = modesFor(radio, chan);
+    var found = false;
+    groups.forEach(function (g) {
+        var og = el('optgroup');
+        og.label = g.w + ' MHz';
+        g.modes.forEach(function (m) {
+            var o = el('option', null, m); o.value = m;
+            if (m === want) { o.selected = true; found = true; }
+            og.appendChild(o);
+        });
+        sel.appendChild(og);
+    });
+    /* Never silently pick something else: when the wanted mode does not exist
+       on this channel, show that state and make the user choose. */
+    if (want && !found) {
+        var o = el('option', null, want + ' — not available on channel ' + chan);
+        o.value = ''; o.disabled = true; o.selected = true;
+        sel.insertBefore(o, sel.firstChild);
+    }
+    return found;
+}
+
+function renderRadio(r) {
+    var box = $('#b-' + r.id);
+    var st = $('#st-' + r.id); clear(st);
+    var live = r.current;
+    if (r.disabled) st.appendChild(OS.stateWord('OFF', 'idle'));
+    else if (!live) st.appendChild(OS.stateWord('DOWN', 'bad'));
+    else st.appendChild(OS.stateWord('UP', 'ok'));
+
+    /* never repaint over unsaved edits — and re-pin the unsaved chip the
+       state-word repaint above just cleared away */
+    if (dirty[r.id]) { markDirty(r.id, true); return; }
+    clear(box);
+
+    if (live) {
+        box.appendChild(nowLine([
+            'now ch ' + live.channel, live.freq + ' MHz', live.width + ' MHz wide',
+            'center ' + live.center, live.txpower + ' dBm', 'region ' + r.country
+        ]));
+    } else {
+        box.appendChild(nowLine([r.disabled ? 'radio is off' : 'no access point running',
+                                 'region ' + r.country]));
+    }
+
+    /* configured-vs-running divergence, stated only when true */
+    var cfgW = parseInt(String(r.htmode).replace(/^[A-Z]+/, ''), 10) || 20;
+    if (live && !r.disabled) {
+        if (String(live.channel) !== String(r.channel) || live.width !== cfgW) {
+            var msg = 'Configured ' + r.htmode + ' on channel ' + r.channel +
+                      '; running ' + live.width + ' MHz on channel ' + live.channel + '.';
+            if (r.band === '2g' && live.width < cfgW) {
+                msg += ' On 2.4 GHz, coexistence with neighbouring networks can force the width down.';
+            } else {
+                msg += ' The radio negotiated this itself; the configured value is still what it aims for.';
+            }
+            /* desktop only: on a phone this is a paragraph of explanation
+               standing between you and the controls */
+            var n = OS.note(msg, null);
+            n.className += ' note--deskonly';
+            n.style.marginBottom = '14px';
+            box.appendChild(n);
+        }
+    }
+
+    var form = el('div');
+    var ssid = el('input', 'input'); ssid.value = r.ssid; ssid.maxLength = 32;
+    form.appendChild(field('Network name', ssid));
+
+    var key = el('input', 'input'); key.type = 'password';
+    key.placeholder = 'unchanged'; key.autocomplete = 'new-password'; key.maxLength = 63;
+    form.appendChild(field('Wi-Fi password', key, 'Leave blank to keep the current password.'));
+
+    var chSel = el('select', 'select');
+    r.channels.forEach(function (c) {
+        var o = el('option', null, c.c + '  ·  ' + c.f + ' MHz' + (c.dfs ? '  ·  DFS' : ''));
+        o.value = c.c;
+        if (String(c.c) === String(r.channel)) o.selected = true;
+        chSel.appendChild(o);
+    });
+    form.appendChild(field('Channel', chSel));
+
+    var modeSel = el('select', 'select');
+    fillModeSelect(modeSel, r, r.channel, r.htmode);
+    var modeField = field('Mode', modeSel,
+        'Width and PHY generation. Only combinations this channel supports are listed.');
+    form.appendChild(modeField);
+
+    var txSel = el('select', 'select');
+    [['', 'Maximum'], ['20', '20 dBm'], ['17', '17 dBm'], ['14', '14 dBm'], ['10', '10 dBm'], ['7', '7 dBm']]
+        .forEach(function (o) {
+            var op = el('option', null, o[1]); op.value = o[0];
+            if (String(r.txpower == null ? '' : r.txpower) === o[0]) op.selected = true;
+            txSel.appendChild(op);
+        });
+    form.appendChild(field('Transmit power', txSel,
+        'Maximum is the regulatory limit for the region. Both bands share one chip, so lowering ' +
+        'one can briefly clamp the other until it reloads.'));
+
+    var en = checkRow('Radio enabled', !r.disabled);
+    form.appendChild(en.row);
+
+    var ar = applyRow();
+    /* recovery, not configuration: kick the band without touching the form */
+    var band = r.band === '2g' ? '2.4 GHz' : '5 GHz';
+    var rst = el('button', 'btn btn--ghost btn--sm', 'Restart radio');
+    rst.type = 'button';
+    rst.style.marginLeft = 'auto';
+    rst.addEventListener('click', function () {
+        OS.askPassword('Restart the ' + band + ' radio',
+            'Every device on ' + band + ' disconnects and reconnects by itself, typically within ' +
+            '15 seconds. Devices on the other band are not affected.', 'Restart').then(function (pw) {
+            if (pw == null) return;
+            OS.act(rst, DASH, { action: r.band === '2g' ? 'fix24g' : 'fix5g', pw: pw },
+                { ok: band + ' radio is restarting.', delay: 4000 });
+        });
+    });
+    ar.row.appendChild(rst);
+    form.appendChild(ar.row);
+    box.appendChild(form);
+    watch(r.id, form, ar.apply);
+
+    /* the mode offer follows the channel; a now-invalid choice blocks Apply */
+    chSel.addEventListener('change', function () {
+        var ok = fillModeSelect(modeSel, r, chSel.value, modeSel.value || r.htmode);
+        ar.apply.disabled = !ok && !modeSel.value;
+    });
+    modeSel.addEventListener('change', function () { ar.apply.disabled = !modeSel.value; });
+
+    ar.reset.addEventListener('click', function () {
+        markDirty(r.id, false);
+        renderRadio(r);
+    });
+    ar.apply.addEventListener('click', function () {
+        if (!modeSel.value) return;
+        var turningOff = !en.input.checked && !r.disabled;
+        var body = turningOff
+            ? 'This turns the ' + (r.band === '2g' ? '2.4 GHz' : '5 GHz') + ' radio off. Every device on it ' +
+              'loses Wi-Fi until the radio is enabled again.'
+            : 'Applying reloads the ' + (r.band === '2g' ? '2.4 GHz' : '5 GHz') + ' radio: devices on it drop ' +
+              'for 10–15 seconds and rejoin on their own. If this device is one of them, the page loses ' +
+              'contact briefly and recovers.';
+        OS.askPassword('Apply ' + (r.band === '2g' ? '2.4 GHz' : '5 GHz') + ' settings', body,
+                       'Apply', turningOff).then(function (pw) {
+            if (pw == null) return;
+            OS.act(ar.apply, API, {
+                action: 'setwifi', pw: pw, radio: r.id,
+                ssid: ssid.value, key: key.value,
+                channel: chSel.value, htmode: modeSel.value,
+                txpower: txSel.value, enabled: en.input.checked ? 1 : 0
+            }, { ok: 'Applied. The radio is reloading.', delay: 6000, failPrefix: 'Not applied' })
+              .then(function (j) { if (j && j.ok) markDirty(r.id, false); });
+        });
+    });
+}
+
+function renderIot(d) {
+    var iot = d.wireless.iot;
+    var st = $('#st-iot'); clear(st);
+    st.appendChild(iot.disabled ? OS.stateWord('OFF', 'idle') : OS.stateWord('UP', 'ok'));
+    if (dirty.iot) { markDirty('iot', true); return; }
+    var box = $('#b-iot'); clear(box);
+
+    box.appendChild(nowLine(['2.4 GHz', 'isolated — its devices cannot reach the main network']));
+
+    var form = el('div');
+    var g = el('div', 'fgrid');
+    var ssid = el('input', 'input'); ssid.value = iot.ssid; ssid.maxLength = 32;
+    g.appendChild(field('Network name', ssid));
+    var key = el('input', 'input'); key.type = 'password';
+    key.placeholder = 'unchanged'; key.autocomplete = 'new-password'; key.maxLength = 63;
+    g.appendChild(field('Wi-Fi password', key));
+    form.appendChild(g);
+    var en = checkRow('Network enabled', !iot.disabled);
+    form.appendChild(en.row);
+    var ar = applyRow();
+    form.appendChild(ar.row);
+    box.appendChild(form);
+    watch('iot', form, ar.apply);
+
+    ar.reset.addEventListener('click', function () { markDirty('iot', false); renderIot(d); });
+    ar.apply.addEventListener('click', function () {
+        OS.askPassword('Apply IoT network settings',
+            'Applying reloads the 2.4 GHz radio briefly — smart-home devices drop and rejoin on their own.',
+            'Apply', !en.input.checked && !iot.disabled).then(function (pw) {
+            if (pw == null) return;
+            OS.act(ar.apply, API, {
+                action: 'setiot', pw: pw, ssid: ssid.value, key: key.value,
+                enabled: en.input.checked ? 1 : 0
+            }, { ok: 'Applied. The radio is reloading.', delay: 6000, failPrefix: 'Not applied' })
+              .then(function (j) { if (j && j.ok) markDirty('iot', false); });
+        });
+    });
+}
+
+/* ---------------------------------------------------------------- blocked -- */
+/* The MAC filter lives in dashboard-api (it owns the wireless sections), so
+   this panel reads it from there — fetched once and after each change, not on
+   the poll: the block list changes only when someone changes it. */
+var acl = null;          /* { devices:[{mac,name}], aps:[{section,ssid,band}], blocked:[...] } */
+var BANDNAME = { '2g': '2.4 GHz', '5g': '5 GHz' };
+
+function loadAcl() {
+    return fetch(DASH, { cache: 'no-store' }).then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d || !d.ok) return;
+            var seen = {}, devs = [];
+            function nameOf(mac) {
+                var cm = (d.classmap || {})[mac] || {}, h = (d.hosts || {})[mac] || {},
+                    L = (d.leases || {})[mac] || null;
+                return cm.name || (L && L.name && L.name !== '*' ? L.name : null) ||
+                       (h.name ? String(h.name).replace(/\.lan$/, '') : null) || mac;
+            }
+            function add(mac) {
+                mac = String(mac || '').toUpperCase();
+                if (!mac || seen[mac]) return;
+                seen[mac] = 1;
+                devs.push({ mac: mac, name: nameOf(mac) });
+            }
+            /* Only what is connected right now. Blocking something that is not
+               here is a thing you would do by accident, not on purpose — and
+               the roster of every device ever seen made this a wall of names.
+               Already-blocked devices are absent by definition, so they are
+               listed separately below with their own Unblock. */
+            (d.aps || []).forEach(function (a) {
+                ((a.assoc && a.assoc.results) || []).forEach(function (s) { add(s.mac); });
+            });
+            (d.wired || []).forEach(function (w) { if (w.link === 'wired') add(w.mac); });
+            devs.sort(function (a, b) { return a.name.localeCompare(b.name); });
+
+            var aps = (d.aps || []).map(function (a) {
+                return { section: a.section, ssid: (a.info && a.info.ssid) || a.section, band: a.band };
+            });
+            var blocked = [];
+            (d.aps || []).forEach(function (a) {
+                if (a.macfilter !== 'deny') return;
+                (a.maclist || []).forEach(function (m) {
+                    m = String(m).toUpperCase();
+                    blocked.push({ mac: m, name: nameOf(m), section: a.section,
+                                   ssid: (a.info && a.info.ssid) || a.section });
+                });
+            });
+            acl = { devices: devs, aps: aps, blocked: blocked };
+            renderAcl();
+        }).catch(function () { /* panel keeps its last state; the rest of the page is unaffected */ });
+}
+
+function setAcl(name, mac, section, ssid, block, btn) {
+    OS.askPassword(block ? 'Block ' + name : 'Unblock ' + name,
+        block
+          ? 'It will be disconnected from “' + ssid + '” immediately and refused when it tries to ' +
+            'reassociate. Other networks on this router are unaffected.'
+          : 'It will be allowed to associate with “' + ssid + '” again.',
+        block ? 'Block' : 'Unblock', block
+    ).then(function (pw) {
+        if (pw == null) return;
+        OS.act(btn, DASH, { action: 'aclset', pw: pw, mac: mac, sec: section, block: block ? 1 : 0 },
+            { ok: block ? 'Blocked. The radio is reloading.' : 'Unblocked.', refresh: false })
+          .then(function (j) { if (j && j.ok) setTimeout(loadAcl, 3000); });
+    });
+}
+
+function renderAcl() {
+    if (!acl) return;
+    setTxt($('#st-acl'), acl.blocked.length ? acl.blocked.length + ' blocked' : '');
+    var box = $('#b-acl');
+    var devSel = $('#acl-dev', box), secSel = $('#acl-sec', box);
+    var pd = devSel && devSel.value, ps = secSel && secSel.value;
+    clear(box);
+
+    box.appendChild(el('div', 'hint',
+        'Blocking applies to one SSID on one band — a device blocked on 5 GHz can still join ' +
+        '2.4 GHz unless blocked there too. It takes effect immediately and survives reboots.'))
+        .style.margin = '0 0 12px';
+
+    if (!acl.devices.length) {
+        box.appendChild(el('div', 'hint', 'Nothing is connected to block right now.'))
+            .style.margin = '0 0 12px';
+    } else {
+        var g = el('div', 'fgrid');
+        devSel = el('select', 'select'); devSel.id = 'acl-dev';
+        devSel.setAttribute('aria-label', 'Device to block');
+        acl.devices.forEach(function (v) {
+            var o = el('option', null, v.name); o.value = v.mac;
+            devSel.appendChild(o);
+        });
+        g.appendChild(field('Device', devSel));
+        secSel = el('select', 'select'); secSel.id = 'acl-sec';
+        secSel.setAttribute('aria-label', 'Network to block it on');
+        acl.aps.forEach(function (a) {
+            var o = el('option', null, a.ssid + '  ·  ' + (BANDNAME[a.band] || a.band));
+            o.value = a.section;
+            secSel.appendChild(o);
+        });
+        g.appendChild(field('Network', secSel));
+        box.appendChild(g);
+        if (pd) devSel.value = pd;
+        if (ps) secSel.value = ps;
+
+        /* Block only. A blocked device is by definition not connected, so it can
+           never appear in the picker above — unblocking belongs to the list
+           below, where the blocked devices actually are. */
+        var row = el('div', 'inline');
+        var bb = el('button', 'btn btn--sm btn--danger', 'Block');
+        bb.addEventListener('click', function () {
+            var v = acl.devices.filter(function (x) { return x.mac === devSel.value; })[0];
+            var a = acl.aps.filter(function (x) { return x.section === secSel.value; })[0];
+            if (v && a) setAcl(v.name, v.mac, a.section, a.ssid, true, bb);
+        });
+        row.appendChild(bb);
+        box.appendChild(row);
+    }
+
+    box.appendChild(el('div', 'rowsep'));
+    if (!acl.blocked.length) {
+        box.appendChild(el('div', 'hint', 'No device is blocked on any SSID.'));
+        return;
+    }
+    acl.blocked.forEach(function (bk) {
+        var r = el('div', 'inline'); r.style.marginBottom = '7px';
+        var t = el('span', null, bk.name + ' — ' + bk.ssid);
+        t.style.cssText = 'font-size:12px;flex:1;min-width:120px';
+        r.appendChild(t);
+        var b = el('button', 'btn btn--sm', 'Unblock');
+        b.addEventListener('click', function () {
+            setAcl(bk.name, bk.mac, bk.section, bk.ssid, false, b);
+        });
+        r.appendChild(b);
+        box.appendChild(r);
+    });
+}
+
+/* --------------------------------------------------------------- failover -- */
+/* Fetched only when the phone layout is showing it, and only on demand — this
+   setting changes about once a trip, so it has no business on a poll. */
+var MQF = matchMedia('(max-width: 900px)');
+function loadFailover() {
+    var box = $('#b-failover');
+    if (!box || !MQF.matches) return;
+    fetch(TETH, { cache: 'no-store' }).then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d || !d.ok) return;
+            OS.failoverControl(box, d.uplinks || [], loadFailover);
+        }).catch(function () { /* the rest of the page is unaffected */ });
+}
+if (MQF.addEventListener) MQF.addEventListener('change', loadFailover);
+
+/* -------------------------------------------------------------------- lan -- */
+function ipOk(ip) {
+    var m = String(ip).match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (!m) return false;
+    for (var i = 1; i <= 4; i++) if (+m[i] > 255) return false;
+    var a = +m[1], b = +m[2];
+    if (!(a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31))) return false;
+    return +m[4] >= 1 && +m[4] <= 254;
+}
+function renderLan(d) {
+    if (dirty.lan) return;
+    var box = $('#b-lan'); clear(box);
+    var lan = d.lan;
+
+    var form = el('div');
+    var ip = el('input', 'input'); ip.value = lan.ipaddr;
+    ip.inputMode = 'decimal'; ip.autocomplete = 'off'; ip.spellcheck = false;
+    var ls = el('select', 'select');
+    [['30m', '30 minutes'], ['1h', '1 hour'], ['6h', '6 hours'], ['12h', '12 hours'],
+     ['24h', '24 hours'], ['72h', '3 days']].forEach(function (o) {
+        var op = el('option', null, o[1]); op.value = o[0];
+        if (lan.dhcp.leasetime === o[0]) op.selected = true;
+        ls.appendChild(op);
+    });
+    /* two columns so the form does not stretch a single input across the whole
+       page now that this panel owns the full width */
+    var g0 = el('div', 'fgrid');
+    g0.appendChild(field('Router address', ip,
+        'Subnet mask stays 255.255.255.0 — a /24 network.'));
+    g0.appendChild(field('Lease time', ls,
+        'How long a device keeps its address before renewing.'));
+    form.appendChild(g0);
+
+    var g = el('div', 'fgrid');
+    var ds = el('input', 'input'); ds.type = 'number'; ds.min = 2; ds.max = 254; ds.value = lan.dhcp.start;
+    g.appendChild(field('DHCP pool starts at', ds));
+    var dl = el('input', 'input'); dl.type = 'number'; dl.min = 1; dl.max = 253; dl.value = lan.dhcp.limit;
+    g.appendChild(field('Pool size', dl));
+    form.appendChild(g);
+    var poolHint = el('div', 'hint');
+    poolHint.style.margin = '-6px 0 14px';
+    form.appendChild(poolHint);
+    function updPool() {
+        var base = ip.value.replace(/\.\d+$/, '');
+        var s = +ds.value || 0, n = +dl.value || 0;
+        poolHint.textContent = (s >= 2 && n >= 1 && s + n - 1 <= 254)
+            ? 'Devices get addresses ' + base + '.' + s + ' – ' + base + '.' + (s + n - 1) + '.'
+            : 'That range does not fit inside the /24.';
+    }
+    ['input', 'change'].forEach(function (ev) {
+        ip.addEventListener(ev, updPool); ds.addEventListener(ev, updPool); dl.addEventListener(ev, updPool);
+    });
+    updPool();
+
+    var ar = applyRow();
+    form.appendChild(ar.row);
+    box.appendChild(form);
+    watch('lan', form, ar.apply);
+
+    ar.reset.addEventListener('click', function () { markDirty('lan', false); renderLan(d); });
+    ar.apply.addEventListener('click', function () {
+        if (!ipOk(ip.value)) { OS.toast('That is not a usable private IPv4 address.', 'bad'); return; }
+        var moving = ip.value !== lan.ipaddr;
+        var body = moving
+            ? 'The router moves to ' + ip.value + '. Every device gets a new address, this page goes ' +
+              'unreachable, and you must reopen it at http://' + ip.value + '/settings/ — write that down first.'
+            : 'DHCP changes apply immediately; devices pick them up when their lease renews.';
+        OS.askPassword('Apply LAN settings', body, 'Apply', moving).then(function (pw) {
+            if (pw == null) return;
+            OS.act(ar.apply, API, {
+                action: 'setlan', pw: pw, ipaddr: ip.value,
+                start: ds.value, limit: dl.value, leasetime: ls.value
+            }, { ok: 'Applied.', delay: 1500, failPrefix: 'Not applied' }).then(function (j) {
+                if (!(j && j.ok)) return;
+                markDirty('lan', false);
+                if (j.moved) movedOverlay(j.moved);
+            });
+        });
+    });
+}
+function movedOverlay(newIp) {
+    OS.tp.stop();
+    var veil = el('div', 'veil on');
+    var dlg = el('div', 'dlg');
+    dlg.appendChild(el('div', 'dlg__h')).appendChild(el('div', 'dlg__t', 'The router is moving'));
+    var b = el('div', 'dlg__b');
+    var p = el('div', null, 'The router is switching to ' + newIp + ' now. Wait for your device to pick up ' +
+        'a new address — usually under a minute — then reopen the console at its new home.');
+    p.style.cssText = 'font-size:12.5px;line-height:1.55;color:var(--ink-2)';
+    b.appendChild(p);
+    var a = el('a', 'btn btn--primary', 'Open http://' + newIp + '/settings/');
+    a.href = 'http://' + newIp + '/settings/';
+    a.style.marginTop = '16px';
+    b.appendChild(a);
+    dlg.appendChild(b);
+    veil.appendChild(dlg);
+    document.body.appendChild(veil);
+}
+
+/* DNS had no control of any kind — it was an explainer on a page whose job is
+   configuration. Removed; the resolver chain still lives in LuCI. */
+
+/* ------------------------------------------------------------------ system -- */
+var ZONES = [
+    ['Asia/Jakarta', 'Jakarta (WIB, UTC+7)'], ['Asia/Makassar', 'Makassar (WITA, UTC+8)'],
+    ['Asia/Jayapura', 'Jayapura (WIT, UTC+9)'], ['Asia/Singapore', 'Singapore (UTC+8)'],
+    ['Asia/Tokyo', 'Tokyo (UTC+9)'], ['Asia/Dubai', 'Dubai (UTC+4)'],
+    ['Europe/London', 'London (GMT/BST)'], ['Europe/Amsterdam', 'Amsterdam (CET/CEST)'],
+    ['America/New_York', 'New York (ET)'], ['America/Los_Angeles', 'Los Angeles (PT)'],
+    ['Australia/Sydney', 'Sydney (AEST/AEDT)'], ['UTC', 'UTC']
+];
+function renderSys(d) {
+    if (dirty.sys) return;
+    var box = $('#b-sys'); clear(box);
+    var sys = d.system;
+
+    var form = el('div');
+    var g = el('div', 'fgrid');
+    var hn = el('input', 'input'); hn.value = sys.hostname; hn.maxLength = 24;
+    hn.autocomplete = 'off'; hn.spellcheck = false;
+    g.appendChild(field('Hostname', hn, 'Letters, digits and hyphens.'));
+    var tz = el('select', 'select');
+    var known = false;
+    ZONES.forEach(function (z) {
+        var o = el('option', null, z[1]); o.value = z[0];
+        if (sys.zonename === z[0]) { o.selected = true; known = true; }
+        tz.appendChild(o);
+    });
+    if (!known && sys.zonename) {
+        var o = el('option', null, sys.zonename); o.value = sys.zonename;
+        o.selected = true; o.disabled = true;
+        tz.insertBefore(o, tz.firstChild);
+    }
+    g.appendChild(field('Time zone', tz, 'Daily traffic totals roll over at midnight in this zone.'));
+    form.appendChild(g);
+
+    form.appendChild(nowLine(['time sync NTP ' + (sys.ntp ? 'on' : 'off'),
+                              'up ' + OS.dur(sys.uptime)]));
+
+    var ar = applyRow();
+    form.appendChild(ar.row);
+    box.appendChild(form);
+    watch('sys', form, ar.apply);
+    ar.reset.addEventListener('click', function () { markDirty('sys', false); renderSys(d); });
+    ar.apply.addEventListener('click', function () {
+        OS.askPassword('Apply system settings',
+            'Hostname and time zone update immediately. Nothing disconnects.', 'Apply').then(function (pw) {
+            if (pw == null) return;
+            OS.act(ar.apply, API, { action: 'setsys', pw: pw, hostname: hn.value, zonename: tz.value },
+                   { ok: 'Applied.', delay: 1200, failPrefix: 'Not applied' })
+              .then(function (j) { if (j && j.ok) markDirty('sys', false); });
+        });
+    });
+
+    box.appendChild(el('div', 'rowsep'));
+    var row = el('div', 'inline');
+    var lbl = el('div');
+    lbl.style.cssText = 'font-size:12.5px;color:var(--ink-2);flex:1;min-width:200px';
+    lbl.textContent = 'Restarting takes about a minute. Wi-Fi, the VPN tunnels and the IoT network all ' +
+        'drop and come back on their own.';
+    row.appendChild(lbl);
+    var rb = el('button', 'btn btn--sm btn--danger', 'Restart router');
+    rb.addEventListener('click', function () {
+        OS.askPassword('Restart the router',
+            'Everything drops — Wi-Fi, VPN tunnels, the IoT network — while the router boots. ' +
+            'This page reconnects on its own when it is back.',
+            'Restart', true).then(function (pw) {
+            if (pw == null) return;
+            post({ action: 'reboot', pw: pw }).then(function () { rebootOverlay(); },
+                function (e) { OS.toast('Not restarted: ' + e.message + '.', 'bad'); });
+        });
+    });
+    row.appendChild(rb);
+    box.appendChild(row);
+}
+function rebootOverlay() {
+    OS.tp.stop();
+    var veil = el('div', 'veil on');
+    var dlg = el('div', 'dlg');
+    dlg.appendChild(el('div', 'dlg__h')).appendChild(el('div', 'dlg__t', 'Restarting'));
+    var b = el('div', 'dlg__b');
+    var p = el('div', null, 'The router is rebooting. This page reconnects when it is back — about a minute.');
+    p.style.cssText = 'font-size:12.5px;line-height:1.55;color:var(--ink-2)';
+    b.appendChild(p);
+    dlg.appendChild(b);
+    veil.appendChild(dlg);
+    document.body.appendChild(veil);
+    setTimeout(function poll() {
+        fetch(API, { cache: 'no-store' }).then(function (r) { return r.json(); })
+            .then(function (j) { if (j && j.ok) location.reload(); else setTimeout(poll, 3000); },
+                  function () { setTimeout(poll, 3000); });
+    }, 25000);
+}
+
+/* -------------------------------------------------------------------- boot -- */
+function render(d) {
+    if (!d || !d.ok) return;
+    last = d;
+    var radios = d.wireless.radios;
+    radios.forEach(renderRadio);
+    renderIot(d);
+    renderLan(d);
+    renderSys(d);
+    var up = radios.filter(function (r) { return r.current; }).length;
+    setTxt($('#wifiMeta'), up + ' of ' + radios.length + ' radios up');
+}
+loadAcl();
+loadFailover();
+
+/* Configuration barely moves on its own — poll gently, and only to keep the
+   live "now" lines and the configured-vs-running notes honest. */
+OS.tp = new OS.Transport(API, render, { interval: 15000 });
+OS.tp.start();
+})();
+</script>
+</body>
+</html>

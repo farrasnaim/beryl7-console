@@ -1,0 +1,88 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/15-travel-dns
+#
+# Make captive portals work while travelling WITHOUT giving up DoH at home.
+#
+# THE PROBLEM this exists to prevent (it stranded exactly this router's owner):
+# with https-dns-proxy the router runs dnsmasq in `no-resolv` mode and forwards
+# every query to the local DoH proxies (Cloudflare / Quad9 over :443).  On a
+# hotel / cafe uplink that :443 is BLOCKED until you sign in — so all DNS dies,
+# and worse, the captive portal never even appears, because portals work by
+# hijacking plaintext DNS and DoH gives them nothing to hijack.  Result: you
+# join the Wi-Fi, get an IP, and the sign-in page won't load.  No PC to fix it.
+#
+# THE FIX: while a *travel* uplink (wwan = Wi-Fi repeater, or tethering = USB)
+# owns the default route, add THAT uplink's DHCP-provided DNS server as an extra
+# dnsmasq server.  dnsmasq honours explicit `server=` lines even under no-resolv,
+# so the portal can hijack it, detection fires, and sign-in works.  Once you're
+# back on the home Ethernet WAN (or the uplink drops), the fallback is removed
+# and strict DoH resumes.  Nothing is committed to flash — the file lives in
+# dnsmasq's runtime conf-dir in /tmp.
+#
+# Trade-off, stated plainly: while travelling, DNS may use the local network's
+# resolver in addition to DoH (dnsmasq picks whichever answers first).  On an
+# untrusted network you are already exposing far more than DNS, and being able
+# to get online at all beats perfect DoH here.  It reverts automatically.
+
+TRAVEL_IFACES="wwan tethering"
+
+# Only care about events on the WAN-side interfaces that can change the picture.
+case " $TRAVEL_IFACES wan wan6 " in
+    *" $INTERFACE "*) ;;
+    *) exit 0 ;;
+esac
+case "$ACTION" in ifup|ifdown|ifupdate) ;; *) exit 0 ;; esac
+
+FALLBACK=""
+CONFDIR=""
+for _d in /tmp/dnsmasq.*.d; do [ -d "$_d" ] && CONFDIR="$_d" && break; done
+[ -n "$CONFDIR" ] || exit 0
+CONF="$CONFDIR/travel-dns.conf"
+
+# Which device currently owns the default route, and is it a travel uplink?
+DEFDEV=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+
+active_travel_iface=""
+for _if in $TRAVEL_IFACES; do
+    _l3=$(ubus call network.interface.$_if status 2>/dev/null \
+          | awk -F'"' '/"l3_device"/{print $4; exit}')
+    _up=$(ubus call network.interface.$_if status 2>/dev/null | grep -c '"up": true')
+    if [ -n "$_l3" ] && [ "$_l3" = "$DEFDEV" ] && [ "$_up" -gt 0 ]; then
+        active_travel_iface="$_if"; break
+    fi
+done
+
+if [ -n "$active_travel_iface" ]; then
+    # Prefer the DNS the uplink handed us; fall back to its gateway (which nearly
+    # always answers DNS on consumer/hotel gear and on phone hotspots).
+    dns=$(ubus call network.interface.$active_travel_iface status 2>/dev/null \
+          | awk '/"dns-server"/{f=1;next} f&&/\]/{f=0} f&&/"/{gsub(/[^0-9A-Fa-f.:]/,"");if($0!="")print}')
+    gw=$(ubus call network.interface.$active_travel_iface status 2>/dev/null \
+          | awk -F'"' '/"nexthop"/{print $4; exit}')
+    for _g in $dns $gw; do
+        case "$_g" in
+            *[0-9].[0-9]*|*:*) FALLBACK="$FALLBACK server=$_g
+" ;;
+        esac
+        [ -n "$dns" ] && break   # if the uplink gave real DNS, don't also add the gw
+    done
+fi
+
+# Idempotent: only touch dnsmasq if the desired state differs from the current
+# file. Prevents a restart storm from repeated ifupdate events.
+if [ -n "$FALLBACK" ]; then
+    NEW="# travel-dns: plaintext fallback while on '$active_travel_iface' (captive-portal support)
+$FALLBACK"
+    if [ ! -f "$CONF" ] || [ "$(cat "$CONF")" != "$NEW" ]; then
+        printf '%s' "$NEW" > "$CONF"
+        logger -t travel-dns "travel uplink '$active_travel_iface' active -> plaintext DNS fallback enabled for captive-portal sign-in"
+        /etc/init.d/dnsmasq restart >/dev/null 2>&1
+    fi
+else
+    if [ -f "$CONF" ]; then
+        rm -f "$CONF"
+        logger -t travel-dns "home/Ethernet WAN active -> strict DoH restored"
+        /etc/init.d/dnsmasq restart >/dev/null 2>&1
+    fi
+fi
+exit 0

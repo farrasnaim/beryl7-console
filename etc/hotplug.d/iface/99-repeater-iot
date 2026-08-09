@@ -1,0 +1,54 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/99-repeater-iot
+#
+# Travel automation: the IoT SSID ("localhost") only makes sense at home, where
+# the smart plugs/bulbs live. When the router joins an upstream Wi-Fi (repeater
+# mode) you are travelling and none of that hardware is present, so the SSID is
+# just an extra broadcast — take it down. Bring it back the moment the uplink
+# goes away.
+#
+# Driven by hotplug rather than the /repeater page so it holds however the
+# uplink changes: the web UI, LuCI, a reboot, or the hotel AP dropping out.
+
+[ "$INTERFACE" = "wwan" ] || exit 0
+
+IOT_SECTION="iot2g"
+LOCK=/tmp/.repeater-iot.lock
+LOG="logger -t repeater-iot"
+
+# nothing to do if the IoT SSID isn't configured on this router
+[ "$(uci -q get wireless.$IOT_SECTION)" = "wifi-iface" ] || exit 0
+
+case "$ACTION" in
+    ifup)   want_disabled=1 ;;   # uplink present -> travelling -> IoT off
+    ifdown) want_disabled=0 ;;   # uplink gone    -> home       -> IoT on
+    *) exit 0 ;;
+esac
+
+cur_disabled=$(uci -q get wireless.$IOT_SECTION.disabled)
+[ -n "$cur_disabled" ] || cur_disabled=0
+
+# Already in the desired state: do nothing. Without this guard every uplink
+# renewal/keepalive event would trigger another `wifi reload` and needlessly
+# bounce all Wi-Fi clients.
+[ "$cur_disabled" = "$want_disabled" ] && exit 0
+
+# Serialise: ifup/ifdown can fire in quick succession on a flapping uplink.
+exec 9>>"$LOCK"
+flock -n 9 2>/dev/null || exit 0
+
+uci set wireless.$IOT_SECTION.disabled="$want_disabled"
+uci commit wireless
+
+if [ "$want_disabled" = "1" ]; then
+    $LOG "uplink up -> disabling IoT SSID '$(uci -q get wireless.$IOT_SECTION.ssid)'"
+else
+    $LOG "uplink down -> re-enabling IoT SSID '$(uci -q get wireless.$IOT_SECTION.ssid)'"
+fi
+
+# Backgrounded: hotplug handlers should return promptly, and `wifi reload`
+# re-enters netifd (which is what invoked us).
+( sleep 1; wifi reload ) >/dev/null 2>&1 &
+
+flock -u 9 2>/dev/null
+exit 0

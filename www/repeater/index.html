@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Wi-Fi uplink — Beryl 7</title>
+<link rel="stylesheet" href="/os.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="spine"></aside>
+  <main class="main">
+    <div class="topline"></div>
+
+    <header class="head">
+      <div>
+        <h1 class="head__t">Wi-Fi uplink</h1>
+        <p class="head__s" id="subtitle">Use someone else’s Wi-Fi as this router’s internet connection.</p>
+      </div>
+      <div class="head__aside">
+        <button class="btn btn--primary" id="scanBtn"></button>
+      </div>
+    </header>
+
+    <div id="alerts"></div>
+
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h">
+          <span class="panel__t">Joined network</span>
+          <div class="panel__aside"><span id="upChip"></span><span class="hslot" id="actSlot"></span></div>
+        </div>
+        <div class="panel__b" id="uplink">
+          <div class="sk" style="width:48%"></div>
+          <div class="sk" style="width:66%;margin-top:10px"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Same panel as the USB page: the failover order governs both, so it is
+         settable from either one. -->
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h">
+          <span class="panel__t">Internet sources</span>
+          <div class="panel__aside"><span class="row__cap">lowest metric wins</span></div>
+        </div>
+        <div class="panel__b panel__b--flush" id="sources"></div>
+        <div class="panel__b desk-only" id="priority" style="border-top:1px solid var(--line);padding-top:16px"></div>
+      </section>
+    </div>
+
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h">
+          <span class="panel__t">Networks in range</span>
+          <div class="panel__aside"><span class="row__cap" id="scanMeta"></span></div>
+        </div>
+        <div class="panel__b panel__b--flush" id="scan"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<nav class="mobilebar" aria-label="Sections"></nav>
+
+<script src="/os.js"></script>
+<script>
+(function () {
+'use strict';
+var API = '/cgi-bin/repeater-api';
+var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
+
+OS.buildShell('/repeater/');
+
+var scanResults = null, scanAt = 0, scanning = false, last = null;
+
+$('#scanBtn').appendChild(OS.icon('search'));
+$('#scanBtn').appendChild(document.createTextNode('Scan'));
+OS.dockAction('#actSlot');
+
+/* --------------------------------------------------------------- uplink -- */
+function renderUplink(d) {
+    var box = $('#uplink'); clear(box);
+    var u = d.uplink || {}, w = d.wwan || {};
+    var chip = $('#upChip'); clear(chip);
+
+    if (!u.configured) {
+        chip.appendChild(OS.stateWord('NOT JOINED', 'idle'));
+        box.appendChild(OS.emptyState('Not joined to a network',
+            'Use Scan above to find networks, then pick one. The router keeps using its Ethernet ' +
+            'WAN until the Wi-Fi uplink actually connects, so nothing breaks while you set it up.',
+            'wifi'));
+        OS.stage('repeater', 'Not joined', '');
+        setTxt($('#subtitle'), 'Use someone else’s Wi-Fi as this router’s internet connection.');
+        return;
+    }
+
+    var connected = !!u.connected && !!w.up;
+    var carrying = d.default_route_dev && /^(phy|wlan|wwan)/.test(d.default_route_dev);
+    /* Same words, same component as this uplink's row in Internet sources
+       directly below — one fact must not render two ways on one screen. */
+    var state = d.connecting ? ['CONNECTING', 'warn'] :
+                connected ? (carrying ? ['CARRYING', 'ok'] : ['STANDBY', null]) :
+                !u.enabled ? ['OFF', 'idle'] : ['DOWN', 'bad'];
+    chip.appendChild(OS.stateWord(state[0], state[1]));
+
+    /* headline: SSID + live signal */
+    var head = el('div');
+    head.style.cssText = 'display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap';
+    var idb = el('div'); idb.style.minWidth = '0'; idb.style.flex = '1';
+    var nm = el('div');
+    nm.style.cssText = 'font-size:19px;font-weight:600;letter-spacing:-.02em;' +
+                       'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    nm.textContent = u.assoc_ssid || u.ssid || '(unnamed network)';
+    idb.appendChild(nm);
+    var sub = [];
+    if (u.radio) sub.push(u.radio === 'radio1' ? '5 GHz' : '2.4 GHz');
+    if (u.bssid) sub.push(u.bssid.toUpperCase());
+    if (u.encryption) sub.push(u.encryption === 'none' ? 'open' : u.encryption.toUpperCase());
+    idb.appendChild(el('div', 'row__sub', sub.join('   ·   ')));
+    head.appendChild(idb);
+
+    if (connected && u.signal) {
+        var sg = el('div'); sg.style.cssText = 'min-width:150px';
+        sg.appendChild(el('div', 'ro__k', 'Signal'));
+        var line = el('div');
+        line.style.cssText = 'display:flex;align-items:center;gap:9px;margin-top:6px';
+        var m = OS.rssiScale(u.signal, false);
+        m.style.width = '110px';
+        line.appendChild(m);
+        var t = el('span', 'n', u.signal + ' dBm'); t.style.fontSize = '12px';
+        line.appendChild(t);
+        sg.appendChild(line);
+        var qq = OS.quality(u.signal);
+        var wsp = el('div'); wsp.style.marginTop = '4px';
+        wsp.appendChild(OS.stateWord(qq.word, qq.tone === 'ok' ? 'ok' : qq.tone));
+        sg.appendChild(wsp);
+        head.appendChild(sg);
+    }
+    box.appendChild(head);
+
+    if (d.connecting) {
+        var p = OS.note('Associating and waiting for an address. This takes up to ' +
+            (d.connect_timeout || 20) + ' seconds; if it fails the router falls back to Ethernet ' +
+            'on its own.', 'warn');
+        p.style.margin = '14px 0 0';
+        box.appendChild(p);
+    } else if (connected) {
+        box.appendChild(el('div', 'rowsep'));
+        var strip = el('div');
+        strip.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px';
+        strip.appendChild(OS.readout('Address', w.ip || '—', '', 'given by that network', null, true));
+        strip.appendChild(OS.readout('Quality', (u.quality != null ? u.quality : '—'), '',
+            'link quality reported by the driver', null, true));
+        strip.appendChild(OS.readout('Role', carrying ? 'Carrying' : 'Standby', '',
+            carrying ? 'this is the active uplink' : 'Ethernet is preferred', null, true));
+        box.appendChild(strip);
+    }
+
+    /* actions */
+    box.appendChild(el('div', 'rowsep'));
+    var acts = el('div', 'inline');
+    var tb = el('button', 'btn btn--sm' + (u.enabled ? '' : ' btn--primary'));
+    tb.appendChild(OS.icon('power'));
+    tb.appendChild(document.createTextNode(u.enabled ? 'Disconnect' : 'Connect'));
+    tb.addEventListener('click', function () {
+        OS.act(tb, API, { action: u.enabled ? 'down' : 'up' },
+            { ok: u.enabled ? 'Wi-Fi uplink disconnected. Back on Ethernet.' : 'Connecting…', delay: 3000 });
+    });
+    acts.appendChild(tb);
+
+    var fb = el('button', 'btn btn--sm btn--danger');
+    fb.appendChild(OS.icon('x'));
+    fb.appendChild(document.createTextNode('Forget'));
+    fb.addEventListener('click', function () {
+        OS.dialog({
+            title: 'Forget “' + (u.ssid || 'this network') + '”',
+            body: 'The saved network and its password are removed. The router goes back to using its ' +
+                  'Ethernet WAN. You can add it again at any time by scanning.',
+            okText: 'Forget', danger: true
+        }).then(function (go) {
+            if (!go) return;
+            OS.act(fb, API, { action: 'del' }, { ok: 'Network forgotten.', delay: 2000 });
+        });
+    });
+    acts.appendChild(fb);
+    box.appendChild(acts);
+
+    OS.stage('repeater', connected ? (carrying ? 'Carrying the uplink' : 'Connected, standby')
+             : d.connecting ? 'Connecting…' : u.enabled ? 'Down' : 'Off',
+             connected ? 'live' : d.connecting ? 'warn' : u.enabled ? 'fault' : '');
+    setTxt($('#subtitle'), connected
+        ? 'Connected to ' + (u.assoc_ssid || u.ssid) + (carrying ? ' and carrying all internet traffic.' : '. Ethernet is still preferred.')
+        : d.connecting ? 'Joining ' + (u.ssid || 'the network') + '…'
+        : u.ssid ? 'Saved network “' + u.ssid + '” is not connected.'
+        : 'The saved network is not connected.');
+}
+
+/* --------------------------------------------------------------- alerts -- */
+function renderAlerts(d) {
+    var a = $('#alerts'); clear(a);
+    if (d.last_error) {
+        var n = OS.note(d.last_error, 'bad');
+        var b = el('button', 'btn btn--sm');
+        b.textContent = 'Dismiss';
+        b.style.marginLeft = 'auto';
+        b.addEventListener('click', function () {
+            OS.act(b, API, { action: 'clearerr' }, { ok: false, refresh: true });
+        });
+        n.appendChild(b);
+        n.style.marginBottom = '12px';
+        a.appendChild(n);
+    }
+    if (!d.wan_carrier && !(d.wwan && d.wwan.up)) {
+        var n2 = OS.note('No Ethernet cable is carrying a link and the wireless uplink is down, so the ' +
+            'router currently has no way out. Join a network below to get back online.', 'warn');
+        n2.style.marginBottom = '12px';
+        a.appendChild(n2);
+    }
+    OS.flagTab('/repeater/', !!d.last_error);
+
+    /* the rail's Uplink row, straight from the uplinks[] this page now serves —
+       no guessing from the device name any more */
+    var act = (d.uplinks || []).filter(function (u) { return u.active; })[0];
+    OS.stage('source', act ? act.label : 'None', act ? 'live' : 'fault');
+}
+
+/* ----------------------------------------------------------------- scan -- */
+function ownSsids(d) {
+    var s = {};
+    if (d.iot_ssid && d.iot_ssid.name) s[d.iot_ssid.name] = 1;
+    return s;
+}
+function renderScan(d) {
+    var box = $('#scan'); clear(box);
+    if (scanning) {
+        var l = el('div', 'panel__b');
+        ['64%', '48%', '57%', '41%'].forEach(function (w) {
+            var s = el('div', 'sk'); s.style.width = w; s.style.marginBottom = '11px';
+            l.appendChild(s);
+        });
+        box.appendChild(l);
+        setTxt($('#scanMeta'), 'sweeping both bands…');
+        return;
+    }
+    if (!scanResults) {
+        box.appendChild(OS.emptyState('Nothing scanned yet',
+            'Use Scan above — it sweeps both bands once and takes a few seconds. Your own networks ' +
+            'are shown greyed out so you do not join the router to itself.', 'search'));
+        setTxt($('#scanMeta'), '');
+        return;
+    }
+    var mine = ownSsids(d);
+    var seen = {}, list = [];
+    (scanResults || []).forEach(function (n) {
+        var key = n.ssid + '|' + (n.mhz > 3000 ? 5 : 2);
+        if (seen[key]) { if (n.signal > seen[key].signal) seen[key].signal = n.signal; return; }
+        seen[key] = n; list.push(n);
+    });
+    list.sort(function (a, b) { return b.signal - a.signal; });
+    setTxt($('#scanMeta'), list.length + ' found · ' + OS.ago(scanAt, Math.floor(Date.now() / 1e3)));
+
+    if (!list.length) {
+        box.appendChild(OS.emptyState('No networks found', 'Nothing is broadcasting within range.', 'search'));
+        return;
+    }
+    var cur = (d.uplink && d.uplink.ssid) || '';
+    list.forEach(function (n) {
+        var band = n.mhz > 3000 ? '5' : '2.4';
+        var isMine = !!mine[n.ssid];
+        var isCur = n.ssid === cur;
+        var hidden = n.ssid === '(hidden)' || !n.ssid;
+        var r = el('div', 'row row--entity');
+        r.style.gridTemplateColumns = 'minmax(0,1fr) auto auto';
+        if (isMine || hidden) r.style.cursor = 'default';
+        else { r.setAttribute('role', 'button'); r.setAttribute('tabindex', '0'); }
+
+        var id = el('div', 'row__id re-id');
+        var ic = el('div', 'row__ico'); ic.appendChild(OS.icon('wifi'));
+        if (isCur) { ic.style.borderColor = 'var(--ac-line)'; ic.style.color = 'var(--ac-fg)'; }
+        id.appendChild(ic);
+        var txt = el('div'); txt.style.minWidth = '0';
+        var top = el('div', 'row__title');
+        var nm = el('span', 'row__nm', hidden ? 'Hidden network' : n.ssid);
+        if (isMine || hidden) nm.style.color = 'var(--ink-3)';
+        top.appendChild(nm);
+        if (isCur) top.appendChild(OS.chip('saved', 'on'));
+        if (isMine) top.appendChild(OS.chip('this router', 'flat'));
+        if (!(n.encryption && n.encryption.enabled)) top.appendChild(OS.chip('open', 'warn'));
+        txt.appendChild(top);
+        txt.appendChild(el('div', 'row__sub',
+            band + ' GHz  ·  ch ' + n.channel + '  ·  ' + String(n.bssid || '').toUpperCase()));
+        id.appendChild(txt);
+        r.appendChild(id);
+
+        var sig = el('div', 're-sig');
+        sig.style.cssText = 'display:flex;align-items:center';
+        var m = OS.rssiScale(n.signal, true);
+        m.style.width = '64px';
+        m.title = n.signal + ' dBm';
+        sig.appendChild(m);
+        r.appendChild(sig);
+
+        var right = el('div', 're-state'); right.style.cssText = 'text-align:right;min-width:76px';
+        var q = OS.quality(n.signal);
+        right.appendChild(OS.stateWord(q.word, q.tone === 'ok' ? 'ok' : q.tone));
+        right.appendChild(el('div', 'row__cap', n.signal + ' dBm'));
+        r.appendChild(right);
+
+        if (!isMine && !hidden) {
+            var go = function () { join(n, band); };
+            r.addEventListener('click', go);
+            r.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+            });
+        }
+        box.appendChild(r);
+    });
+}
+
+function join(n, band) {
+    var open = !(n.encryption && n.encryption.enabled);
+    var body = 'The router will join this network on ' + band + ' GHz and use it for internet access. ' +
+        'Your own Wi-Fi keeps running unchanged — devices stay connected to it.' +
+        (open ? ' This network is unencrypted; anyone nearby can see traffic that is not already secured.' : '');
+    var opts = { title: 'Join “' + n.ssid + '”', body: body, okText: 'Join' };
+    if (!open) {
+        opts.field = { label: 'Network password', type: 'password',
+                       placeholder: 'password for ' + n.ssid,
+                       emptyMsg: 'This network needs a password.' };
+    }
+    OS.dialog(opts).then(function (v) {
+        if (v == null) return;
+        OS.toast('Joining ' + n.ssid + '…');
+        OS.post(API, { action: 'add', ssid: n.ssid, key: open ? '' : v,
+                       enc: open ? 'none' : 'psk', band: band === '5' ? '5' : '2' })
+          .then(function (j) {
+            if (j && j.ok) {
+                OS.toast('Saved. Associating — this can take ' + (j.timeout || 20) + ' seconds.', 'ok', 6000);
+                OS.tp.refresh(1500);
+            } else {
+                OS.toast('Could not join: ' + ((j && j.error) || 'unknown'), 'bad');
+            }
+          });
+    });
+}
+
+$('#scanBtn').addEventListener('click', function () {
+    var b = this;
+    if (scanning) return;
+    scanning = true; b.classList.add('is-busy'); b.disabled = true;
+    renderScan(last || {});
+    OS.post(API, { action: 'scan' }).then(function (j) {
+        scanning = false; b.classList.remove('is-busy'); b.disabled = false;
+        if (j && j.ok && j.scan && j.scan.results) {
+            scanResults = j.scan.results; scanAt = Math.floor(Date.now() / 1e3);
+            OS.toast(scanResults.length === 1 ? '1 network found.'
+                     : scanResults.length + ' networks found.', 'ok');
+        } else {
+            OS.toast('Scan failed: ' + ((j && j.error) || 'the radio was busy — try again.'), 'bad');
+        }
+        renderScan(last || {});
+    });
+});
+
+function render(d) {
+    if (!d || !d.ok) return;
+    last = d;
+    renderAlerts(d);
+    var ups = OS.sourcesList($('#sources'), d);
+    OS.failoverControl($('#priority'), ups, function () { OS.tp.refresh(1200); });
+    renderUplink(d);
+    renderScan(d);
+}
+
+OS.tp = new OS.Transport(API, render, { interval: 8000 });
+OS.tp.start();
+})();
+</script>
+</body>
+</html>

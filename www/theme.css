@@ -1,0 +1,610 @@
+/* =========================================================================
+   Beryl 7 control panel — "Farras Naim" design system (red accent)
+   Dark-first; light via html[data-theme="light"]. Self-contained, no CDN.
+
+   Linked AFTER each page's inline <style> so it wins the cascade. Two things
+   follow from that:
+     1. The token block below overrides the per-page :root blocks, so every
+        existing component re-tints without being rewritten.
+     2. Anything this file redefines (buttons, inputs, tabs, panels) takes the
+        design-system look; anything it doesn't touch keeps its page layout.
+   ========================================================================= */
+
+/* ---------- TOKENS ---------------------------------------------------- */
+:root {
+    color-scheme: dark;
+
+    --bg:            #08080b;
+    --bg-deep:       #050507;
+    --surface:       rgba(255, 255, 255, 0.028);
+    --surface-hi:    rgba(255, 255, 255, 0.055);
+    --line:          rgba(255, 255, 255, 0.085);
+    --line-hi:       rgba(255, 255, 255, 0.16);
+
+    --text:          #ededf0;
+    --muted:         #8b8b96;
+    --faint:         #7c7c86;
+
+    --accent:        #f04444;
+    --accent-solid:  #d32020;
+    --on-accent:     #ffffff;
+    --accent-2:      #ff8a5c;
+    --accent-soft:   rgba(240, 68, 68, 0.14);
+    --accent-line:   rgba(240, 68, 68, 0.34);
+    --accent-glow:   rgba(240, 68, 68, 0.30);
+
+    --warn:          #e0a53b;
+    /* Kept green, deliberately, for POSITIVE STATUS ONLY — see note at the
+       bottom of this file. Red is brand/action/focus; green is "this link is
+       up". On a network panel a red "CONNECTED" pill reads as a fault. */
+    --ok:            #37c871;
+    --bad:           #f2685c;
+
+    /* Text-safe counterparts. --ok / --warn are GRAPHIC colours — dots, fills,
+       glows, borders — tuned for vividness; a single token cannot serve both
+       roles, because what reads well as a 8px dot fails as 10px text. The -fg
+       pair carries the same semantics tuned to clear WCAG AA 4.5:1 as small
+       text on this theme's surfaces, including the 10%-tinted status panels.
+       Dark needs no separate value (the vivid pair already measures 6.5:1+
+       here), but both tokens are declared in both themes so component rules
+       never have to branch on theme. */
+    --ok-fg:         #37c871;
+    --warn-fg:       #e0a53b;
+
+    --shadow-pop:    rgba(0, 0, 0, 0.6);
+
+    --fs-h1:    clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
+    --fs-h2:    clamp(1.25rem, 1.05rem + 0.9vw, 1.6rem);
+    --fs-h3:    clamp(1.02rem, 0.96rem + 0.3vw, 1.18rem);
+    --fs-body:  0.9375rem;
+    --fs-sm:    0.875rem;
+    --fs-xs:    0.78rem;
+    --fs-mono:  0.72rem;
+
+    --radius:    14px;
+    --radius-sm: 10px;
+    --ease:      cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-io:   cubic-bezier(0.65, 0, 0.35, 1);
+
+    --font:      -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+    /* --- bridge: names the four pages' inline CSS already reference ------
+       Aliasing rather than find-and-replacing across ~590 component rules.
+       Every .panel/.card/.trow/.tun/.net/.updot in the existing markup picks
+       up the red palette through these with no markup change. */
+    --fg:        var(--text);
+    --mut:       var(--muted);
+    --dim:       var(--faint);
+    --border:    var(--line);
+    --surface2:  var(--surface-hi);
+    --accent-hi: var(--accent);
+    --accent-lo: var(--accent-2);
+    --tint1:     rgba(240, 68, 68, 0.07);
+    --tint2:     rgba(240, 68, 68, 0.05);
+}
+
+html[data-theme="light"] {
+    color-scheme: light;
+    --bg:            #fbfbfc;
+    --bg-deep:       #f2f2f5;
+    --surface:       rgba(10, 10, 20, 0.022);
+    --surface-hi:    rgba(10, 10, 20, 0.05);
+    --line:          rgba(10, 10, 20, 0.10);
+    --line-hi:       rgba(10, 10, 20, 0.2);
+    --text:          #16161a;
+    --muted:         #63636e;
+    --faint:         #6e6e79;
+    --accent:        #d32020;
+    --accent-solid:  #d32020;
+    --on-accent:     #ffffff;
+    --accent-2:      #c2410c;
+    --accent-soft:   rgba(211, 32, 32, 0.09);
+    --accent-line:   rgba(211, 32, 32, 0.30);
+    --accent-glow:   rgba(211, 32, 32, 0.18);
+    --warn:          #b57611;
+    --ok:            #16A34A;
+    --bad:           #c22a1f;
+    /* See the dark block. Light is where the split earns its keep: #16A34A as
+       text measures 2.7:1 on the hero telemetry band and 3.2:1 even on the page
+       background — both fail AA. These clear 4.5:1 on every surface the panel
+       actually paints, tinted panels included. --bad already passes (4.8) and
+       is deliberately left alone. */
+    --ok-fg:         #0F7034;
+    --warn-fg:       #82550A;
+    --shadow-pop:    rgba(20, 20, 30, 0.22);
+    /* Deliberately weaker than the dark theme's. Light surfaces are only ~2%
+       opaque, so the body's radial glow reads straight through them — at the
+       dark theme's strength every card turned visibly pink. */
+    --tint1:         rgba(211, 32, 32, 0.035);
+    --tint2:         rgba(211, 32, 32, 0.022);
+}
+
+/* ---------- BASE ------------------------------------------------------ */
+/* line-height stays at 1.5, not the design system's 1.65: this is a control
+   panel with ~30 stat rows per screen, and the brief says keep the density.
+   1.65 is applied to prose blocks (.hint, .guide, .note) further down. */
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+/* ---------- TOP BAR / TABS ------------------------------------------- */
+.nav {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; flex-wrap: wrap; padding: 0.4rem 0; margin-bottom: 0.5rem;
+}
+.nav__brand {
+    display: flex; align-items: center; gap: 0.6rem;
+    font-weight: 650; letter-spacing: -0.015em; font-size: 19px;
+}
+.nav__tools { display: flex; align-items: center; gap: 0.7rem; margin-left: auto; }
+.nav__status { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--faint); }
+
+/* The dot doubles as the poller's liveness indicator, so it is green while
+   data is flowing and red when the fetch fails — status, not brand. */
+.nav__dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 45%, transparent);
+    animation: navpulse 2.8s var(--ease-io) infinite;
+}
+.nav__dot.off { background: var(--bad); animation: none; box-shadow: none; }
+@keyframes navpulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 45%, transparent); }
+    50%      { box-shadow: 0 0 0 7px transparent; }
+}
+
+.tabs { display: flex; gap: 0.15rem; margin: 0; padding: 0; border: 0; font-size: inherit; }
+.tabs .tab {
+    position: relative; z-index: 0;
+    padding: 0.4rem 0.85rem; border-radius: 100px; border: 0;
+    font-size: var(--fs-sm); font-weight: 500; color: var(--muted);
+    transition: color 0.25s var(--ease);
+}
+.tabs .tab:hover { color: var(--text); }
+.tabs .tab.is-active { color: var(--text); font-weight: 600; }
+.tabs .tab.is-active::before {
+    content: ''; position: absolute; inset: 0; border-radius: 100px;
+    background: var(--surface-hi); z-index: -1;
+}
+
+.icon-btn {
+    display: grid; place-items: center; width: 34px; height: 34px; flex-shrink: 0;
+    padding: 0; background: none; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 50%; color: var(--muted);
+    transition: transform 0.25s var(--ease), border-color 0.25s var(--ease), color 0.25s var(--ease);
+}
+.icon-btn:hover { color: var(--text); border-color: var(--line-hi); transform: translateY(-2px); }
+.icon-btn svg {
+    width: 16px; height: 16px; fill: none; stroke: currentColor;
+    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.icon-btn .sun { display: none; }
+html[data-theme="light"] .icon-btn .sun  { display: block; }
+html[data-theme="light"] .icon-btn .moon { display: none; }
+
+/* ---------- SECTION LABELS ------------------------------------------- */
+/* The pages already use <h2> for "USB PORT" / "UPLINK STATUS" style labels,
+   so the eyebrow recipe is applied to the element directly — no markup edit. */
+h2, .eyebrow {
+    display: flex; align-items: center; gap: 0.55rem;
+    font-family: var(--font-mono); font-size: var(--fs-mono); font-weight: 500;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint);
+    margin: 26px 0 10px;
+}
+h2::before, .eyebrow::before {
+    content: ''; width: 22px; height: 1px; flex-shrink: 0;
+    background: var(--accent); opacity: 0.7;
+}
+
+/* ---------- PANEL / CARD --------------------------------------------- */
+.panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    transition: border-color 0.4s var(--ease);
+}
+.panel:hover { border-color: var(--line-hi); }
+
+/* Padding stays compact (the design system's 1.4rem is a landing-page value)
+   but the radius, border and hover lift come from the system. */
+.card {
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--surface);
+}
+.card:hover { border-color: var(--line-hi); }
+
+/* ---------- STAT TILE ------------------------------------------------ */
+/* No text-transform here: CSS uppercasing turns "2.4 GHz" into "2.4 GHZ",
+   and units must keep their casing. The JS supplies properly cased labels. */
+.stat .k, .stat__l {
+    font-family: var(--font-mono); font-size: var(--fs-mono); font-weight: 500;
+    letter-spacing: 0.05em; text-transform: none; color: var(--faint);
+}
+.stat .v, .stat__n {
+    font-size: 21px; font-weight: 640; letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+}
+.stat .v2 { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--faint); }
+
+/* ---------- STATUS PILLS --------------------------------------------- */
+/* .state is the existing class; .pill is the design-system name. Both styled
+   so new markup and old markup look identical. */
+.state, .pill, .uptag, .devbadge, .mldtag, .vpntag, .blktag {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.2rem 0.6rem; border-radius: 100px;
+    font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    border: 1px solid var(--line); color: var(--muted); background: var(--surface);
+}
+.state.up, .pill--on, .uptag.act {
+    color: var(--ok-fg); border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+}
+/* --muted, not --faint: at 9-10px this pill measured 4.41:1 in both themes.
+   Same reason the hero telemetry band uses --mut for its labels. */
+.state.dn, .pill--off { color: var(--muted); border-color: var(--line); }
+.state.warn, .pill--warn {
+    color: var(--warn-fg); border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.state.bad, .pill--bad {
+    color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent);
+}
+
+/* ---------- BUTTONS --------------------------------------------------- */
+/* Pill shape from the system, but padding trimmed so button rows stay on one
+   line on a phone. .primary/.danger are the existing modifiers; --solid/
+   --ghost/--danger are the system's names. Both work. */
+.btn {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    padding: 0.45rem 0.95rem; border-radius: 100px;
+    font-family: var(--font); font-size: var(--fs-xs); font-weight: 600;
+    color: var(--text); background: var(--surface-hi);
+    border: 1px solid var(--line); cursor: pointer;
+    transition: transform 0.3s var(--ease), background 0.3s var(--ease),
+                border-color 0.3s var(--ease), box-shadow 0.3s var(--ease);
+}
+.btn:hover { transform: translateY(-2px); border-color: var(--line-hi); }
+.btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+.btn:disabled:hover { transform: none; border-color: var(--line); }
+
+.btn.primary, .btn--solid {
+    background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent);
+}
+.btn.primary:hover, .btn--solid:hover {
+    background: var(--accent-solid); border-color: var(--accent-solid);
+    box-shadow: 0 8px 26px var(--accent-glow);
+}
+.btn--ghost { background: transparent; }
+.btn--ghost:hover { border-color: var(--line-hi); background: var(--surface-hi); }
+
+/* Destructive reads as a red OUTLINE so it never looks like the primary CTA. */
+.btn.danger, .btn--danger {
+    color: var(--accent); border-color: var(--accent-line); background: transparent;
+}
+.btn.danger:hover, .btn--danger:hover {
+    background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent);
+}
+
+/* ---------- LIST ROW -------------------------------------------------- */
+.row {
+    display: flex; align-items: center; gap: 0.9rem;
+    padding: 0.9rem 1.05rem;
+    border: 1px solid var(--line); border-radius: 11px; background: var(--surface);
+    transition: border-color 0.32s var(--ease), background 0.32s var(--ease);
+}
+.row:hover { border-color: var(--accent-line); background: var(--surface-hi); }
+.row__meta { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--faint); }
+.row__control { margin-left: auto; }
+
+/* Existing clickable list rows get the same accent-on-hover treatment. */
+.net:hover, .rrow:hover, .dev:hover { background: var(--surface-hi); }
+
+/* ---------- FORM CONTROLS -------------------------------------------- */
+/* NOTE: `input[type="text"]` does not match an <input> with no type attribute,
+   and most inputs in these pages have none — hence :not([type]).
+   Also: display is deliberately NOT set here. An earlier `input{display:block}`
+   rule outranked the UA [hidden] rule and produced two visible file pickers on
+   the VPN page; the guard below keeps that fixed. */
+input:not([type]),
+input[type="text"], input[type="password"], input[type="number"],
+input[type="search"], input[type="tel"], input[type="url"],
+textarea, select {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    background: var(--bg-deep);
+    color: var(--text);
+    font-family: var(--font); font-size: var(--fs-sm);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
+}
+input[hidden] { display: none !important; }
+input::placeholder, textarea::placeholder { color: var(--faint); }
+input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent-line);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+textarea { min-height: 7rem; resize: vertical; font-family: var(--font-mono); }
+select {
+    -webkit-appearance: none; appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: right 1.05rem top 55%, right 0.8rem top 55%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 2.2rem;
+}
+input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+
+/* No uppercase here either — labels contain cased terms ("Wi-Fi", "APN",
+   "SIM PIN") that CSS uppercasing mangles, and long sentence-labels read
+   like shouting. Same rule as the stat tiles. */
+label, .field > label {
+    font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 500;
+    letter-spacing: 0.04em; text-transform: none; color: var(--faint);
+}
+.field { display: grid; gap: 0.4rem; }
+/* Hints and prose keep the roomier line-height. */
+.hint, .guide, .note, .notice, .tooldesc { line-height: 1.6; text-transform: none; letter-spacing: 0; }
+.hint { font-family: var(--font); font-size: var(--fs-xs); color: var(--faint); }
+
+/* ---------- NOTICES --------------------------------------------------- */
+.note, .notice {
+    border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+    background: color-mix(in srgb, var(--warn) 8%, transparent);
+    color: var(--text); border-radius: var(--radius-sm);
+    padding: 0.75rem 0.95rem; font-size: var(--fs-xs);
+}
+.note strong, .notice strong { color: var(--warn-fg); }
+.failnote {
+    border: 1px solid color-mix(in srgb, var(--bad) 38%, transparent);
+    background: color-mix(in srgb, var(--bad) 10%, transparent);
+    color: var(--bad); border-radius: var(--radius-sm);
+}
+.msg.ok  { color: var(--ok-fg); }
+.msg.err { color: var(--bad); }
+
+/* ---------- TOGGLE SWITCH -------------------------------------------- */
+.switch { position: relative; width: 42px; height: 24px; display: inline-block; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch .track {
+    position: absolute; inset: 0; border-radius: 100px;
+    background: var(--surface-hi); border: 1px solid var(--line);
+    transition: background 0.25s var(--ease), border-color 0.25s var(--ease);
+}
+.switch .track::before {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+    border-radius: 50%; background: var(--muted);
+    transition: transform 0.25s var(--ease), background 0.25s var(--ease);
+}
+.switch input:checked + .track {
+    background: color-mix(in srgb, var(--ok) 16%, transparent);
+    border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+}
+.switch input:checked + .track::before { transform: translateX(18px); background: var(--ok); }
+
+/* ---------- STATUS-GREEN CARVE-OUT ------------------------------------
+   The brief allows keeping green for positive status only, and this panel
+   needs it: "connected", "link up" and "VPN active" are read at a glance and
+   a red badge for them would parse as a fault on a network device. Red stays
+   the brand — actions, focus rings, the active tab, accent marks, section
+   rules. Everything below is status semantics, not branding. */
+.dot.on, .updot.live, .wdot.on, .pulse { background: var(--ok); }
+.updot.act {
+    background: var(--ok);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+.pulse.off, .dot.off, .wdot.off { background: var(--bad); }
+
+/* ---------- COLLAPSIBLE SECTIONS -------------------------------------- */
+/* A whole section (h2 + panel) inside <details class="sec">. The h2 keeps
+   its eyebrow styling; the summary just adds a chevron and the pointer.
+   Closed by default — settings you touch once and reference material don't
+   need to occupy the screen (progressive disclosure). */
+details.sec { margin: 26px 0 10px; }
+details.sec > summary { list-style: none; cursor: pointer; display: flex;
+    align-items: center; gap: 0.55rem; min-height: 32px;
+    -webkit-user-select: none; user-select: none; }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary h2 { margin: 0; }
+details.sec > summary::after { content: ''; width: 7px; height: 7px;
+    flex-shrink: 0; margin-left: 2px;
+    border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint);
+    transform: rotate(-45deg); transition: transform 0.2s var(--ease); }
+details.sec[open] > summary::after { transform: rotate(45deg); }
+details.sec > .panel { margin-top: 10px; }
+
+/* ---------- MOTION / A11Y -------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important; animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
+}
+/* Below ~900px brand + tabs + tools no longer fit on one line, and the tools
+   were the thing that wrapped — leaving "updated 6:38 AM" stranded on its own
+   right-aligned row. Drop the tabs to their own full-width row instead, so the
+   break looks intentional: [brand ......... status + toggle] / [tabs]. */
+@media (max-width: 900px) {
+    .tabs { order: 3; width: 100%; overflow-x: auto; padding-top: 0.15rem; }
+    .tabs .tab { white-space: nowrap; }
+}
+@media (max-width: 560px) {
+    .nav { gap: 0.5rem; }
+    .nav__brand { font-size: 17px; }
+    .nav__status { font-size: 0.7rem; }
+}
+
+/* =====================================================================
+   "One glance, one thumb" shell — appbar + adaptive tabbar + hero + sheet
+   Mobile-first: the tabbar is a fixed bottom bar (thumb zone); at >=900px
+   it docks back to the top as pill tabs. All rules below assume the shell
+   markup produced by redesign.pl.
+   ===================================================================== */
+
+/* ---------- APP BAR --------------------------------------------------- */
+.appbar { display: flex; align-items: center; justify-content: space-between;
+    gap: 0.8rem; padding: 0.35rem 0 0.3rem; }
+.appbar__brand { display: flex; align-items: center; gap: 0.6rem;
+    font-weight: 650; font-size: 17px; letter-spacing: -0.015em; min-width: 0; }
+.appbar__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appbar__tools { display: flex; align-items: center; gap: 0.7rem; flex-shrink: 0; }
+.t-long { display: none; }
+@media (min-width: 900px) {
+    .appbar__brand { font-size: 19px; }
+    .t-long { display: inline; }
+    .t-short { display: none; }
+}
+
+/* ---------- TAB BAR (mobile: fixed bottom, thumb-reachable) ----------- */
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    display: flex; margin: 0;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border-top: 1px solid var(--line);
+    padding: 6px max(10px, env(safe-area-inset-left))
+             calc(6px + env(safe-area-inset-bottom))
+             max(10px, env(safe-area-inset-right)); }
+.tabbar__item { flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 3px; min-height: 48px; padding: 4px 2px;
+    border-radius: 12px; border-bottom: 0;
+    color: var(--muted); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.01em; }
+.tabbar__item svg { width: 22px; height: 22px; fill: none; stroke: currentColor;
+    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tabbar__item.is-active { color: var(--accent); }
+/* body clearance for the fixed bar (wins over the pages' inline media rule
+   because theme.css loads later at equal specificity) */
+body { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+
+/* ---------- TAB BAR (desktop: docked pill tabs) ----------------------- */
+@media (min-width: 900px) {
+    .tabbar { position: static; display: flex; justify-content: flex-start;
+        gap: 4px; background: none; border: 0; padding: 0; margin: 10px 0 2px;
+        -webkit-backdrop-filter: none; backdrop-filter: none; }
+    .tabbar__item { flex: 0 0 auto; flex-direction: row; gap: 7px; min-height: 0;
+        padding: 0.45rem 0.95rem; border-radius: 100px; font-size: var(--fs-sm); }
+    .tabbar__item svg { width: 16px; height: 16px; }
+    .tabbar__item:hover { color: var(--text); }
+    .tabbar__item.is-active { color: var(--text); background: var(--surface-hi); }
+    .tabbar__item.is-active svg { stroke: var(--accent); }
+    body { padding-bottom: 60px; }
+}
+
+/* ---------- PAGE TITLE (large-title pattern) -------------------------- */
+.pagehead { margin: 12px 0 2px; }
+.pagetitle { font-family: var(--font); font-size: var(--fs-h1); font-weight: 700;
+    letter-spacing: -0.02em; margin: 0; }
+.pagesub { font-size: var(--fs-sm); color: var(--muted); margin: 2px 0 0; }
+
+/* ---------- HERO (the dashboard's first impression) ------------------- */
+.hero { position: relative; margin: 12px 0 2px; padding: 1.05rem 1.15rem;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: linear-gradient(135deg, var(--accent-soft), transparent 58%), var(--surface);
+    overflow: hidden; }
+.hero__state { display: flex; align-items: center; gap: 0.65rem;
+    font-size: var(--fs-h2); font-weight: 700; letter-spacing: -0.02em; }
+.hero__dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    background: var(--ok);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 18%, transparent); }
+.hero.offline .hero__dot { background: var(--bad);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 18%, transparent); }
+.hero.offline { background: linear-gradient(135deg,
+    color-mix(in srgb, var(--bad) 10%, transparent), transparent 58%), var(--surface); }
+.hero__sub { font-size: var(--fs-sm); color: var(--muted); margin: 3px 0 0 1.55rem; }
+.hero__chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0 1.55rem; }
+.chip { display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.3rem 0.62rem; border-radius: 100px;
+    border: 1px solid var(--line); background: var(--surface);
+    font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted);
+    font-variant-numeric: tabular-nums; }
+.chip b { color: var(--text); font-weight: 600; }
+
+/* ---------- STAT STRIP (mobile: horizontal swipe) --------------------- */
+@media (max-width: 640px) {
+    .stats { display: flex; overflow-x: auto; gap: 20px;
+        padding: 16px 2px 14px; margin-bottom: 16px;
+        scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .stats::-webkit-scrollbar { display: none; }
+    .stat { flex: 0 0 auto; min-width: 84px; }
+}
+
+/* ---------- DEVICE MODAL -> BOTTOM SHEET on mobile -------------------- */
+/* Always-available close control. The sheet scrolls, and the original
+   "Close" button lives at the very bottom of that scroll area — on a device
+   with several links it was off-screen, leaving the backdrop tap as the only
+   way out. This X sits in the header, which is sticky, so it is reachable at
+   any scroll position. */
+/* Activity badge in the device modal. Green "Active now" uses the status
+   carve-out (see bottom of file); idle is deliberately quiet — it is the
+   normal state for most devices and shouldn't compete for attention. */
+.devbadge.act {
+    color: var(--ok-fg);
+    border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+    background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+.devbadge.slp { color: var(--faint); }
+
+/* Shown at every width: the desktop modal is also max-height:85vh with
+   overflow, so a device with many links pushed the bottom Close out of view
+   there too — just less often. */
+.sheetclose { display: inline-flex; flex-shrink: 0; margin-left: 4px;
+    width: 30px; height: 30px; padding: 0; cursor: pointer;
+    align-items: center; justify-content: center;
+    background: var(--surface-hi); border: 1px solid var(--line);
+    border-radius: 50%; color: var(--muted); }
+.sheetclose:hover { color: var(--text); border-color: var(--line-hi); }
+.sheetclose svg { width: 14px; height: 14px; display: block; }
+
+@media (max-width: 640px) {
+    .modalbg { align-items: flex-end; padding: 0; }
+    .modal { max-width: none; width: 100%; max-height: 88vh; overflow-y: auto;
+        border-radius: 18px 18px 0 0; border-bottom: 0;
+        padding: 10px 20px calc(20px + env(safe-area-inset-bottom));
+        box-shadow: 0 -12px 40px var(--shadow-pop); }
+    /* grabber, the universal "this is a sheet" affordance */
+    .modal::before { content: ''; display: block; width: 36px; height: 4px;
+        border-radius: 2px; background: var(--line-hi); margin: 4px auto 14px; }
+    .modalbtns .btn { min-height: 44px; flex: 1 1 auto; justify-content: center; }
+
+    /* header pinned so the X never scrolls away; negative margins + padding
+       let the background span the sheet's full width behind it */
+    .devmodal .devhead {
+        position: sticky; top: 0; z-index: 3;
+        margin: 0 -20px 12px; padding: 4px 20px 10px;
+        background: var(--bg); border-bottom: 1px solid var(--line);
+    }
+    .sheetclose { display: inline-flex; width: 34px; height: 34px; }
+    /* the bottom Close is now redundant on mobile */
+    .devmodal > .modalbtns:last-child { display: none; }
+}
+
+/* Same reasoning on the device cards: the page's inline `.lhead .band` rule
+   uppercases "5 GHz" into "5 GHZ". Equal specificity, later file wins. */
+.lhead .band { text-transform: none; }
+
+/* Troubleshoot cards: the restart tools carry a status line for post-action
+   feedback; the block tools don't. When empty it still reserved a ghost line
+   (min-height:1em + flex gap), so two of the four cards had visibly deeper
+   bottom padding and their buttons sat ~20px above the others' baseline.
+   Collapse it when empty — same pattern as the stat tiles' .v2:empty rule. */
+.toolstat:empty { display: none; }
+
+/* ---------- TOUCH HONESTY --------------------------------------------- */
+@media (max-width: 640px) {
+    .btn { min-height: 44px; padding: 0.55rem 1.05rem; font-size: 0.8rem; }
+    .btns .btn.primary, .btns .btn--solid { flex: 1 1 auto; justify-content: center; }
+    /* 16px inputs stop iOS zooming the page on focus */
+    input:not([type]), input[type="text"], input[type="password"],
+    input[type="number"], input[type="search"], textarea, select {
+        font-size: 16px; min-height: 44px; }
+    .net, .rrow, .dev, .up { min-height: 44px; }
+    .icon-btn { width: 40px; height: 40px; }
+}

@@ -1,0 +1,434 @@
+#!/bin/sh
+# /www/cgi-bin/repeater-api  —  travel / hotel-uplink (WISP repeater) manager.
+#
+# Model: one wifi-iface in mode=sta joined to an upstream AP, attached to the
+# `wwan` network (proto dhcp) which lives in the firewall's wan zone. Your own
+# APs keep broadcasting, so room devices reach the internet through the uplink
+# with no reconfiguration.
+#
+# DRIVER LIMITATION (verified on this MT7990 build): scanning on the 5 GHz radio
+# returns nothing while its AP is up. 2.4 GHz scanning works, and the ubus scan
+# path returns 2.4 GHz results regardless of which iface is asked. Uplinks are
+# therefore discovered on 2.4 GHz; a 5 GHz uplink must be entered manually.
+
+PASSWORD="changeme"
+POST_MAX=8192
+
+esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+BODY=""
+if [ "$REQUEST_METHOD" = "POST" ]; then
+    CL="${CONTENT_LENGTH:-0}"; case "$CL" in ''|*[!0-9]*) CL=0 ;; esac
+    [ "$CL" -gt "$POST_MAX" ] && { printf '{"ok":false,"error":"body too large"}'; exit 0; }
+    [ "$CL" -gt 0 ] && BODY=$(dd bs=1 count="$CL" 2>/dev/null)
+fi
+
+urldec() {
+    printf '%s' "$1" | awk '
+    BEGIN{ for(i=0;i<16;i++){ h=sprintf("%X",i); H[h]=i; H[tolower(h)]=i } }
+    { gsub(/\+/," "); s=$0; n=length(s); out=""
+      for(i=1;i<=n;i++){ c=substr(s,i,1)
+        if(c=="%" && i+2<=n){ a=substr(s,i+1,1); b=substr(s,i+2,1)
+          if((a in H) && (b in H)){ out=out sprintf("%c",H[a]*16+H[b]); i+=2; continue } }
+        out=out c }
+      printf "%s", out }'
+}
+qs_get() {
+    printf '%s' "${QUERY_STRING}&${BODY}" | tr '&' '\n' \
+      | awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}'
+}
+qs_get_dec() { urldec "$(qs_get "$1")"; }
+
+guard_post() {
+    [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
+    gp_src="${HTTP_ORIGIN:-$HTTP_REFERER}"
+    gp_src="${gp_src#*://}"; gp_src="${gp_src%%[:/]*}"
+    gp_ok=0
+    case "$gp_src" in
+        "") gp_ok=0 ;;
+        localhost|127.0.0.1|::1) gp_ok=1 ;;
+        *) for gp_ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
+             [ "$gp_ip" = "$gp_src" ] && { gp_ok=1; break; }
+           done ;;
+    esac
+    [ "$gp_ok" = 1 ] || { printf '{"ok":false,"error":"bad origin"}'; exit 0; }
+}
+
+ACTION=$(qs_get action)
+# Writes MUST be POST. This endpoint is passwordless, so guard_post's same-origin
+# check (POST-only) is the sole protection — but a GET write bypassed it. Reads
+# (status) and the non-mutating `scan` stay GET-able; everything else needs POST.
+case "$ACTION" in
+    ""|scan) ;;
+    *) [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; } ;;
+esac
+[ "$REQUEST_METHOD" = "POST" ] && guard_post
+
+# ---------- connection watchdog ----------
+# Associating is not the same as working: the iPhone-hotspot case associated at
+# L2 but never answered DHCP, leaving the router wedged on a dead uplink with no
+# feedback. So after a connect attempt, wait for wwan to actually come UP (i.e.
+# hold a lease). If it doesn't inside the window, undo the attempt, fall back to
+# the ethernet WAN, and leave a message for the UI to show.
+TRYMARK=/tmp/.repeater-trying
+FAILMARK=/tmp/.repeater-fail
+CONNECT_TIMEOUT=20
+
+# Re-assert the ethernet WAN after dropping a Wi-Fi uplink.
+#
+# While an uplink is up the default route points at the STA (dev phy0.x-sta0).
+# `ifdown wwan` removes that route, but netifd still believes `wan` is up and so
+# never reinstalls ITS default route. The router is then left holding a WAN IP,
+# able to reach the ONT on-link, and with no default route at all — no internet
+# for any client. Observed live; costs a couple of seconds to prevent.
+# Is an Ethernet cable actually plugged into the WAN port? On the road there
+# usually isn't one, which changes what "no default route" means: away from home
+# it is the expected consequence of dropping the only uplink, not a fault.
+wan_has_carrier() {
+    _dev=$(uci -q get network.wan.device 2>/dev/null); [ -n "$_dev" ] || _dev=eth0
+    [ "$(cat /sys/class/net/$_dev/carrier 2>/dev/null)" = "1" ]
+}
+
+restore_wan() {
+    ip route show default 2>/dev/null | grep -q . && return 0
+    # No cable => nothing to fall back to. Don't spend 10s retrying or log a
+    # scary warning for a situation that is simply "you're travelling".
+    wan_has_carrier || { logger -t repeater "uplink down and no Ethernet carrier — offline until another uplink is joined"; return 1; }
+    ifup wan >/dev/null 2>&1
+    _w=0
+    while [ "$_w" -lt 10 ]; do
+        ip route show default 2>/dev/null | grep -q . && return 0
+        _w=$((_w+1)); sleep 1
+    done
+    logger -t repeater "WARNING: Ethernet is connected but no default route after uplink teardown"
+    return 1
+}
+
+uplink_watchdog() {
+    _ssid="$1"
+    _i=0
+    while [ "$_i" -lt "$CONNECT_TIMEOUT" ]; do
+        if ubus call network.interface.wwan status 2>/dev/null | grep -q '"up": true'; then
+            rm -f "$TRYMARK" "$FAILMARK"
+            return 0
+        fi
+        _i=$((_i+1)); sleep 1
+    done
+    # timed out — roll back so we are not left on a half-open uplink
+    ifdown wwan >/dev/null 2>&1
+    uci set wireless.uplink.disabled='1'
+    uci commit wireless
+    wifi reload >/dev/null 2>&1
+    restore_wan
+    rm -f "$TRYMARK"
+    # Tailor the message to where you actually are. Telling someone in a hotel
+    # that it "reverted to the Ethernet WAN" is useless — there is no cable.
+    if wan_has_carrier; then
+        printf 'Could not connect to “%s” within %ss. It associated but never got an IP address, or the password was rejected. Reverted to the Ethernet WAN — check the password and signal, then try again.' \
+            "$_ssid" "$CONNECT_TIMEOUT" > "$FAILMARK"
+    else
+        printf 'Could not connect to “%s” within %ss. It associated but never got an IP address, or the password was rejected. No Ethernet is connected, so the router is offline until an uplink joins — double-check the password (watch for a captive portal that needs a browser sign-in) and try again.' \
+            "$_ssid" "$CONNECT_TIMEOUT" > "$FAILMARK"
+    fi
+    logger -t repeater "uplink '$_ssid' failed within ${CONNECT_TIMEOUT}s; reverted"
+}
+
+ensure_wwan() {
+    # wwan interface (dhcp client on the uplink)
+    if [ -z "$(uci -q get network.wwan)" ]; then
+        uci set network.wwan=interface
+        uci set network.wwan.proto='dhcp'
+        uci commit network
+    fi
+    # put wwan in the wan firewall zone so it's treated as untrusted + masqueraded
+    for z in $(uci -q show firewall | sed -n 's/^firewall\.\(@zone\[[0-9]*\]\)\.name=.wan.$/\1/p'); do
+        cur=$(uci -q get firewall.$z.network)
+        case " $cur " in *" wwan "*) ;; *) uci add_list firewall.$z.network='wwan'; uci commit firewall ;; esac
+    done
+}
+
+# ============================ SCAN ============================
+# Uses `iw ... scan` directly, NOT iwinfo/ubus-iwinfo.
+#
+# Why: this is a Wi-Fi 7 multi-radio-single-PHY device (radio0 + radio1 both on
+# phy0). iwinfo cannot scope a scan to radio 1 — `iwinfo <5g-iface> scan` dies
+# with "Netlink error ... No event received", and `ubus call iwinfo scan` on the
+# 5 GHz iface silently returns the 2.4 GHz radio's results (every entry band=2).
+# Verified side by side: iw saw 11 genuine 5 GHz APs on the same interface where
+# iwinfo saw none. Most hotel APs are 5 GHz, so this matters.
+if [ "$ACTION" = "scan" ]; then
+    # one AP interface per radio, so both bands get scanned
+    IF24=$(ubus call network.wireless status 2>/dev/null | awk '
+        /"section":/ { gsub(/[",]/,""); s=$2 }
+        /"ifname":/  { gsub(/[",]/,""); if (s=="main2g") { print $2; exit } }')
+    IF5=$(ubus call network.wireless status 2>/dev/null | awk '
+        /"section":/ { gsub(/[",]/,""); s=$2 }
+        /"ifname":/  { gsub(/[",]/,""); if (s=="main5g") { print $2; exit } }')
+
+    # ONE active sweep, not one per radio. Both radios sit on the same PHY, so a
+    # single scan already covers every channel in both bands — issuing a second
+    # one back to back just collides with the first ("command failed: Resource
+    # busy (-16)"), which is what made the 2nd/3rd click fail.
+    #
+    # `scan dump` (the driver's cached table) is then folded in: it costs nothing,
+    # can't fail, and means a click that lands while another scan is in flight
+    # still returns results instead of an error. Duplicates are removed below.
+    SCANIF="$IF5"; [ -n "$SCANIF" ] || SCANIF="$IF24"
+    ALL=$( { [ -n "$SCANIF" ] && iw dev "$SCANIF" scan 2>/dev/null
+             [ -n "$IF5" ]  && iw dev "$IF5"  scan dump 2>/dev/null
+             [ -n "$IF24" ] && iw dev "$IF24" scan dump 2>/dev/null; } | awk '
+        BEGIN { for (i=0; i<16; i++) { h=sprintf("%X",i); HX[h]=i; HX[tolower(h)]=i } }
+        # iw prints any non-ASCII SSID byte as the LITERAL text \xNN (an iPhone
+        # hotspot named "Farras’s iPhone" arrives as Farras\xe2\x80\x99s iPhone).
+        # \x is not a valid JSON escape, so passing it through made the whole
+        # response unparseable and the UI reported "Scan failed". Turn those
+        # sequences back into the real bytes.
+        function unhex(s,   out,i,n,c,a,b) {
+            out=""; n=length(s)
+            for (i=1; i<=n; i++) {
+                c=substr(s,i,1)
+                if (c=="\\" && substr(s,i+1,1)=="x" && i+3<=n) {
+                    a=substr(s,i+2,1); b=substr(s,i+3,1)
+                    if ((a in HX) && (b in HX)) {
+                        out = out sprintf("%c", HX[a]*16 + HX[b]); i+=3; continue
+                    }
+                }
+                out = out c
+            }
+            return out
+        }
+        # Escape by walking the string. gsub is deliberately NOT used: its
+        # replacement text treats backslashes specially, so the usual
+        # gsub(/\\/,"\\\\") is a silent no-op and leaves JSON broken.
+        function jesc(s,   out,i,n,c) {
+            out=""; n=length(s)
+            for (i=1; i<=n; i++) {
+                c=substr(s,i,1)
+                if (c=="\\")      out = out "\\\\"
+                else if (c=="\"") out = out "\\\""
+                else if (c < " ") continue
+                else              out = out c
+            }
+            return out
+        }
+        function flush_bss() {
+            if (bssid == "") return
+            if (ssid == "") ssid = "(hidden)"
+            if (!(bssid in seen) || sig > bsig[bssid]) {
+                seen[bssid]=1; bsig[bssid]=sig; bss[bssid]=ssid
+                bfreq[bssid]=freq; benc[bssid]=enc
+            }
+            bssid=""; ssid=""; freq=0; sig=0; enc=0
+        }
+        /^BSS / { flush_bss(); bssid=$2; sub(/\(.*/, "", bssid); next }
+        /^\tfreq:/    { freq = $2 + 0; next }
+        /^\tsignal:/  { sig  = $2 + 0; next }
+        /^\tSSID:/    { s=$0; sub(/^\tSSID: ?/, "", s); ssid=s; next }
+        /^\tRSN:/     { enc=1; next }
+        /^\tWPA:/     { enc=1; next }
+        /capability:.*Privacy/ { enc=1; next }
+        END {
+            flush_bss()
+            n=0
+            for (b in seen) {
+                f=bfreq[b]; s=bss[b]
+                ch = 0
+                if (f >= 4900) ch = int((f - 5000) / 5)
+                else if (f == 2484) ch = 14
+                else if (f >= 2400) ch = int((f - 2407) / 5)
+                q = int((bsig[b] + 100) * 2); if (q < 0) q = 0; if (q > 100) q = 100
+                s = jesc(unhex(s))
+                printf "%s{\"ssid\":\"%s\",\"bssid\":\"%s\",\"channel\":%d,\"mhz\":%d,\"signal\":%d,\"quality\":%d,\"quality_max\":100,\"encryption\":{\"enabled\":%s}}",
+                       (n++ ? "," : ""), s, b, ch, f, bsig[b], q, (benc[b] ? "true" : "false")
+            }
+        }')
+
+    printf '{"ok":true,"iface24":"%s","iface5":"%s","scan":{"results":[%s]}}' \
+        "$(esc "$IF24")" "$(esc "$IF5")" "$ALL"
+    exit 0
+fi
+
+# ============================ ADD UPLINK ============================
+if [ "$ACTION" = "add" ]; then
+    # No router password, by explicit user choice: joining an uplink is a travel
+    # convenience and typing an admin password at a hotel desk is friction for no
+    # gain. guard_post still enforces the origin check, and guest/iot are
+    # input=REJECT so this endpoint is only reachable from the trusted LAN.
+    SSID=$(qs_get_dec ssid)
+    KEY=$(qs_get_dec key)
+    ENC=$(qs_get enc)
+    BAND=$(qs_get band)
+    [ -n "$SSID" ] || { printf '{"ok":false,"error":"ssid required"}'; exit 0; }
+    case "$BAND" in 5) RADIO=radio1 ;; *) RADIO=radio0 ;; esac
+    case "$ENC" in
+        none) ENCV='none' ;;
+        psk)  ENCV='psk2' ;;
+        *)    ENCV=$([ -n "$KEY" ] && echo 'psk2' || echo 'none') ;;
+    esac
+    [ "$ENCV" != "none" ] && [ -z "$KEY" ] && { printf '{"ok":false,"error":"password required for encrypted network"}'; exit 0; }
+
+    ensure_wwan
+    # a single uplink section, replaced each time
+    uci -q delete wireless.uplink
+    uci set wireless.uplink=wifi-iface
+    uci set wireless.uplink.device="$RADIO"
+    uci set wireless.uplink.mode='sta'
+    uci set wireless.uplink.network='wwan'
+    uci set wireless.uplink.ssid="$SSID"
+    uci set wireless.uplink.encryption="$ENCV"
+    [ "$ENCV" != "none" ] && uci set wireless.uplink.key="$KEY"
+    uci set wireless.uplink.disabled='0'
+    uci commit wireless
+    # `wifi reload` alone is NOT enough: after a failed association netifd marks
+    # wwan disabled and never retries, so the STA interface is never recreated
+    # and the uplink silently stays dead. An explicit ifup after the radios
+    # settle is what actually revives it.
+    date +%s > "$TRYMARK"; rm -f "$FAILMARK"
+    ( wifi reload >/dev/null 2>&1; sleep 8; ifup wwan >/dev/null 2>&1
+      uplink_watchdog "$SSID" ) >/dev/null 2>&1 &
+    printf '{"ok":true,"action":"add","ssid":"%s","radio":"%s","encryption":"%s","timeout":%s}' \
+        "$(esc "$SSID")" "$RADIO" "$ENCV" "$CONNECT_TIMEOUT"
+    exit 0
+fi
+
+# ============================ REMOVE UPLINK ============================
+if [ "$ACTION" = "del" ]; then
+    # Also unauthenticated: removing an uplink just falls back to the ethernet
+    # WAN, and re-adding it is a two-click operation.
+    [ -n "$(uci -q get wireless.uplink)" ] || { printf '{"ok":false,"error":"no uplink configured"}'; exit 0; }
+    uci -q delete wireless.uplink
+    uci commit wireless
+    ifdown wwan >/dev/null 2>&1
+    rm -f "$TRYMARK" "$FAILMARK"
+    ( wifi reload >/dev/null 2>&1; restore_wan ) >/dev/null 2>&1 &
+    printf '{"ok":true,"action":"del"}'
+    exit 0
+fi
+
+# dismiss a stale failure notice from the UI
+if [ "$ACTION" = "clearerr" ]; then
+    rm -f "$FAILMARK"
+    printf '{"ok":true,"action":"clearerr"}'
+    exit 0
+fi
+
+# ============================ ENABLE / DISABLE ============================
+if [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ]; then
+    [ -n "$(uci -q get wireless.uplink)" ] || { printf '{"ok":false,"error":"no uplink configured"}'; exit 0; }
+    [ "$ACTION" = "up" ] && uci set wireless.uplink.disabled='0' || uci set wireless.uplink.disabled='1'
+    uci commit wireless
+    if [ "$ACTION" = "down" ]; then
+        ifdown wwan >/dev/null 2>&1
+        rm -f "$TRYMARK" "$FAILMARK"
+        ( wifi reload >/dev/null 2>&1; restore_wan ) >/dev/null 2>&1 &
+    else
+        # see the note in `add`: netifd will not re-create the STA on its own
+        date +%s > "$TRYMARK"; rm -f "$FAILMARK"
+        ( wifi reload >/dev/null 2>&1; sleep 8; ifup wwan >/dev/null 2>&1
+          uplink_watchdog "$(uci -q get wireless.uplink.ssid)" ) >/dev/null 2>&1 &
+    fi
+    printf '{"ok":true,"action":"%s"}' "$ACTION"
+    exit 0
+fi
+
+# ============================ STATUS (read) ============================
+U_SSID=$(uci -q get wireless.uplink.ssid)
+U_RADIO=$(uci -q get wireless.uplink.device)
+U_ENC=$(uci -q get wireless.uplink.encryption)
+U_DIS=$(uci -q get wireless.uplink.disabled); [ -n "$U_DIS" ] || U_DIS=0
+
+# runtime sta iface
+STAIF=$(ubus call network.wireless status 2>/dev/null | awk '
+    /"section":/ { gsub(/[",]/,""); s=$2 }
+    /"ifname":/  { gsub(/[",]/,""); if (s=="uplink") { print $2; exit } }')
+
+CONN=false; SIG=0; UPSSID=""; BSSID=""; QUAL=0
+if [ -n "$STAIF" ]; then
+    INFO=$(ubus call iwinfo info "{\"device\":\"$STAIF\"}" 2>/dev/null)
+    UPSSID=$(printf '%s' "$INFO" | awk -F'"' '/"ssid":/{print $4; exit}')
+    BSSID=$(printf '%s' "$INFO" | awk -F'"' '/"bssid":/{print $4; exit}')
+    SIG=$(printf '%s' "$INFO" | awk -F'[:,]' '/"signal":/{gsub(/ /,"",$2); print $2; exit}')
+    QUAL=$(printf '%s' "$INFO" | awk -F'[:,]' '/"quality":/{gsub(/ /,"",$2); print $2; exit}')
+    case "$SIG" in ''|*[!0-9-]*) SIG=0 ;; esac
+    case "$QUAL" in ''|*[!0-9-]*) QUAL=0 ;; esac
+    [ -n "$UPSSID" ] && [ "$BSSID" != "00:00:00:00:00:00" ] && CONN=true
+fi
+
+WIP=$(ubus call network.interface.wwan status 2>/dev/null | awk -F'"' '/"address":/{print $4; exit}')
+WUP=$(ubus call network.interface.wwan status 2>/dev/null | grep -c '"up": true')
+[ "$WUP" -gt 0 ] 2>/dev/null && WUPJ=true || WUPJ=false
+
+# is the ethernet WAN currently the active default route?
+DEFDEV=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+
+printf '{"ok":true,"ts":%s,' "$(date +%s)"
+printf '"uplink":{"configured":%s,"ssid":"%s","radio":"%s","encryption":"%s","enabled":%s,' \
+    "$( [ -n "$U_SSID" ] && echo true || echo false )" \
+    "$(esc "$U_SSID")" "$(esc "$U_RADIO")" "$(esc "$U_ENC")" \
+    "$( [ "$U_DIS" = "1" ] && echo false || echo true )"
+printf '"connected":%s,"assoc_ssid":"%s","bssid":"%s","signal":%s,"quality":%s},' \
+    "$CONN" "$(esc "$UPSSID")" "$(esc "$BSSID")" "${SIG:-0}" "${QUAL:-0}"
+printf '"wwan":{"up":%s,"ip":"%s"},' "$WUPJ" "$(esc "$WIP")"
+printf '"default_route_dev":"%s",' "$(esc "$DEFDEV")"
+# Surface a missing default route instead of leaving the user to discover it as
+# "no internet". This is the exact state a teardown used to leave behind.
+printf '"has_default_route":%s,' "$( [ -n "$DEFDEV" ] && echo true || echo false )"
+printf '"wan_carrier":%s,' "$(wan_has_carrier && echo true || echo false)"
+
+# ---- the three internet sources, in the same shape tethering-api emits ----
+# Failover order is a property of BOTH uplink pages (it decides which of them
+# wins), so this page serves the same panel rather than sending the user to the
+# other one. Same field names on purpose: one renderer draws both.
+jbool_r() { case "$1" in true|1) printf 'true' ;; *) printf 'false' ;; esac; }
+jnum_r()  { case "$1" in ''|*[!0-9-]*) printf '0' ;; *) printf '%s' "$1" ;; esac; }
+# One ubus call per interface, not two: the status blob carries both the l3
+# device and the up flag, so ask once and parse it twice.
+_st_wan=$(ubus call network.interface.wan status 2>/dev/null)
+_st_wwan=$(ubus call network.interface.wwan status 2>/dev/null)
+_st_teth=$(ubus call network.interface.tethering status 2>/dev/null)
+_l3() { printf '%s' "$1" | awk -F'"' '/"l3_device"/{print $4; exit}'; }
+_wan_dev=$(_l3 "$_st_wan"); _wwan_dev=$(_l3 "$_st_wwan"); _teth_dev=$(_l3 "$_st_teth")
+R_ACTIVE="none"
+case "$DEFDEV" in
+    "") ;;
+    "$_wan_dev")  [ -n "$_wan_dev" ]  && R_ACTIVE="wan" ;;
+    "$_wwan_dev") [ -n "$_wwan_dev" ] && R_ACTIVE="wwan" ;;
+    "$_teth_dev") [ -n "$_teth_dev" ] && R_ACTIVE="tethering" ;;
+esac
+iface_json_r() {   # $1=uci name  $2=label  $3=l3 device  $4=status blob
+    _u="$4"
+    _up=$(printf '%s' "$_u" | awk -F: '/"up"/{gsub(/[ ,\t]/,"",$2); print $2; exit}')
+    _ip=""; [ -n "$3" ] && _ip=$(ip -4 -o addr show dev "$3" 2>/dev/null | awk '{split($4,x,"/"); print x[1]; exit}')
+    _m=$(uci -q get "network.$1.metric")
+    printf '{"name":"%s","label":"%s","up":%s,"device":"%s","ip":"%s","metric":%s,"active":%s}' \
+        "$1" "$(esc "$2")" "$(jbool_r "$_up")" "$(esc "$3")" "$(esc "$_ip")" \
+        "$(jnum_r "$_m")" "$([ "$R_ACTIVE" = "$1" ] && echo true || echo false)"
+}
+printf '"active":"%s",' "$R_ACTIVE"
+printf '"uplinks":[%s,%s,%s],' \
+    "$(iface_json_r wan 'Ethernet' "$_wan_dev" "$_st_wan")" \
+    "$(iface_json_r tethering 'USB' "$_teth_dev" "$_st_teth")" \
+    "$(iface_json_r wwan 'Wi-Fi' "$_wwan_dev" "$_st_wwan")"
+# connect-attempt state. A stale TRYMARK (watchdog killed, reboot mid-attempt)
+# is ignored after timeout+15s so the UI can't get stuck on "Connecting…".
+CONNECTING=false
+if [ -f "$TRYMARK" ]; then
+    _t=$(cat "$TRYMARK" 2>/dev/null); case "$_t" in ''|*[!0-9]*) _t=0 ;; esac
+    _age=$(( $(date +%s) - _t ))
+    [ "$_age" -lt $((CONNECT_TIMEOUT + 15)) ] && CONNECTING=true || rm -f "$TRYMARK"
+fi
+LASTERR=""
+[ -f "$FAILMARK" ] && LASTERR=$(cat "$FAILMARK" 2>/dev/null)
+printf '"connecting":%s,"connect_timeout":%s,"last_error":"%s",' \
+    "$CONNECTING" "$CONNECT_TIMEOUT" "$(esc "$LASTERR")"
+# is the IoT SSID currently on? (auto-managed with the uplink — see the
+# /etc/hotplug.d/iface/99-repeater-iot script)
+IOTDIS=$(uci -q get wireless.iot2g.disabled); [ -n "$IOTDIS" ] || IOTDIS=0
+printf '"iot_ssid":{"name":"%s","enabled":%s},' \
+    "$(esc "$(uci -q get wireless.iot2g.ssid)")" \
+    "$( [ "$IOTDIS" = "1" ] && echo false || echo true )"
+printf '"scan_note":"Scans both bands via iw (iwinfo cannot scope a scan to the 5 GHz radio on this multi-radio PHY)."'
+printf '}'

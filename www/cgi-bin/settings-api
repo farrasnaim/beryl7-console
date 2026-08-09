@@ -1,0 +1,358 @@
+#!/bin/sh
+# /www/cgi-bin/settings-api  —  curated router configuration.
+#
+# Read: one JSON with the configured values, the live radio state, and the
+# capability data the UI needs to offer only REAL choices (channel list and
+# per-channel maximum width are derived from `iw` at request time, never from
+# a hardcoded Wi-Fi table).
+#
+# Writes are POST + same-origin + router password, because every action here
+# rewrites /etc/config and reloads a service. That is the same bar the other
+# APIs set for config-changing actions (block, radio restart, tunnel delete).
+#
+# Validation lives HERE, not in the browser: channel must be one the radio can
+# legally use, the width must fit that channel's contiguous block, the PHY
+# generation must exist on that band. The UI filters for clarity; this file
+# filters for safety.
+
+PASSWORD="changeme"
+POST_MAX=4096
+PHY=phy0
+
+esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+jnum() { case "$1" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$1" ;; esac; }
+fail() { printf '{"ok":false,"error":"%s"}' "$(esc "$1")"; exit 0; }
+
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+BODY=""
+if [ "$REQUEST_METHOD" = "POST" ]; then
+    CL="${CONTENT_LENGTH:-0}"; case "$CL" in ''|*[!0-9]*) CL=0 ;; esac
+    [ "$CL" -gt "$POST_MAX" ] && fail "body too large"
+    [ "$CL" -gt 0 ] && BODY=$(dd bs=1 count="$CL" 2>/dev/null)
+fi
+
+urldec() {
+    printf '%s' "$1" | awk '
+    BEGIN{ for(i=0;i<16;i++){ h=sprintf("%X",i); H[h]=i; H[tolower(h)]=i } }
+    { gsub(/\+/," "); s=$0; n=length(s); out=""
+      for(i=1;i<=n;i++){ c=substr(s,i,1)
+        if(c=="%" && i+2<=n){ a=substr(s,i+1,1); b=substr(s,i+2,1)
+          if((a in H) && (b in H)){ out=out sprintf("%c",H[a]*16+H[b]); i+=2; continue } }
+        out=out c }
+      printf "%s", out }'
+}
+qs_get() {
+    printf '%s' "${QUERY_STRING}&${BODY}" | tr '&' '\n' \
+      | awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}'
+}
+qs_get_dec() { urldec "$(qs_get "$1")"; }
+
+guard_post() {
+    [ "$REQUEST_METHOD" = "POST" ] || fail "POST required"
+    gp_src="${HTTP_ORIGIN:-$HTTP_REFERER}"
+    gp_src="${gp_src#*://}"; gp_src="${gp_src%%[:/]*}"
+    gp_ok=0
+    case "$gp_src" in
+        "") gp_ok=0 ;;
+        localhost|127.0.0.1|::1) gp_ok=1 ;;
+        *) for gp_ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
+             [ "$gp_ip" = "$gp_src" ] && { gp_ok=1; break; }
+           done ;;
+    esac
+    [ "$gp_ok" = 1 ] || fail "bad origin"
+}
+
+ACTION=$(qs_get action)
+case "$ACTION" in
+    "") ;;
+    *) [ "$REQUEST_METHOD" = "POST" ] || fail "POST required" ;;
+esac
+[ "$REQUEST_METHOD" = "POST" ] && guard_post
+if [ -n "$ACTION" ]; then
+    [ "$(qs_get_dec pw)" = "$PASSWORD" ] || fail "wrong password"
+fi
+
+# ---------------------------------------------------------------- capability --
+# Channel list with a computed per-channel MAXIMUM width. A width is valid only
+# when every channel of its standard contiguous block is present and usable, so
+# regulatory gaps (disabled ranges, No-IR) shrink the offer automatically.
+# One awk owns the block maths for both the read and the write path, so the
+# browser can never smuggle a width past what the offer was computed from.
+# With pick="" it prints the channel list as JSON; with pick=<channel> it
+# prints that channel's maximum width as a bare number.
+chan_calc() {   # $1 = iw band number (1=2.4GHz, 2=5GHz), $2 = pick (optional)
+    iw phy $PHY channels 2>/dev/null | awk -v want="$1" -v pick="${2:-}" '
+    /^[\t ]*Band [0-9]+:/ { band=$2+0; next }
+    /\* [0-9]+ MHz \[[0-9]+\]/ {
+        if (band != want) { cur=0; next }
+        f=$2+0; match($0,/\[[0-9]+\]/); c=substr($0,RSTART+1,RLENGTH-2)+0
+        cur=c; freq[c]=f; disab[c]=($0 ~ /\(disabled\)/)?1:0; order[++n]=c; next
+    }
+    /No IR/          { if (band==want && cur) disab[cur]=1 }
+    /[Rr]adar detection/ { if (band==want && cur) dfs[cur]=1 }
+    END {
+        for (i=1;i<=n;i++) { c=order[i]; if (!disab[c]) ok[c]=1 }
+        for (i=1;i<=n;i++) {
+            c=order[i]; if (disab[c]) continue
+            w=20
+            if (want==1) {
+                if (ok[c-4] || ok[c+4]) w=40
+            } else {
+                base = (c>=149) ? 149 : 36
+                b40 = c - ((c-base)%8);  if (ok[b40] && ok[b40+4]) w=40
+                b80 = c - ((c-base)%16)
+                if (w==40 && ok[b80] && ok[b80+4] && ok[b80+8] && ok[b80+12]) w=80
+                if (w==80) { b160 = c - ((c-base)%32); good=1
+                    for (m=0;m<32;m+=4) if (!ok[b160+m]) good=0
+                    if (good) w=160
+                }
+            }
+            maxw[c]=w
+        }
+        if (pick != "") { print (pick in maxw) ? maxw[pick] : 0; exit }
+        printf "["
+        out=0
+        for (i=1;i<=n;i++) {
+            c=order[i]; if (disab[c]) continue
+            printf "%s{\"c\":%d,\"f\":%d,\"maxw\":%d%s}", (out++?",":""), c, freq[c], maxw[c], (dfs[c]?",\"dfs\":true":"")
+        }
+        printf "]"
+    }'
+}
+chan_json() { chan_calc "$1"; }
+maxw_of()  { chan_calc "$1" "$2"; }
+
+# PHY generations actually present on a band, from the capability blocks.
+# The HT marker is its MCS table — `iw` prints HT caps as a bare
+# "Capabilities:" line, so the literal string "HT Capabilities" never appears.
+gens_of() {     # $1 = iw band number
+    iw phy $PHY info 2>/dev/null | awk -v want="$1" '
+    /^[\t ]*Band [0-9]+:/ { band=$2+0; next }
+    band==want && /HT TX\/RX MCS rate indexes/ { g["HT"]=1 }
+    band==want && /VHT Capabilities/           { g["VHT"]=1 }
+    band==want && /HE PHY Capabilities/        { g["HE"]=1 }
+    band==want && /EHT PHY Capabilities/       { g["EHT"]=1 }
+    END {
+        printf "["
+        n=0
+        split("HT VHT HE EHT", ord, " ")
+        for (i=1;i<=4;i++) if (ord[i] in g) printf "%s\"%s\"", (n++?",":""), ord[i]
+        printf "]"
+    }'
+}
+band_num() { [ "$1" = "2g" ] && echo 1 || echo 2; }
+
+# ------------------------------------------------------------------- writes --
+if [ "$ACTION" = "setwifi" ]; then
+    RADIO=$(qs_get_dec radio)
+    case "$RADIO" in radio0|radio1) ;; *) fail "bad radio" ;; esac
+    BAND=$(uci -q get wireless.$RADIO.band)
+    BN=$(band_num "$BAND")
+    IFSEC=$([ "$RADIO" = "radio0" ] && echo main2g || echo main5g)
+
+    EN=$(qs_get_dec enabled); case "$EN" in 0|1) ;; *) fail "bad enabled flag" ;; esac
+    SSID=$(qs_get_dec ssid | tr -d '\n\r\t')
+    KEY=$(qs_get_dec key | tr -d '\n\r')
+    CH=$(qs_get_dec channel)
+    HT=$(qs_get_dec htmode)
+    TX=$(qs_get_dec txpower)
+
+    SLEN=$(printf '%s' "$SSID" | wc -c)
+    [ "$SLEN" -ge 1 ] && [ "$SLEN" -le 32 ] || fail "network name must be 1-32 characters"
+    if [ -n "$KEY" ]; then
+        KLEN=$(printf '%s' "$KEY" | wc -c)
+        [ "$KLEN" -ge 8 ] && [ "$KLEN" -le 63 ] || fail "password must be 8-63 characters"
+    fi
+    case "$CH" in ''|*[!0-9]*) fail "bad channel" ;; esac
+    MAXW=$(maxw_of "$BN" "$CH"); MAXW=$(jnum "$MAXW")
+    [ "$MAXW" -ge 20 ] || fail "channel $CH is not available on this band"
+
+    GEN=$(printf '%s' "$HT" | sed 's/[0-9]*$//'); W=$(printf '%s' "$HT" | sed 's/^[A-Z]*//')
+    case "$GEN" in HT|VHT|HE|EHT) ;; *) fail "bad mode" ;; esac
+    case "$W" in 20|40|80|160) ;; *) fail "bad width" ;; esac
+    [ "$GEN" = "HT" ] && [ "$W" -gt 40 ] && fail "HT supports 20 or 40 MHz only"
+    gens_of "$BN" | grep -q "\"$GEN\"" || fail "$GEN is not supported on this band"
+    [ "$W" -le "$MAXW" ] || fail "channel $CH supports at most $MAXW MHz"
+
+    if [ -n "$TX" ]; then
+        case "$TX" in *[!0-9]*) fail "bad transmit power" ;; esac
+        [ "$TX" -ge 1 ] && [ "$TX" -le 30 ] || fail "transmit power out of range"
+    fi
+
+    uci set wireless.$RADIO.disabled="$([ "$EN" = "1" ] && echo 0 || echo 1)"
+    uci set wireless.$RADIO.channel="$CH"
+    uci set wireless.$RADIO.htmode="$HT"
+    if [ -n "$TX" ]; then uci set wireless.$RADIO.txpower="$TX"
+    else uci -q delete wireless.$RADIO.txpower; fi
+    uci set wireless.$IFSEC.ssid="$SSID"
+    [ -n "$KEY" ] && uci set wireless.$IFSEC.key="$KEY"
+    uci commit wireless
+    logger -t settings "wifi $RADIO applied via web UI (ch=$CH $HT)"
+    # the whole subshell must drop stdout, or uhttpd holds the response open
+    # until the reload finishes
+    ( sleep 1; wifi reload $RADIO ) >/dev/null 2>&1 &
+    # Echo the committed values back: proof the write landed, not just that the
+    # request arrived. The radio itself confirms on the next status poll.
+    printf '{"ok":true,"applied":{"channel":"%s","htmode":"%s","ssid":"%s"}}' \
+        "$(esc "$CH")" "$(esc "$HT")" "$(esc "$SSID")"
+    exit 0
+fi
+
+if [ "$ACTION" = "setiot" ]; then
+    EN=$(qs_get_dec enabled); case "$EN" in 0|1) ;; *) fail "bad enabled flag" ;; esac
+    SSID=$(qs_get_dec ssid | tr -d '\n\r\t')
+    KEY=$(qs_get_dec key | tr -d '\n\r')
+    SLEN=$(printf '%s' "$SSID" | wc -c)
+    [ "$SLEN" -ge 1 ] && [ "$SLEN" -le 32 ] || fail "network name must be 1-32 characters"
+    if [ -n "$KEY" ]; then
+        KLEN=$(printf '%s' "$KEY" | wc -c)
+        [ "$KLEN" -ge 8 ] && [ "$KLEN" -le 63 ] || fail "password must be 8-63 characters"
+    fi
+    uci set wireless.iot2g.disabled="$([ "$EN" = "1" ] && echo 0 || echo 1)"
+    uci set wireless.iot2g.ssid="$SSID"
+    [ -n "$KEY" ] && uci set wireless.iot2g.key="$KEY"
+    uci commit wireless
+    logger -t settings "iot network applied via web UI"
+    ( sleep 1; wifi reload radio0 ) >/dev/null 2>&1 &
+    printf '{"ok":true}'
+    exit 0
+fi
+
+if [ "$ACTION" = "setlan" ]; then
+    IP=$(qs_get_dec ipaddr)
+    DSTART=$(qs_get_dec start); DLIMIT=$(qs_get_dec limit); DLEASE=$(qs_get_dec leasetime)
+    # IPv4, each octet 0-255, and a private /24 whose host part is not .0/.255
+    printf '%s' "$IP" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || fail "bad router address"
+    O1=${IP%%.*}; R=${IP#*.}; O2=${R%%.*}; R=${R#*.}; O3=${R%%.*}; O4=${R##*.}
+    for o in $O1 $O2 $O3 $O4; do [ "$o" -le 255 ] || fail "bad router address"; done
+    case "$O1.$O2" in 10.*|192.168|172.1[6-9]|172.2[0-9]|172.3[01]) ;; *) fail "router address must be a private range" ;; esac
+    [ "$O4" -ge 1 ] && [ "$O4" -le 254 ] || fail "router address host part must be 1-254"
+    case "$DSTART" in ''|*[!0-9]*) fail "bad DHCP start" ;; esac
+    case "$DLIMIT" in ''|*[!0-9]*) fail "bad DHCP size" ;; esac
+    [ "$DSTART" -ge 2 ] && [ "$DSTART" -le 254 ] || fail "DHCP start must be 2-254"
+    [ "$DLIMIT" -ge 1 ] && [ $((DSTART + DLIMIT - 1)) -le 254 ] || fail "DHCP range runs past .254"
+    # The router must not sit inside its own pool
+    [ "$O4" -ge "$DSTART" ] && [ "$O4" -le $((DSTART + DLIMIT - 1)) ] && fail "the pool would contain the router address"
+    case "$DLEASE" in 30m|1h|6h|12h|24h|72h) ;; *) fail "bad lease time" ;; esac
+
+    OLDIP=$(uci -q get network.lan.ipaddr)
+    uci set dhcp.lan.start="$DSTART"
+    uci set dhcp.lan.limit="$DLIMIT"
+    uci set dhcp.lan.leasetime="$DLEASE"
+    uci commit dhcp
+    if [ "$IP" != "$OLDIP" ]; then
+        uci set network.lan.ipaddr="$IP"
+        uci commit network
+        logger -t settings "LAN address change $OLDIP -> $IP via web UI"
+        # Answer first, move the network afterwards — the response must escape
+        # on the old address before it stops existing.
+        ( sleep 2; /etc/init.d/network reload; sleep 2; /etc/init.d/dnsmasq restart ) >/dev/null 2>&1 &
+        printf '{"ok":true,"moved":"%s"}' "$(esc "$IP")"
+    else
+        logger -t settings "DHCP settings applied via web UI"
+        /etc/init.d/dnsmasq restart >/dev/null 2>&1
+        printf '{"ok":true}'
+    fi
+    exit 0
+fi
+
+if [ "$ACTION" = "setsys" ]; then
+    HN=$(qs_get_dec hostname)
+    ZN=$(qs_get_dec zonename)
+    printf '%s' "$HN" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]{0,22}[A-Za-z0-9])?$' || fail "hostname: letters, digits and hyphens only"
+    TZ=""
+    case "$ZN" in
+        "Asia/Jakarta")        TZ="WIB-7" ;;
+        "Asia/Makassar")       TZ="WITA-8" ;;
+        "Asia/Jayapura")       TZ="WIT-9" ;;
+        "Asia/Singapore")      TZ="<+08>-8" ;;
+        "Asia/Tokyo")          TZ="JST-9" ;;
+        "Asia/Dubai")          TZ="<+04>-4" ;;
+        "Europe/London")       TZ="GMT0BST,M3.5.0/1,M10.5.0" ;;
+        "Europe/Amsterdam")    TZ="CET-1CEST,M3.5.0,M10.5.0/3" ;;
+        "America/New_York")    TZ="EST5EDT,M3.2.0,M11.1.0" ;;
+        "America/Los_Angeles") TZ="PST8PDT,M3.2.0,M11.1.0" ;;
+        "Australia/Sydney")    TZ="AEST-10AEDT,M10.1.0,M4.1.0/3" ;;
+        "UTC")                 TZ="UTC0" ;;
+        *) fail "unsupported time zone" ;;
+    esac
+    uci set system.@system[0].hostname="$HN"
+    uci set system.@system[0].zonename="$ZN"
+    uci set system.@system[0].timezone="$TZ"
+    uci commit system
+    /etc/init.d/system reload >/dev/null 2>&1
+    echo "$HN" > /proc/sys/kernel/hostname 2>/dev/null
+    logger -t settings "system settings applied via web UI (host=$HN tz=$ZN)"
+    printf '{"ok":true}'
+    exit 0
+fi
+
+if [ "$ACTION" = "reboot" ]; then
+    logger -t settings "reboot requested via web UI"
+    ( sleep 2; reboot ) >/dev/null 2>&1 &
+    printf '{"ok":true}'
+    exit 0
+fi
+
+[ -n "$ACTION" ] && fail "unknown action"
+
+# --------------------------------------------------------------------- read --
+NOW=$(date +%s)
+UP=$(cut -d. -f1 /proc/uptime)
+
+radio_json() {  # $1 = radioN
+    R="$1"
+    BAND=$(uci -q get wireless.$R.band)
+    BN=$(band_num "$BAND")
+    IFSEC=$([ "$R" = "radio0" ] && echo main2g || echo main5g)
+    DIS=$(uci -q get wireless.$R.disabled); [ "$DIS" = "1" ] || DIS=0
+    CH=$(uci -q get wireless.$R.channel)
+    HT=$(uci -q get wireless.$R.htmode)
+    TX=$(uci -q get wireless.$R.txpower)
+    CTRY=$(uci -q get wireless.$R.country)
+    SSID=$(uci -q get wireless.$IFSEC.ssid)
+    ENC=$(uci -q get wireless.$IFSEC.encryption)
+    IDIS=$(uci -q get wireless.$IFSEC.disabled); [ "$IDIS" = "1" ] || IDIS=0
+
+    # live state: first AP interface on this band from `iw dev`
+    CUR=$(iw dev 2>/dev/null | awk -v want="$BN" '
+        /^\tInterface/ { isap=0; ch=0; band=0; next }
+        /type AP/ { isap=1; next }
+        /channel/ {
+            ch=$2+0; g=$3; sub(/\(/,"",g); f=g+0
+            match($0,/width: [0-9]+/); w=substr($0,RSTART+7,RLENGTH-7)+0
+            match($0,/center1: [0-9]+/); c1=substr($0,RSTART+9,RLENGTH-9)+0
+            band=(f<3000)?1:2; next
+        }
+        /txpower/ && isap && band==want && ch {
+            printf "{\"channel\":%d,\"freq\":%d,\"width\":%d,\"center\":%d,\"txpower\":%d}", ch, f, w, c1, $2+0
+            exit
+        }')
+    [ -n "$CUR" ] || CUR=null
+
+    printf '{"id":"%s","band":"%s","disabled":%s,"channel":"%s","htmode":"%s","txpower":%s,"country":"%s",' \
+        "$R" "$(esc "$BAND")" "$([ "$DIS" = "1" ] && echo true || echo false)" \
+        "$(esc "$CH")" "$(esc "$HT")" \
+        "$([ -n "$TX" ] && jnum "$TX" || echo null)" "$(esc "$CTRY")"
+    printf '"gens":%s,"channels":%s,"current":%s,' "$(gens_of "$BN")" "$(chan_json "$BN")" "$CUR"
+    printf '"ssid":"%s","enc":"%s","iface_disabled":%s}' \
+        "$(esc "$SSID")" "$(esc "$ENC")" "$([ "$IDIS" = "1" ] && echo true || echo false)"
+}
+
+IOT_SSID=$(uci -q get wireless.iot2g.ssid)
+IOT_DIS=$(uci -q get wireless.iot2g.disabled); [ "$IOT_DIS" = "1" ] || IOT_DIS=0
+
+printf '{"ok":true,"ts":%s,' "$NOW"
+printf '"wireless":{"radios":[%s,%s],' "$(radio_json radio0)" "$(radio_json radio1)"
+printf '"iot":{"ssid":"%s","disabled":%s}},' "$(esc "$IOT_SSID")" "$([ "$IOT_DIS" = "1" ] && echo true || echo false)"
+printf '"lan":{"ipaddr":"%s","netmask":"%s","dhcp":{"start":%s,"limit":%s,"leasetime":"%s"}},' \
+    "$(esc "$(uci -q get network.lan.ipaddr)")" "$(esc "$(uci -q get network.lan.netmask)")" \
+    "$(jnum "$(uci -q get dhcp.lan.start)")" "$(jnum "$(uci -q get dhcp.lan.limit)")" \
+    "$(esc "$(uci -q get dhcp.lan.leasetime)")"
+printf '"system":{"hostname":"%s","zonename":"%s","uptime":%s,"ntp":%s}}' \
+    "$(esc "$(uci -q get system.@system[0].hostname)")" \
+    "$(esc "$(uci -q get system.@system[0].zonename)")" \
+    "$(jnum "$UP")" \
+    "$([ "$(uci -q get system.ntp.enabled)" = "1" ] && echo true || echo false)"

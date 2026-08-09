@@ -1,0 +1,36 @@
+#!/bin/sh /etc/rc.common
+# /etc/init.d/cpugovernor
+#
+# Scale the four A53 cores with load instead of pinning them at 2.0 GHz.
+#
+# mtk-cpufreq on this board comes up with the "userspace" governor and nothing
+# driving it, so the cores sit at maximum clock permanently — measured at
+# 2000 MHz with a load average of 0.00. schedutil drives frequency from
+# scheduler utilisation, which ramps fast enough that forwarding and WireGuard
+# don't notice, and drops to 500 MHz when the router is doing nothing.
+#
+# Revert with:  echo userspace > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
+
+START=99
+STOP=99
+
+GOV=schedutil
+
+boot()  { start; }
+
+start() {
+    for _p in /sys/devices/system/cpu/cpufreq/policy*; do
+        [ -w "$_p/scaling_governor" ] || continue
+        case " $(cat "$_p/scaling_available_governors" 2>/dev/null) " in
+            *" $GOV "*) echo "$GOV" > "$_p/scaling_governor" ;;
+            *) logger -t cpugovernor "$GOV unavailable on $(basename "$_p")" ;;
+        esac
+    done
+    logger -t cpugovernor "governor set to $(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)"
+}
+
+stop() {
+    for _p in /sys/devices/system/cpu/cpufreq/policy*; do
+        [ -w "$_p/scaling_governor" ] && echo performance > "$_p/scaling_governor"
+    done
+}

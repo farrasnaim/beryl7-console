@@ -1,0 +1,128 @@
+#!/bin/sh
+# /etc/hotplug.d/net/30-tethering
+#
+# Adopt whatever network device a USB uplink presents as, and bind it to the
+# 'tethering' interface.
+#
+# GL's firmware hardcoded `option device 'eth2'`. That only works if the
+# tethered device happens to claim that name, and it doesn't reliably: usbnet
+# picks the name from driver flags, so we get
+#
+#   iPhone (ipheth)          -> ethN     FLAG_ETHER
+#   Android RNDIS            -> usbN     usbnet default
+#   Huawei HiLink (cdc_ether)-> ethN     FLAG_ETHER
+#   NCM / QMI / MBIM 5G      -> wwanN    FLAG_WWAN
+#
+# so binding by name is wrong for most of the hardware we support. Detect
+# USB-ness from the sysfs topology instead and adopt whatever the kernel
+# named it.
+
+[ -n "$DEVICENAME" ] || exit 0
+
+LOG="logger -t tethering"
+CUR=$(uci -q get network.tethering.device)
+PROTO=$(uci -q get network.tethering.proto)
+
+l3dev() {
+    ubus call network.interface.tethering status 2>/dev/null \
+      | awk -F'"' '/"l3_device"/{print $4; exit}'
+}
+
+case "$ACTION" in
+    remove)
+        # Under a modem protocol `device` is a control node (/dev/cdc-wdm0),
+        # not a netdev, so CUR won't match. Fall back to asking netifd which
+        # L3 device the interface was using and check whether it survived.
+        L3=$(l3dev)
+        hit=0
+        [ "$DEVICENAME" = "$CUR" ] && hit=1
+        [ -n "$L3" ] && [ ! -e "/sys/class/net/$L3" ] && hit=1
+        [ "$hit" = 1 ] || exit 0
+        rm -f /tmp/.tethering-clash
+        ifdown tethering >/dev/null 2>&1
+        $LOG "USB uplink $DEVICENAME unplugged -> tethering down"
+        exit 0
+        ;;
+    add) ;;
+    *) exit 0 ;;
+esac
+
+# Only adopt devices that hang off a USB bus. SoC ethernet resolves to
+# /devices/platform/..., USB resolves through /usb1/ or /usb2/.
+REAL=$(readlink -f "/sys/class/net/$DEVICENAME" 2>/dev/null)
+case "$REAL" in
+    */usb[0-9]*/*) ;;
+    *) exit 0 ;;
+esac
+
+# Serialise: a composite modem can register several netdevs at once.
+exec 9>>/tmp/.tethering.lock
+flock -n 9 2>/dev/null || exit 0
+
+# A saved modem profile drives the link through qmi/mbim/ncm/3g, where
+# `device` must stay pointed at the control node. The netdev still appears
+# (wwan0 and friends) but netifd owns it — don't clobber the binding.
+case "$PROTO" in
+    dhcp|'') ;;
+    *)
+        $LOG "$DEVICENAME appeared; tethering runs proto=$PROTO, keeping device=$CUR"
+        [ "$(uci -q get network.tethering.disabled)" = "1" ] || \
+            ( sleep 3; ifup tethering ) >/dev/null 2>&1 &
+        exit 0
+        ;;
+esac
+
+# A composite device (e.g. QMI modem exposing both wwan0 and a CDC fallback)
+# registers more than one candidate. First one wins; ignore the rest while
+# the interface is actually carrying the link.
+if [ -n "$CUR" ] && [ "$CUR" != "$DEVICENAME" ] && [ -e "/sys/class/net/$CUR" ]; then
+    $LOG "ignoring $DEVICENAME, already using $CUR"
+    exit 0
+fi
+
+if [ "$CUR" != "$DEVICENAME" ]; then
+    uci set network.tethering.device="$DEVICENAME"
+    uci commit network
+fi
+
+DRV=$(basename "$(readlink -f "/sys/class/net/$DEVICENAME/device/driver" 2>/dev/null)" 2>/dev/null)
+$LOG "adopted USB uplink $DEVICENAME (driver ${DRV:-unknown})"
+
+# Pin the USB device out of autosuspend. Both root hubs default to power/control
+# =auto; if the kernel suspends a tethering phone/modem during an idle moment the
+# uplink silently drops — exactly the kind of intermittent failure that is
+# miserable to diagnose on the road. The netdev's sysfs 'device' node is the USB
+# *interface* (…/1-1:4.2); power/control lives one level up on the USB *device*
+# (…/1-1), so walk up until we find it.
+_usbdev=$(readlink -f "/sys/class/net/$DEVICENAME/device" 2>/dev/null)
+while [ -n "$_usbdev" ] && [ "$_usbdev" != "/" ]; do
+    if [ -f "$_usbdev/power/control" ]; then
+        echo on > "$_usbdev/power/control" 2>/dev/null && \
+            $LOG "autosuspend disabled on $(basename "$_usbdev") for stable tethering"
+        break
+    fi
+    _usbdev=$(dirname "$_usbdev")
+done
+
+rm -f /tmp/.tethering-clash /tmp/.tethering-error
+
+if [ "$(uci -q get network.tethering.disabled)" = "1" ]; then
+    $LOG "tethering is disabled in config -> not bringing $DEVICENAME up"
+    exit 0
+fi
+
+# Open the netdev IMMEDIATELY, before anything else.
+#
+# ipheth only submits RX URBs from its ndo_open, and iphone pairing is not
+# confirmed until an RX URB actually completes (dev->confirmed_pairing).  Until
+# that flag is set, ipheth_carrier_set() returns early and NEVER asks the phone
+# about carrier -- so the link can never come up.  iOS gives the host only about
+# 5s before it resets the interface, so the previous "sleep 3; ifup" lost the
+# race on nearly every attach.  Bringing the link up costs nothing and starts
+# the RX path instantly; the DHCP round trip can still take its time.
+ip link set "$DEVICENAME" up >/dev/null 2>&1
+
+( sleep 1; ifup tethering ) >/dev/null 2>&1 &
+
+flock -u 9 2>/dev/null
+exit 0

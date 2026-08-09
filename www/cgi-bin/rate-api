@@ -1,0 +1,74 @@
+#!/bin/sh
+# /www/cgi-bin/rate-api  —  WAN byte counters, and nothing else.
+#
+# Companion to dashboard-api for the throughput ribbon, which is the only thing
+# on the Overview that genuinely changes second to second. Measured on this
+# router: 9ms wall / 8.5ms CPU / 7 forks per call, against dashboard-api's
+# 455ms / 435ms / 328. That 50x gap is what makes a 1s sample rate affordable —
+# roughly 0.2% of the four cores, versus 7.5% for polling the full payload.
+#
+# Deliberately STATELESS: the client keeps the previous sample and divides.
+# dashboard-api instead divides by whole seconds and parks its previous sample
+# in one shared file, which rounds badly below ~3s (a 1.4s gap reads as 1 or 2)
+# and lets two open tabs consume each other's baseline. Neither applies here.
+#
+# Read-only, takes no parameters and writes nothing, so there is no state to
+# guard and no CSRF surface: the other APIs' POST/origin checks exist to protect
+# writes, and this endpoint has none.
+
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+# The interface actually carrying internet traffic, which is not always
+# network.wan.device — on a Wi-Fi or USB uplink the default route moves there
+# and eth0 goes quiet. pbr keeps its tunnel routes in separate tables
+# (pbr_wg_*, selected by fwmark), so the main table's default is always the
+# physical uplink and never a WireGuard interface.
+DEV=$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
+[ -n "$DEV" ] || DEV=$(uci -q get network.wan.device 2>/dev/null)
+[ -n "$DEV" ] || DEV=eth0
+
+RX=$(cat "/sys/class/net/$DEV/statistics/rx_bytes" 2>/dev/null)
+TX=$(cat "/sys/class/net/$DEV/statistics/tx_bytes" 2>/dev/null)
+case "$RX" in ''|*[!0-9]*) RX=0 ;; esac
+case "$TX" in ''|*[!0-9]*) TX=0 ;; esac
+
+# Monotonic, centisecond resolution. busybox date has no %N, a whole second is
+# far too coarse to divide by at this rate, and monotonic means an NTP step
+# cannot fabricate a spike. Resets on reboot, which the client detects.
+# Read BEFORE the ping below, so the throughput delta is never skewed by how
+# long the round-trip took.
+UP=$(awk '{printf "%.2f", $1; exit}' /proc/uptime 2>/dev/null)
+case "$UP" in ''|*[!0-9.]*) UP=0 ;; esac
+
+# Latency, same target as dashmon's 1-minute ring so the live trace and the 4h
+# history are the same measurement and can share one chart. Costs no CPU worth
+# counting — ping sleeps waiting for the reply rather than computing — and it
+# only runs while someone is actually watching, because this endpoint is polled
+# at 1s only while the Overview is open and the session is active.
+# -W1 bounds the worst case at one second; a lost packet reports null and the
+# client draws a gap instead of inventing a value.
+PING=$(ping -c1 -W1 1.1.1.1 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -1)
+case "$PING" in ''|*[!0-9.]*) PING=null ;; esac
+
+# System vitals, in the SAME units dashboard-api uses (temp in millidegrees,
+# memory in kB) so the client can merge them without converting. Read with
+# shell builtins rather than cat/awk per file — three forks measured 7.5ms of
+# CPU, which is a third of this endpoint's whole budget; `read` costs nothing.
+# Only meminfo needs a parser, so exactly one fork remains.
+read -r LOAD1 _rest < /proc/loadavg 2>/dev/null
+case "$LOAD1" in ''|*[!0-9.]*) LOAD1=0 ;; esac
+read -r TEMPV < /sys/class/thermal/thermal_zone0/temp 2>/dev/null
+case "$TEMPV" in ''|*[!0-9]*) TEMPV=0 ;; esac
+FANV=0
+for _h in /sys/class/hwmon/hwmon*; do
+    [ -f "$_h/fan1_input" ] && { read -r FANV < "$_h/fan1_input" 2>/dev/null; break; }
+done
+case "$FANV" in ''|*[!0-9]*) FANV=0 ;; esac
+MEMLINE=$(awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{printf "%d %d", t+0, a+0}' /proc/meminfo 2>/dev/null)
+MEMT=${MEMLINE%% *}; MEMA=${MEMLINE##* }
+case "$MEMT" in ''|*[!0-9]*) MEMT=0 ;; esac
+case "$MEMA" in ''|*[!0-9]*) MEMA=0 ;; esac
+
+printf '{"ok":true,"dev":"%s","up":%s,"rx":%s,"tx":%s,"ping":%s,' "$DEV" "$UP" "$RX" "$TX" "$PING"
+printf '"load":"%s","temp":%s,"fan":%s,"memt":%s,"mema":%s}' "$LOAD1" "$TEMPV" "$FANV" "$MEMT" "$MEMA"

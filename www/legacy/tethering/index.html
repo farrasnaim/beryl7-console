@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Beryl 7 — Tethering</title>
+<script>
+(function(){try{var t=localStorage.getItem('theme');
+if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark';}
+document.documentElement.setAttribute('data-theme',t);}
+catch(e){document.documentElement.setAttribute('data-theme','dark');}})();
+</script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{position:relative;min-height:100vh;background:var(--bg);color:var(--fg);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  -webkit-font-smoothing:antialiased;padding:20px 18px 60px;max-width:1120px;margin:0 auto}
+body::before{content:"";position:fixed;inset:-15%;z-index:-1;pointer-events:none;
+  background-repeat:no-repeat;
+  background-image:radial-gradient(1000px 560px at center,var(--tint1),transparent 60%),
+                   radial-gradient(900px 520px at center,var(--tint2),transparent 60%);
+  background-position:15% -10%,92% 105%;animation:drift1 26s ease-in-out infinite alternate}
+@keyframes drift1{0%{background-position:15% -10%,92% 105%}50%{background-position:27% 2%,80% 92%}
+  100%{background-position:8% -18%,97% 112%}}
+@media (prefers-reduced-motion:reduce){body::before{animation:none}}
+
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:4px}
+h1{font-size:19px;font-weight:650;letter-spacing:-.01em;margin:0}
+.hmeta{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:7px}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--ok);cursor:pointer;
+  box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 60%,transparent);animation:pl 2.4s infinite}
+.pulse.off{background:var(--bad);animation:none}
+@keyframes pl{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 50%,transparent)}
+  70%{box-shadow:0 0 0 6px color-mix(in srgb,var(--ok) 0%,transparent)}
+  100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 0%,transparent)}}
+nav{display:flex;gap:14px;margin:14px 0 4px;font-size:12.5px;flex-wrap:wrap}
+nav a{color:var(--mut);text-decoration:none;padding-bottom:4px;border-bottom:1.5px solid transparent}
+nav a:hover{color:var(--fg)}
+nav a.on{color:var(--fg);border-bottom-color:var(--accent-hi);font-weight:600}
+
+h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--mut);margin:24px 0 9px}
+.panel{position:relative;background:var(--surface);border:1px solid var(--border);
+  border-radius:13px;padding:15px;overflow:hidden}
+.panel.acc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
+  background:var(--accent,var(--dim));opacity:.6}
+.st{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.stname{font-size:15px;font-weight:600}
+.state{font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 6px;border-radius:5px;
+  border:1px solid var(--border);color:var(--mut)}
+.state.up{color:var(--ok-fg);border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
+.state.dn{color:var(--dim)}
+.state.warn{color:var(--warn-fg);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.state.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
+.trow{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
+.trow .tk{color:var(--dim)}
+.trow .tv{font-variant-numeric:tabular-nums;text-align:right;word-break:break-all}
+.btns{display:flex;gap:7px;margin-top:12px;padding-top:10px;border-top:1px solid var(--border);flex-wrap:wrap}
+.btn{font:inherit;font-size:11.5px;font-weight:600;color:var(--fg);
+  background:var(--surface2);border:1px solid var(--border);border-radius:7px;
+  padding:6px 11px;cursor:pointer}
+.btn:hover{border-color:var(--accent-hi)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.danger:hover{border-color:var(--bad);color:var(--bad)}
+.btn.primary{background:var(--accent-hi);color:var(--bg);border-color:var(--accent-hi)}
+
+.ups{display:grid;gap:0}
+.up{display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;
+  padding:10px 2px;border-top:1px solid var(--border)}
+.up:first-child{border-top:0}
+.updot{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+.updot.live{background:var(--ok)}
+.updot.act{background:var(--accent-hi);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent-hi) 22%,transparent)}
+.uplab{font-size:13px;font-weight:550}
+.upsub{font-size:10.5px;color:var(--dim);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.uptag{font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 6px;border-radius:5px;
+  border:1px solid var(--border);color:var(--dim);white-space:nowrap}
+.uptag.act{color:var(--accent-hi);border-color:color-mix(in srgb,var(--accent-hi) 45%,transparent)}
+
+.dev{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
+  padding:9px 2px;border-top:1px solid var(--border)}
+.dev:first-child{border-top:0}
+.dname{font-size:13px;font-weight:550}
+.dmeta{font-size:10.5px;color:var(--dim);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+label{display:block;font-size:11.5px;color:var(--mut);margin-bottom:11px}
+input,select{display:block;width:100%;margin-top:5px;font:inherit;font-size:13px;
+  color:var(--fg);background:var(--surface2);border:1px solid var(--border);
+  border-radius:7px;padding:8px 9px}
+input[hidden]{display:none}
+.hint{font-size:11px;color:var(--dim);margin-top:3px;line-height:1.45}
+.hint code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;
+  background:var(--surface2);padding:1px 4px;border-radius:4px;color:var(--mut)}
+label.chk{display:flex;align-items:center;gap:8px;color:var(--mut);font-size:12px;margin-top:-4px}
+label.chk input{width:auto;margin:0;display:inline-block}
+.msg{font-size:11.5px;min-height:1.2em;margin-top:9px}
+.msg.ok{color:var(--ok-fg)}.msg.err{color:var(--bad)}
+.empty{color:var(--mut);font-size:13.5px;padding:20px 0}
+.failnote{display:flex;align-items:flex-start;gap:12px;font-size:12px;color:var(--bad);
+  background:color-mix(in srgb,var(--bad) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--bad) 35%,transparent);border-radius:11px;
+  padding:11px 13px;margin-bottom:10px;line-height:1.5}
+.failnote span{flex:1;min-width:0}
+.failnote .btn{flex-shrink:0;padding:5px 10px}
+.note{font-size:11.5px;color:var(--warn-fg);background:color-mix(in srgb,var(--warn) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--warn) 32%,transparent);border-radius:9px;
+  padding:9px 11px;margin-bottom:14px;line-height:1.5}
+.disc{cursor:pointer;font-size:11px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--mut);list-style:none;padding:2px 0}
+.disc::-webkit-details-marker{display:none}
+.disc::before{content:"▸ ";color:var(--dim)}
+details[open] .disc::before{content:"▾ "}
+.guide{font-size:12.5px;line-height:1.6;color:var(--mut);margin-top:11px}
+.guide b{color:var(--fg);font-weight:600}
+.guide ol{margin:5px 0 14px;padding-left:19px}
+.guide li{margin:2px 0}
+.guide code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:11.5px;background:var(--surface2);padding:1px 5px;border-radius:4px;color:var(--fg)}
+.log{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;
+  line-height:1.65;color:var(--dim);max-height:210px;overflow:auto;white-space:pre-wrap;
+  word-break:break-all}
+@media (max-width:520px){body{padding:16px 13px 46px}}
+</style>
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<header class="appbar">
+  <div class="appbar__brand">
+    <span class="nav__dot" id="pulse"></span>
+    <span class="appbar__name"><span class="t-long">Farras's GL.iNet Beryl 7 🔱</span><span class="t-short">Beryl 7 🔱</span></span>
+  </div>
+  <div class="appbar__tools">
+    <span class="nav__status" id="stamp">connecting…</span>
+    <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle colour theme" title="Toggle light / dark">
+      <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
+  </div>
+</header>
+<nav class="tabbar" aria-label="Sections">
+  <a class="tabbar__item" href="/dashboard/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.7V21h14V9.7"/></svg><span>Home</span></a>
+  <a class="tabbar__item" href="/vpn/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5.2c0 4.3-2.9 7.9-7 9.8-4.1-1.9-7-5.5-7-9.8V6z"/><path d="m9.2 11.8 2 2 3.6-3.9"/></svg><span>VPN</span></a>
+  <a class="tabbar__item" href="/repeater/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 11.8a11 11 0 0 1 15 0"/><path d="M7.6 14.9a7 7 0 0 1 8.8 0"/><circle cx="12" cy="18.4" r="1.5" fill="currentColor" stroke="none"/></svg><span>Repeater</span></a>
+  <a class="tabbar__item is-active" aria-current="page" href="/tethering/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7h2.5a5 5 0 0 1 0 10H15"/><path d="M9 7H6.5a5 5 0 0 0 0 10H9"/><path d="M8.5 12h7"/></svg><span>Tethering</span></a>
+</nav>
+<div class="pagehead"><h1 class="pagetitle">Tethering</h1><p class="pagesub">Internet from a USB phone or modem</p></div>
+
+<div class="failnote" id="clash" style="display:none">
+  <span id="clashTxt"></span>
+  <button class="btn" id="clashDismiss">Dismiss</button>
+</div>
+
+<h2>Internet Source</h2>
+<div class="panel">
+  <div class="ups" id="ups"></div>
+  <div class="hint" id="upHint" style="margin-top:11px"></div>
+</div>
+
+<h2>USB Port</h2>
+<div class="panel" id="usbPanel">
+  <div id="usbBody"><div class="empty">Loading…</div></div>
+  <div class="btns">
+    <button class="btn primary" id="modemBtn" style="display:none">Configure modem…</button>
+    <button class="btn" id="redetectBtn">Rescan</button>
+    <button class="btn" id="upBtn">Connect</button>
+    <button class="btn" id="downBtn">Disconnect</button>
+    <button class="btn danger" id="toggleBtn">Turn Off Tethering</button>
+    <button class="btn danger" id="forgetBtn">Forget Device</button>
+  </div>
+  <div class="msg" id="actMsg"></div>
+</div>
+
+<details class="sec"><summary><h2>Uplink Priority</h2></summary>
+<div class="panel">
+  <label>If both a USB modem and a Wi-Fi repeater are connected, use
+    <select id="pref">
+      <option value="modem">USB modem / phone (recommended)</option>
+      <option value="wifi">Wi-Fi repeater (hotel network)</option>
+    </select>
+    <div class="hint">Ethernet always wins over both when the cable is live. This only
+      decides the tie-break between your two wireless uplinks.</div>
+  </label>
+  <div class="msg" id="prefMsg"></div>
+</div>
+</details>
+
+<section id="modemWrap" style="display:none">
+<h2>Modem Profile</h2>
+<div class="panel">
+  <div class="hint" style="margin-bottom:14px">A bare modem will not attach to the carrier until it
+    is given an APN. Phones and HiLink dongles dial themselves and never need any of this — which
+    is why this section only appears when something that needs it is plugged in.</div>
+  <label>Protocol
+    <select id="mproto">
+      <option value="qmi">QMI</option>
+      <option value="mbim">MBIM</option>
+      <option value="ncm">NCM</option>
+      <option value="3g">AT + PPP (older 3G sticks)</option>
+    </select>
+    <div class="hint" id="mprotoHint"></div>
+  </label>
+  <label>Control device
+    <select id="mdev"></select>
+    <div class="hint">The node netifd sends commands to — not the data interface.
+      QMI and MBIM use <code>/dev/cdc-wdm*</code>; NCM and AT sticks use a serial port.</div>
+  </label>
+  <label>APN
+    <input id="mapn" placeholder="internet" autocomplete="off">
+    <div class="hint">From the carrier whose SIM is in the modem. Indosat is usually
+      <code>indosatgprs</code>, Telkomsel <code>internet</code>, XL <code>internet</code>.</div>
+  </label>
+  <label id="mpdpWrap">IP type
+    <select id="mpdp">
+      <option value="ipv4v6">IPv4 + IPv6</option>
+      <option value="ipv4">IPv4 only</option>
+      <option value="ipv6">IPv6 only</option>
+    </select>
+  </label>
+  <label id="mdialWrap" style="display:none">Dial number
+    <input id="mdial" placeholder="*99#" autocomplete="off">
+  </label>
+  <label>Authentication
+    <select id="mauth">
+      <option value="none">None</option>
+      <option value="pap">PAP</option>
+      <option value="chap">CHAP</option>
+      <option value="both">PAP or CHAP</option>
+    </select>
+    <div class="hint">Most Indonesian prepaid APNs need none. Leave it alone unless your
+      carrier gave you a username.</div>
+  </label>
+  <label>Username<input id="muser" autocomplete="off"></label>
+  <label>Password<input id="mpass" type="password" autocomplete="new-password"></label>
+  <label class="chk" id="mclrpwWrap" style="display:none">
+    <input type="checkbox" id="mclrpw"> Clear the stored password
+  </label>
+  <label>SIM PIN
+    <input id="mpin" type="password" autocomplete="new-password">
+    <div class="hint">Only if the SIM is locked. Repeated wrong PINs will lock it to the PUK.</div>
+  </label>
+  <label class="chk" id="mclrpinWrap" style="display:none">
+    <input type="checkbox" id="mclrpin"> Clear the stored PIN
+  </label>
+  <label>Startup delay
+    <input id="mdelay" placeholder="0" inputmode="numeric">
+    <div class="hint">Seconds to wait before the first command. Sticks that enumerate slowly
+      need 5–15; leave blank if it works without.</div>
+  </label>
+  <div class="btns">
+    <button class="btn primary" id="msaveBtn">Save and Connect</button>
+    <button class="btn danger" id="mclearBtn" style="display:none">Revert to DHCP</button>
+  </div>
+  <div class="msg" id="modemMsg"></div>
+</div>
+</section>
+
+<details class="sec"><summary><h2>Setup Guides</h2></summary>
+<div class="panel">
+<details>
+  <summary class="disc">iPhone — USB tethering</summary>
+  <div class="guide">
+    <ol>
+      <li>Plug the iPhone into the router's USB-A port with a Lightning/USB-C data cable.</li>
+      <li>Unlock the phone and tap <b>Trust</b> on the "Trust This Computer?" prompt.
+          It only appears once per router.</li>
+      <li>Turn on <b>Settings → Personal Hotspot → Allow Others to Join</b>.</li>
+    </ol>
+    The <code>ipheth</code> driver plus <code>usbmuxd</code> handle the pairing. iOS hands out
+    <code>172.20.10.0/28</code>, which cannot collide with anything here.
+    If nothing appears, unplug it, plug it back in, and tap <b>Rescan</b> — iOS sometimes
+    refuses the handshake if the phone was locked at plug-in.
+  </div>
+</details>
+<details>
+  <summary class="disc">Android — USB tethering</summary>
+  <div class="guide">
+    <ol>
+      <li>Plug the phone in, then set the USB mode to anything other than "charge only"
+          if prompted.</li>
+      <li>Enable <b>Settings → Network &amp; internet → Hotspot &amp; tethering → USB tethering</b>.
+          The toggle only becomes tappable once the cable is in.</li>
+    </ol>
+    Android shows up as <code>rndis_host</code> (most phones) or <code>cdc_ncm</code>
+    (newer Samsung/Pixel). Both drivers are installed. The usual subnet is
+    <code>192.168.42.0/24</code> — no conflict.
+  </div>
+</details>
+<details>
+  <summary class="disc">Huawei E5577 and other MiFi units</summary>
+  <div class="guide">
+    Plug it in and it should just work — the E5577 presents itself as a network device
+    and serves <code>192.168.9.0/24</code>, which does not overlap your LAN
+    (<code>192.168.8.0/24</code>), your IoT network (<code>192.168.10.0/24</code>) or the
+    upstream network (<code>192.168.1.0/24</code>). Its own admin page stays reachable at
+    <code>192.168.9.1</code> while tethered.
+  </div>
+</details>
+<details>
+  <summary class="disc">Huawei HiLink dongles — read before plugging in</summary>
+  <div class="guide">
+    <b>E3372h, E8372 and most HiLink sticks default to <code>192.168.8.1/24</code> — the
+    exact address of this router's LAN.</b> That is a genuine conflict, not a warning to
+    click past: two identical <code>/24</code> routes end up in the table and LAN traffic
+    starts leaving through the USB port at random.
+    <ol>
+      <li>Plug the dongle into a PC first and open its web UI.</li>
+      <li>Change its LAN/DHCP range to something unused — <code>192.168.9.0/24</code> or
+          <code>192.168.77.0/24</code>.</li>
+      <li>Then move it to the router.</li>
+    </ol>
+    If you plug one in unchanged, the router detects the overlap, refuses the uplink and
+    tells you here rather than silently breaking your LAN.
+  </div>
+</details>
+<details>
+  <summary class="disc">5G / LTE modem sticks</summary>
+  <div class="guide">
+    Drivers for every common mode are installed: <code>qmi_wwan</code>,
+    <code>cdc_mbim</code>, <code>cdc_ncm</code>, <code>huawei_cdc_ncm</code>,
+    <code>rndis_host</code>, <code>sierra_net</code> and <code>option</code> for AT-command
+    sticks, alongside <code>usb-modeswitch</code> with the full mode database.
+    <ol>
+      <li>Plug in and wait about ten seconds.</li>
+      <li>If the USB panel says <b>mass storage — mode switch pending</b>, tap
+          <b>Re-detect</b>; that runs the mode-switch database against it.</li>
+      <li>A stick that lands as a serial port instead of a network device shows up under
+          <b>Serial ports</b> below. Those need an APN and a dial script, which this page
+          does not do yet — tell me the model and I'll wire up the right protocol.</li>
+    </ol>
+  </div>
+</details>
+</div>
+</details>
+
+<details class="sec"><summary><h2>Recent Activity</h2></summary>
+<div class="panel"><div class="log" id="log">—</div></div>
+</details>
+
+<script>
+(function(){
+var API='/cgi-bin/tethering-api';
+var pulse=document.getElementById('pulse'), stamp=document.getElementById('stamp'), S=null;
+var busy=false;
+
+(function(){
+  var tbtn=document.getElementById('themeToggle');
+  var media=window.matchMedia?window.matchMedia('(prefers-color-scheme: light)'):null;
+  function current(){
+    return document.documentElement.getAttribute('data-theme')
+        || ((media&&media.matches)?'light':'dark');
+  }
+  if(tbtn) tbtn.addEventListener('click',function(){
+    var next = current()==='dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme',next);
+    try{ localStorage.setItem('theme',next); }catch(e){}
+  });
+})();
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function el(id){return document.getElementById(id);}
+function dur(s){s=+s||0;var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  if(d)return d+'d '+h+'h'; if(h)return h+'h '+m+'m'; if(m)return m+'m'; return s+'s';}
+function say(node,txt,cls){var n=el(node);n.className='msg'+(cls?' '+cls:'');n.textContent=txt;}
+
+function post(action,params){
+  var b='action='+encodeURIComponent(action);
+  for(var k in params) b+='&'+k+'='+encodeURIComponent(params[k]);
+  return fetch(API,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
+    .then(function(r){return r.json();});
+}
+
+function renderUplinks(d){
+  var box=el('ups'), ups=(d.uplinks||[]).slice();
+  ups.sort(function(a,b){return (+a.metric)-(+b.metric);});
+  var RANK=['1st choice','2nd choice','3rd choice'];
+  box.innerHTML='';
+  ups.forEach(function(u,i){
+    var row=document.createElement('div'); row.className='up';
+    var cls='updot'+(u.active?' act':(u.up?' live':''));
+    var sub = u.up ? (esc(u.device)+(u.ip?' · '+esc(u.ip):'')) : 'not connected';
+    row.innerHTML='<span class="'+cls+'"></span>'+
+      '<span><div class="uplab">'+esc(u.label)+'</div><div class="upsub">'+sub+'</div></span>'+
+      '<span class="uptag'+(u.active?' act':'')+'">'+
+        (u.active?'IN USE':esc(RANK[i]||('metric '+u.metric)))+'</span>';
+    box.appendChild(row);
+  });
+  var act=ups.filter(function(u){return u.active;})[0];
+  el('upHint').textContent = act
+    ? 'All traffic is flowing through ' + act.label + '.'
+    : 'Not connected — none of the uplinks has a route to the internet.';
+}
+
+function renderUsb(d){
+  var b=el('usbBody'), h='';
+  if(d.device && d.present){
+    // "no carrier" is a different failure from "no address": the cable is fine and
+    // the driver is bound, the device at the other end just is not sharing yet.
+    // Distinguishing them is the difference between a 5-second fix and an hour lost.
+    var noLink = !(+d.carrier);
+    var st = d.iface.up ? '<span class="state up">CONNECTED</span>'
+           : (d.clash ? '<span class="state bad">REFUSED</span>'
+           : (!d.enabled ? '<span class="state dn">DISABLED</span>'
+           : (noLink ? '<span class="state warn">NOT SHARING</span>'
+           : '<span class="state warn">NO ADDRESS</span>')));
+    h+='<div class="st"><span class="stname">'+esc(d.kind)+'</span>'+st+'</div>';
+    h+='<div class="trow"><span class="tk">interface</span><span class="tv">'+esc(d.device)+'</span></div>';
+    h+='<div class="trow"><span class="tk">driver</span><span class="tv">'+esc(d.driver||'—')+'</span></div>';
+    h+='<div class="trow"><span class="tk">link</span><span class="tv">'+(+d.carrier?'carrier up':'no carrier')+'</span></div>';
+    if(noLink && d.enabled && !d.clash){
+      h+='<div class="hint">'+(d.driver==='ipheth'
+        ? 'The iPhone is plugged in and paired, but it is not sharing its connection yet. '+
+          'On the phone open <b>Settings &rsaquo; Personal Hotspot</b> and turn on '+
+          '<b>Allow Others to Join</b> — the link comes up within a second or two.'
+        : (d.driver==='rndis_host'||d.driver==='cdc_ether'||d.driver==='cdc_ncm'
+        ? 'The phone is plugged in but not sharing yet. Turn on USB tethering in its '+
+          'network settings and this connects on its own.'
+        : 'The device is attached but its link is down. A phone needs tethering switched '+
+          'on; a mobile modem may still be attaching to the network.'))+'</div>';
+    }
+    if(d.iface.ip)
+      h+='<div class="trow"><span class="tk">address</span><span class="tv">'+esc(d.iface.ip)+'</span></div>';
+    if(d.iface.gw)
+      h+='<div class="trow"><span class="tk">gateway</span><span class="tv">'+esc(d.iface.gw)+'</span></div>';
+    if(d.iface.dns && d.iface.dns.length)
+      h+='<div class="trow"><span class="tk">dns</span><span class="tv">'+esc(d.iface.dns.join(', '))+'</span></div>';
+    if(d.iface.up)
+      h+='<div class="trow"><span class="tk">up for</span><span class="tv">'+dur(d.iface.uptime)+'</span></div>';
+  } else if(d.device && !d.present){
+    h+='<div class="st"><span class="stname">'+esc(d.device)+'</span>'+
+       '<span class="state dn">UNPLUGGED</span></div>'+
+       '<div class="hint">Remembered from the last time something was plugged in. '+
+       'Plug it back and it reconnects automatically, or press Forget device.</div>';
+  } else {
+    h+='<div class="empty">Nothing is connected to the USB port.</div>';
+  }
+
+  if(d.usb && d.usb.length){
+    h+='<div style="margin-top:13px;padding-top:11px;border-top:1px solid var(--border)">';
+    d.usb.forEach(function(u){
+      var nm=(u.vendor||'')+(u.vendor&&u.product?' ':'')+(u.product||'');
+      if(!nm) nm='USB device';
+      h+='<div class="dev"><span><div class="dname">'+esc(nm)+'</div>'+
+         '<div class="dmeta">'+esc(u.id)+' · port '+esc(u.port)+
+         (u.drivers?' · '+esc(u.drivers):'')+'</div></span>'+
+         '<span class="uptag">'+esc(u.kind)+'</span></div>';
+    });
+    h+='</div>';
+  }
+  if(d.serial && d.serial.length){
+    h+='<div class="hint" style="margin-top:11px">Serial ports exposed: <b>'+
+       esc(d.serial.join(', '))+'</b> — this modem speaks AT commands rather than presenting '+
+       'a network device. It needs an APN and dial profile, which this page does not set up yet.</div>';
+  }
+  if(!d.usbmuxd && d.driver==='ipheth'){
+    h+='<div class="hint" style="color:var(--warn-fg);margin-top:9px">usbmuxd is not running — '+
+       'the iPhone will not pass traffic until it is. Try Re-detect.</div>';
+  }
+  b.innerHTML=h;
+
+  el('toggleBtn').textContent = d.enabled ? 'Turn Off Tethering' : 'Turn On Tethering';
+  el('upBtn').disabled   = busy || !d.present || !d.enabled || d.iface.up;
+  el('downBtn').disabled = busy || !d.iface.up;
+  el('forgetBtn').disabled = busy || !d.device;
+}
+
+function renderClash(d){
+  var box=el('clash');
+  if(!d.clash){ box.style.display='none'; return; }
+  box.style.display='';
+  el('clashTxt').innerHTML='<b>Uplink refused — subnet conflict.</b> The USB device handed out '+
+    '<code>'+esc(d.clash.tether)+'</code>, which overlaps <code>'+esc(d.clash['with'])+'</code> '+
+    'already routed on <code>'+esc(d.clash.dev)+'</code>. Bringing it up would have sent some of '+
+    'your LAN traffic out through the USB port. Change the subnet in the modem’s own admin '+
+    'page, then tap Rescan.';
+}
+
+// ---- modem profile form ----
+// The poller refreshes every 5s, which would wipe half-typed input. Once the
+// user touches a field we stop repainting the form until they save or cancel.
+var modemTouched=false;
+
+function syncProtoFields(){
+  var p=el('mproto').value;
+  el('mpdpWrap').style.display  = (p==='3g') ? 'none' : '';
+  el('mdialWrap').style.display = (p==='3g') ? '' : 'none';
+  el('mprotoHint').textContent = {
+    qmi : 'Qualcomm QMI. Fastest and most common on modern LTE/5G modules.',
+    mbim: 'Standardised MBIM. Try this if QMI does not attach.',
+    ncm : 'Huawei and similar NCM sticks. Driven over an AT command port.',
+    '3g': 'AT commands over PPP. Slowest path — only for older 3G sticks.'
+  }[p] || '';
+}
+
+function fillModemForm(d){
+  var m=d.modem||{}, p=m.profile||{};
+  var sel=el('mdev'); sel.innerHTML='';
+  var nodes=(d.serial||[]).slice();
+  if(p.device && p.device.indexOf('/dev/')===0 && nodes.indexOf(p.device)<0) nodes.push(p.device);
+  if(!nodes.length){
+    var o=document.createElement('option');
+    o.value=''; o.textContent='no control device detected'; sel.appendChild(o);
+  }
+  nodes.forEach(function(n){
+    var o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o);
+  });
+  sel.value = p.device || m.suggest_device || (nodes[0]||'');
+
+  el('mproto').value = m.configured ? (m.proto||m.suggest_proto||'qmi')
+                                    : (m.suggest_proto||'qmi');
+  el('mapn').value   = p.apn||'';
+  el('mauth').value  = p.auth||'none';
+  el('muser').value  = p.username||'';
+  el('mpdp').value   = p.pdptype||'ipv4v6';
+  el('mdial').value  = p.dialnumber||'';
+  el('mdelay').value = p.delay||'';
+  el('mpass').value=''; el('mpin').value='';
+  el('mpass').placeholder = p.has_password ? 'stored — blank keeps it' : '';
+  el('mpin').placeholder  = p.has_pin      ? 'stored — blank keeps it' : '';
+  el('mclrpwWrap').style.display  = p.has_password ? '' : 'none';
+  el('mclrpinWrap').style.display = p.has_pin      ? '' : 'none';
+  el('mclrpw').checked=false; el('mclrpin').checked=false;
+  el('mclearBtn').style.display = m.configured ? '' : 'none';
+  syncProtoFields();
+}
+
+function renderModem(d){
+  var m=d.modem||{}, btn=el('modemBtn'), wrap=el('modemWrap');
+  if(!m.is_modem){
+    btn.style.display='none';
+    wrap.style.display='none';
+    return;
+  }
+  btn.style.display='';
+  btn.textContent = m.configured ? 'Edit modem profile' : 'Configure modem…';
+  if(!modemTouched) fillModemForm(d);
+}
+
+function draw(d){
+  S=d;
+  renderClash(d);
+  renderUplinks(d);
+  renderUsb(d);
+  renderModem(d);
+  el('log').textContent = (d.log&&d.log.length) ? d.log.join('\n') : 'Nothing logged yet.';
+  function metricOf(n,dflt){
+    var u=(d.uplinks||[]).filter(function(x){return x.name===n;})[0];
+    return u ? (+u.metric||dflt) : dflt;
+  }
+  el('pref').value = (metricOf('tethering',20) <= metricOf('wwan',30)) ? 'modem' : 'wifi';
+}
+
+function poll(){
+  fetch(API,{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok) throw new Error('bad payload');
+    pulse.classList.remove('off');
+    stamp.textContent=new Date().toLocaleTimeString();
+    draw(d);
+  }).catch(function(){
+    pulse.classList.add('off');
+    stamp.textContent='offline';
+  });
+}
+
+function act(action,params,msgNode){
+  if(busy) return;
+  busy=true;
+  say(msgNode||'actMsg','Working…','');
+  post(action,params).then(function(r){
+    busy=false;
+    // r.hint means "accepted, but the far end has not come up" — not a success.
+    if(r&&r.ok){ say(msgNode||'actMsg', r.hint||'Done.', r.hint?'':'ok'); }
+    else { say(msgNode||'actMsg',(r&&r.error)?r.error:'Failed.','err'); }
+    setTimeout(poll,1200);
+  }).catch(function(){
+    busy=false; say(msgNode||'actMsg','Request failed.','err');
+  });
+}
+
+el('redetectBtn').addEventListener('click',function(){
+  if(busy) return; busy=true; say('actMsg','Scanning USB bus…','');
+  post('redetect',{}).then(function(r){
+    busy=false;
+    if(r&&r.ok&&r.device) say('actMsg','Found '+r.device+'.','ok');
+    else if(r&&r.ok) say('actMsg','No USB network device found.','err');
+    else say('actMsg','Failed.','err');
+    setTimeout(poll,1500);
+  }).catch(function(){busy=false;say('actMsg','Request failed.','err');});
+});
+el('upBtn').addEventListener('click',function(){act('up');});
+el('downBtn').addEventListener('click',function(){act('down');});
+el('forgetBtn').addEventListener('click',function(){act('forget');});
+el('toggleBtn').addEventListener('click',function(){
+  act(S&&S.enabled?'disable':'enable');
+});
+el('clashDismiss').addEventListener('click',function(){act('clearerr');});
+
+el('modemBtn').addEventListener('click',function(){
+  var w=el('modemWrap'), show = (w.style.display==='none');
+  w.style.display = show ? '' : 'none';
+  if(show){
+    modemTouched=false;
+    if(S) fillModemForm(S);
+    w.scrollIntoView({behavior:'smooth',block:'start'});
+  }
+});
+['mproto','mdev','mapn','mauth','muser','mpass','mpin','mpdp','mdial','mdelay',
+ 'mclrpw','mclrpin'].forEach(function(id){
+  var n=el(id);
+  n.addEventListener('input', function(){modemTouched=true;});
+  n.addEventListener('change',function(){modemTouched=true;});
+});
+el('mproto').addEventListener('change',syncProtoFields);
+
+el('msaveBtn').addEventListener('click',function(){
+  var apn=el('mapn').value.trim();
+  if(!apn){ say('modemMsg','APN is required — the modem cannot attach without it.','err'); return; }
+  if(!el('mdev').value){ say('modemMsg','No control device detected to talk to.','err'); return; }
+  var params={
+    proto:el('mproto').value, device:el('mdev').value, apn:apn,
+    auth:el('mauth').value, username:el('muser').value.trim(),
+    password:el('mpass').value, pincode:el('mpin').value,
+    pdptype:el('mpdp').value, dialnumber:el('mdial').value.trim(),
+    delay:el('mdelay').value.trim()
+  };
+  if(el('mclrpw').checked)  params.clearpw='1';
+  if(el('mclrpin').checked) params.clearpin='1';
+  modemTouched=false;
+  act('modemsave',params,'modemMsg');
+});
+
+el('mclearBtn').addEventListener('click',function(){
+  modemTouched=false;
+  act('modemclear',{},'modemMsg');
+});
+el('pref').addEventListener('change',function(){
+  act('priority',{pref:this.value},'prefMsg');
+});
+
+poll();
+setInterval(poll,5000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+#!/bin/sh
+# /usr/sbin/apwatch — keep the serving Wi-Fi alive without human help.
+#
+# WHY THIS EXISTS: every repeater action runs `wifi reload`, which bounces BOTH
+# radios (single PHY). If a reload ever fails to bring an AP back — a wedged
+# mt76 radio, a failed STA association taking its radio down with it — someone
+# with only a phone has no way in: no AP, no dashboard, no SSH. This watchdog
+# closes that hole by noticing and recovering on its own.
+#
+# ESCALATION, gentlest first, and it stops as soon as the AP is back:
+#   strike 1  ->  `wifi up`            (re-apply wireless config)
+#   strike 2  ->  `wifi reload`        (fuller restart of the wireless stack)
+#   strike 3+ ->  reboot               (last resort, heavily rate-limited)
+#
+# It deliberately does NOT touch anything while a repeater connect is in flight,
+# and it never reboots more than once an hour or within 10 min of boot, so it
+# can't turn a bad config into a boot loop.
+
+STATE=/tmp/.apwatch.strikes
+RBMARK=/etc/apwatch.lastreboot          # persistent: must survive the reboot
+LOG="logger -t apwatch"
+
+MIN_UPTIME=600          # don't act during the first 10 min (boot still settling)
+REBOOT_COOLDOWN=3600    # at most one self-reboot per hour
+
+uptime_s=$(cut -d. -f1 /proc/uptime 2>/dev/null); : "${uptime_s:=0}"
+[ "$uptime_s" -lt "$MIN_UPTIME" ] && exit 0
+
+# A repeater connect legitimately tears radios down for a few seconds.
+[ -f /tmp/.repeater-trying ] && exit 0
+
+# Which AP sections are *supposed* to be running right now?
+want=0; have=0; missing=""
+for sec in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+    [ "$(uci -q get wireless.$sec.mode)" = "ap" ] || continue
+    [ "$(uci -q get wireless.$sec.disabled)" = "1" ] && continue
+    want=$((want+1))
+    ifn=$(ubus call network.wireless status 2>/dev/null | awk -v w="$sec" '
+        /"section":/ { gsub(/[",]/,""); s=$2 }
+        /"ifname":/  { gsub(/[",]/,""); if (s==w) { print $2; exit } }')
+    # Present in ubus AND actually carrying the IFF_UP flag in the kernel.
+    if [ -n "$ifn" ] && [ -e "/sys/class/net/$ifn" ] && \
+       grep -qi 'up' "/sys/class/net/$ifn/operstate" 2>/dev/null; then
+        have=$((have+1))
+    else
+        # operstate for an AP with no clients reads "unknown", not "up" — so fall
+        # back to the admin flag, which is what actually matters here.
+        if [ -n "$ifn" ] && [ -e "/sys/class/net/$ifn/flags" ] && \
+           [ $(( $(cat "/sys/class/net/$ifn/flags" 2>/dev/null || echo 0) & 1 )) -eq 1 ]; then
+            have=$((have+1))
+        else
+            missing="$missing $sec"
+        fi
+    fi
+done
+
+# No APs configured at all? Nothing to guard.
+[ "$want" -gt 0 ] || exit 0
+
+if [ "$have" -ge "$want" ]; then
+    [ -f "$STATE" ] && { rm -f "$STATE"; $LOG "all $want AP(s) healthy again"; }
+    exit 0
+fi
+
+strikes=$(cat "$STATE" 2>/dev/null); case "$strikes" in ''|*[!0-9]*) strikes=0 ;; esac
+strikes=$((strikes+1))
+echo "$strikes" > "$STATE"
+$LOG "AP(s) missing:$missing ($have/$want up) — strike $strikes"
+
+case "$strikes" in
+    1) $LOG "recovery: wifi up";     wifi up     >/dev/null 2>&1 ;;
+    2) $LOG "recovery: wifi reload"; wifi reload >/dev/null 2>&1 ;;
+    *)
+        now=$(date +%s)
+        last=$(cat "$RBMARK" 2>/dev/null); case "$last" in ''|*[!0-9]*) last=0 ;; esac
+        if [ $((now - last)) -lt "$REBOOT_COOLDOWN" ]; then
+            $LOG "would reboot, but last self-reboot was $((now-last))s ago — holding off"
+            exit 0
+        fi
+        $LOG "AP still down after 3 attempts — rebooting to recover"
+        echo "$now" > "$RBMARK"; sync
+        rm -f "$STATE"
+        # setsid: a plain background reboot dies with the cron child
+        setsid sh -c 'sleep 2; reboot' >/dev/null 2>&1 &
+        ;;
+esac
+exit 0

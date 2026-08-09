@@ -1,0 +1,420 @@
+#!/bin/sh
+# /www/cgi-bin/tethering-api  —  USB uplink (phone / modem tethering) manager.
+#
+# Model: any USB network device is adopted by /etc/hotplug.d/net/30-tethering
+# into the `tethering` interface (proto dhcp, wan firewall zone). This CGI
+# reports what is attached and lets you enable/disable it and set its priority
+# relative to the other two uplinks.
+#
+# Uplink priority is by route metric, lower wins:
+#     wan  10   ethernet to the ONT   — always preferred at home
+#     tethering 20                    — deliberate physical act, beats stale Wi-Fi
+#     wwan 30   repeater / hotel Wi-Fi
+#
+# No password on any action: this is travel tooling, same call as /repeater.
+# POSTs are still origin-checked.
+
+POST_MAX=4096
+CLASHMARK=/tmp/.tethering-clash
+
+esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+# Field arriving from the form: strip anything that could break out of a uci
+# value or a log line, and cap the length. Values are passed to uci as single
+# argv entries so there is no shell-eval path, but a stray newline would still
+# corrupt /etc/config/network.
+clean() { printf '%s' "$1" | tr -d '\n\r\t' | cut -c1-96; }
+jnum() { case "$1" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$1" ;; esac; }
+jbool() { case "$1" in 1|true) printf 'true' ;; *) printf 'false' ;; esac; }
+
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+BODY=""
+if [ "$REQUEST_METHOD" = "POST" ]; then
+    CL="${CONTENT_LENGTH:-0}"; case "$CL" in ''|*[!0-9]*) CL=0 ;; esac
+    [ "$CL" -gt "$POST_MAX" ] && { printf '{"ok":false,"error":"body too large"}'; exit 0; }
+    [ "$CL" -gt 0 ] && BODY=$(dd bs=1 count="$CL" 2>/dev/null)
+fi
+
+urldec() {
+    printf '%s' "$1" | awk '
+    BEGIN{ for(i=0;i<16;i++){ h=sprintf("%X",i); H[h]=i; H[tolower(h)]=i } }
+    { gsub(/\+/," "); s=$0; n=length(s); out=""
+      for(i=1;i<=n;i++){ c=substr(s,i,1)
+        if(c=="%" && i+2<=n){ a=substr(s,i+1,1); b=substr(s,i+2,1)
+          if((a in H) && (b in H)){ out=out sprintf("%c",H[a]*16+H[b]); i+=2; continue } }
+        out=out c }
+      printf "%s", out }'
+}
+qs_get() {
+    printf '%s' "${QUERY_STRING}&${BODY}" | tr '&' '\n' \
+      | awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}'
+}
+qs_get_dec() { urldec "$(qs_get "$1")"; }
+
+guard_post() {
+    [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
+    gp_src="${HTTP_ORIGIN:-$HTTP_REFERER}"
+    gp_src="${gp_src#*://}"; gp_src="${gp_src%%[:/]*}"
+    gp_ok=0
+    case "$gp_src" in
+        "") gp_ok=0 ;;
+        localhost|127.0.0.1|::1) gp_ok=1 ;;
+        *) for gp_ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
+             [ "$gp_ip" = "$gp_src" ] && { gp_ok=1; break; }
+           done ;;
+    esac
+    [ "$gp_ok" = 1 ] || { printf '{"ok":false,"error":"bad origin"}'; exit 0; }
+}
+
+ACTION=$(qs_get action)
+# Writes MUST be POST. Passwordless endpoint, so guard_post's same-origin check
+# (POST-only) is the only gate — a GET write bypassed it. Everything except the
+# read/status path (empty action) requires POST, which then hits guard_post.
+case "$ACTION" in
+    "") ;;
+    *) [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; } ;;
+esac
+[ "$REQUEST_METHOD" = "POST" ] && guard_post
+
+# Map a bound kernel driver to something a human can act on.
+kind_of() {
+    case "$1" in
+        ipheth)          printf 'iPhone / iPad' ;;
+        rndis_host)      printf 'Android (RNDIS)' ;;
+        cdc_ether)       printf 'USB Ethernet / HiLink modem' ;;
+        cdc_ncm)         printf 'USB NCM (Android or modem)' ;;
+        huawei_cdc_ncm)  printf 'Huawei NCM modem' ;;
+        qmi_wwan)        printf 'QMI modem (LTE/5G)' ;;
+        cdc_mbim)        printf 'MBIM modem (LTE/5G)' ;;
+        cdc_eem)         printf 'USB EEM' ;;
+        sierra_net)      printf 'Sierra Wireless modem' ;;
+        option|usb_wwan) printf 'Serial modem (AT commands)' ;;
+        usb-storage|uas) printf 'Mass storage — mode switch pending' ;;
+        cdc_acm)         printf 'USB modem (ACM)' ;;
+        '')              printf 'no driver bound' ;;
+        *)               printf '%s' "$1" ;;
+    esac
+}
+
+# ---------------- write actions ----------------
+case "$ACTION" in
+    enable|disable)
+        want=0; [ "$ACTION" = "disable" ] && want=1
+        uci set network.tethering.disabled="$want"
+        uci commit network
+        if [ "$want" = "1" ]; then
+            ifdown tethering >/dev/null 2>&1
+        else
+            rm -f "$CLASHMARK"
+            ifup tethering >/dev/null 2>&1
+        fi
+        logger -t tethering "tethering ${ACTION}d via web UI"
+        printf '{"ok":true}'; exit 0 ;;
+    up)
+        if [ "$(uci -q get network.tethering.disabled)" = "1" ]; then
+            printf '{"ok":false,"error":"the USB uplink is off"}'; exit 0
+        fi
+        if [ -z "$(uci -q get network.tethering.device)" ]; then
+            printf '{"ok":false,"error":"no USB network device detected"}'; exit 0
+        fi
+        rm -f "$CLASHMARK"
+        ifup tethering >/dev/null 2>&1
+        # A successful ifup only means netifd ACCEPTED the request. A phone keeps the
+        # USB link down until tethering is switched on at its end, so reporting plain
+        # success here is a lie the user then has to debug. Report the wire instead.
+        sleep 1
+        _d=$(uci -q get network.tethering.device)
+        _c=$(cat "/sys/class/net/$_d/carrier" 2>/dev/null)
+        if [ "$_c" = "1" ]; then
+            printf '{"ok":true,"carrier":1}'; exit 0
+        fi
+        _drv=$(readlink "/sys/class/net/$_d/device/driver" 2>/dev/null); _drv=${_drv##*/}
+        case "$_drv" in
+            ipheth)
+                _h="iPhone detected, but it is not sharing yet. On the phone: Settings > Personal Hotspot > Allow Others to Join." ;;
+            rndis_host|cdc_ether|cdc_ncm|cdc_eem)
+                _h="Phone detected, but it is not sharing yet. Turn on USB tethering in its network settings." ;;
+            *)
+                _h="Device attached but the link is down. A phone needs tethering switched on; a modem may still be attaching to the mobile network." ;;
+        esac
+        printf '{"ok":true,"carrier":0,"hint":"%s"}' "$(esc "$_h")"; exit 0 ;;
+    down)
+        ifdown tethering >/dev/null 2>&1
+        printf '{"ok":true}'; exit 0 ;;
+    clearerr)
+        rm -f "$CLASHMARK"
+        printf '{"ok":true}'; exit 0 ;;
+    forget)
+        ifdown tethering >/dev/null 2>&1
+        uci -q delete network.tethering.device
+        uci commit network
+        rm -f "$CLASHMARK"
+        logger -t tethering "device binding cleared via web UI"
+        printf '{"ok":true}'; exit 0 ;;
+    priority)
+        # "modem" = USB beats repeater Wi-Fi; "wifi" = the reverse.
+        p=$(qs_get_dec pref)
+        case "$p" in
+            modem) uci set network.tethering.metric="20"; uci set network.wwan.metric="30" ;;
+            wifi)  uci set network.tethering.metric="30"; uci set network.wwan.metric="20" ;;
+            *) printf '{"ok":false,"error":"bad pref"}'; exit 0 ;;
+        esac
+        uci commit network
+        ubus call network reload >/dev/null 2>&1
+        logger -t tethering "uplink priority set to prefer $p"
+        printf '{"ok":true}'; exit 0 ;;
+    redetect)
+        # Re-run the mode-switch database, then re-fire adoption for anything
+        # already present (hotplug only fires on physical plug events).
+        [ -x /usr/sbin/usbmode ] && usbmode -s >/dev/null 2>&1
+        sleep 2
+        found=""
+        for n in /sys/class/net/*; do
+            dn=$(basename "$n")
+            case "$(readlink -f "$n")" in */usb[0-9]*/*) ;; *) continue ;; esac
+            found="$dn"; break
+        done
+        if [ -n "$found" ]; then
+            uci set network.tethering.device="$found"
+            uci commit network
+            rm -f "$CLASHMARK"
+            [ "$(uci -q get network.tethering.disabled)" = "1" ] || ifup tethering >/dev/null 2>&1
+            logger -t tethering "redetect found $found"
+            printf '{"ok":true,"device":"%s"}' "$(esc "$found")"
+        else
+            printf '{"ok":true,"device":""}'
+        fi
+        exit 0 ;;
+    modemsave)
+        m_proto=$(clean "$(qs_get_dec proto)")
+        m_dev=$(clean "$(qs_get_dec device)")
+        m_apn=$(clean "$(qs_get_dec apn)")
+        m_auth=$(clean "$(qs_get_dec auth)")
+        m_user=$(clean "$(qs_get_dec username)")
+        m_pass=$(clean "$(qs_get_dec password)")
+        m_pin=$(clean "$(qs_get_dec pincode)")
+        m_pdp=$(clean "$(qs_get_dec pdptype)")
+        m_dial=$(clean "$(qs_get_dec dialnumber)")
+        m_delay=$(clean "$(qs_get_dec delay)")
+        m_clrpw=$(qs_get clearpw)
+        m_clrpin=$(qs_get clearpin)
+
+        case "$m_proto" in
+            qmi|mbim|ncm|3g) ;;
+            *) printf '{"ok":false,"error":"unsupported protocol"}'; exit 0 ;;
+        esac
+        # Whitelist the control node rather than trusting the form: this value
+        # ends up in a uci option netifd will open.
+        case "$m_dev" in
+            /dev/cdc-wdm[0-9]*|/dev/ttyUSB[0-9]*|/dev/ttyACM[0-9]*) ;;
+            *) printf '{"ok":false,"error":"invalid control device"}'; exit 0 ;;
+        esac
+        [ -e "$m_dev" ] || { printf '{"ok":false,"error":"control device %s is not present"}' "$(esc "$m_dev")"; exit 0; }
+        [ -n "$m_apn" ] || { printf '{"ok":false,"error":"APN is required"}'; exit 0; }
+        case "$m_auth" in ''|none|pap|chap|both) ;; *) printf '{"ok":false,"error":"bad auth type"}'; exit 0 ;; esac
+        case "$m_pdp" in ''|ipv4|ipv6|ipv4v6) ;; *) printf '{"ok":false,"error":"bad PDP type"}'; exit 0 ;; esac
+        case "$m_delay" in ''|*[!0-9]*) m_delay="" ;; esac
+
+        ifdown tethering >/dev/null 2>&1
+
+        uci set network.tethering.proto="$m_proto"
+        uci set network.tethering.device="$m_dev"
+        uci set network.tethering.apn="$m_apn"
+
+        for o in auth username pdptype dialnumber delay service modes mode; do
+            uci -q delete "network.tethering.$o"
+        done
+        [ -n "$m_auth" ] && uci set network.tethering.auth="$m_auth"
+        [ -n "$m_user" ] && uci set network.tethering.username="$m_user"
+        [ -n "$m_delay" ] && uci set network.tethering.delay="$m_delay"
+        # pdptype is meaningless to the ppp-based 3g handler; dialnumber is
+        # meaningless to everything else.
+        if [ "$m_proto" = "3g" ]; then
+            [ -n "$m_dial" ] && uci set network.tethering.dialnumber="$m_dial"
+        else
+            [ -n "$m_pdp" ] && uci set network.tethering.pdptype="$m_pdp"
+        fi
+
+        # Secrets: blank means "keep what is stored", so the form never has to
+        # echo them back. Clearing is explicit.
+        [ "$m_clrpw" = "1" ]  && uci -q delete network.tethering.password
+        [ "$m_clrpin" = "1" ] && uci -q delete network.tethering.pincode
+        [ -n "$m_pass" ] && uci set network.tethering.password="$m_pass"
+        [ -n "$m_pin" ]  && uci set network.tethering.pincode="$m_pin"
+
+        uci commit network
+        rm -f "$CLASHMARK"
+        logger -t tethering "modem profile saved: proto=$m_proto device=$m_dev apn=$m_apn"
+        ( sleep 1; ifup tethering ) >/dev/null 2>&1 &
+        printf '{"ok":true}'; exit 0 ;;
+    modemclear)
+        ifdown tethering >/dev/null 2>&1
+        for o in apn v6apn auth username password pincode pdptype dialnumber \
+                 delay service modes mode profile v6profile autoconnect plmn; do
+            uci -q delete "network.tethering.$o"
+        done
+        uci set network.tethering.proto="dhcp"
+        uci -q delete network.tethering.device
+        uci commit network
+        logger -t tethering "modem profile cleared, reverted to DHCP"
+        printf '{"ok":true}'; exit 0 ;;
+esac
+
+# ---------------- status ----------------
+DEV=$(uci -q get network.tethering.device)
+DISABLED=$(uci -q get network.tethering.disabled); [ -n "$DISABLED" ] || DISABLED=0
+PRESENT=0; [ -n "$DEV" ] && [ -e "/sys/class/net/$DEV" ] && PRESENT=1
+
+DRV=""; CARRIER=0; MAC=""
+if [ "$PRESENT" = 1 ]; then
+    DRV=$(basename "$(readlink -f "/sys/class/net/$DEV/device/driver" 2>/dev/null)" 2>/dev/null)
+    case "$DRV" in /*|.) DRV="" ;; esac
+    CARRIER=$(cat "/sys/class/net/$DEV/carrier" 2>/dev/null); CARRIER=$(jnum "$CARRIER")
+    MAC=$(cat "/sys/class/net/$DEV/address" 2>/dev/null)
+fi
+
+TSTAT=$(ubus call network.interface.tethering status 2>/dev/null)
+TUP=$(printf '%s' "$TSTAT" | awk -F: '/"up"/{gsub(/[ ,\t]/,"",$2); print $2; exit}')
+TUPTIME=$(printf '%s' "$TSTAT" | awk -F: '/"uptime"/{gsub(/[ ,\t]/,"",$2); print $2; exit}')
+TDNS=$(printf '%s' "$TSTAT" | awk '
+    /"dns-server"/{f=1; next}
+    f && /\]/{ print out; exit }
+    f { if(match($0,/"[^"]+"/)){ s=substr($0,RSTART,RLENGTH); if(out!="") out=out ","; out=out s } }')
+
+TIP=""; TGW=""
+if [ "$PRESENT" = 1 ]; then
+    TIP=$(ip -4 -o addr show dev "$DEV" 2>/dev/null | awk '{print $4; exit}')
+    TGW=$(ip route show default dev "$DEV" 2>/dev/null | awk '{print $3; exit}')
+fi
+
+# Which interface currently owns the default route?
+ACTDEV=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+l3dev() { ubus call "network.interface.$1" status 2>/dev/null \
+            | awk -F'"' '/"l3_device"/{print $4; exit}'; }
+WAN_DEV=$(l3dev wan); WWAN_DEV=$(l3dev wwan)
+ACTIVE="none"
+[ -n "$ACTDEV" ] && case "$ACTDEV" in
+    "$WAN_DEV")  ACTIVE="wan" ;;
+    "$WWAN_DEV") ACTIVE="wwan" ;;
+    "$DEV")      ACTIVE="tethering" ;;
+esac
+
+iface_json() {   # $1=uci name  $2=label
+    _u=$(ubus call "network.interface.$1" status 2>/dev/null)
+    _up=$(printf '%s' "$_u" | awk -F: '/"up"/{gsub(/[ ,\t]/,"",$2); print $2; exit}')
+    _d=$(printf '%s' "$_u" | awk -F'"' '/"l3_device"/{print $4; exit}')
+    _ip=""; [ -n "$_d" ] && _ip=$(ip -4 -o addr show dev "$_d" 2>/dev/null | awk '{split($4,x,"/"); print x[1]; exit}')
+    _m=$(uci -q get "network.$1.metric")
+    printf '{"name":"%s","label":"%s","up":%s,"device":"%s","ip":"%s","metric":%s,"active":%s}' \
+        "$1" "$(esc "$2")" "$(jbool "$_up")" "$(esc "$_d")" "$(esc "$_ip")" \
+        "$(jnum "$_m")" "$([ "$ACTIVE" = "$1" ] && echo true || echo false)"
+}
+
+# USB tree, skipping root hubs and interface nodes.
+USBJ=""; ALLDRV=""
+for d in /sys/bus/usb/devices/*/; do
+    [ -f "$d/idVendor" ] || continue
+    vid=$(cat "$d/idVendor" 2>/dev/null)
+    [ "$vid" = "1d6b" ] && continue
+    pid=$(cat "$d/idProduct" 2>/dev/null)
+    man=$(cat "$d/manufacturer" 2>/dev/null)
+    prd=$(cat "$d/product" 2>/dev/null)
+    port=$(basename "$d")
+    drvs=""
+    for i in "$d"*:*/; do
+        [ -d "$i" ] || continue
+        dv=$(basename "$(readlink -f "$i/driver" 2>/dev/null)" 2>/dev/null)
+        case "$dv" in ''|/*|.) continue ;; esac
+        case " $drvs " in *" $dv "*) ;; *) drvs="$drvs $dv" ;; esac
+    done
+    drvs="${drvs# }"
+    ALLDRV="$ALLDRV $drvs"
+    first=$(printf '%s' "$drvs" | awk '{print $1}')
+    [ -n "$USBJ" ] && USBJ="$USBJ,"
+    USBJ="$USBJ{\"port\":\"$(esc "$port")\",\"id\":\"$(esc "$vid"):$(esc "$pid")\",\"vendor\":\"$(esc "$man")\",\"product\":\"$(esc "$prd")\",\"drivers\":\"$(esc "$drvs")\",\"kind\":\"$(esc "$(kind_of "$first")")\"}"
+done
+
+# Serial ports exposed by a modem in AT mode — presence means the stick came up
+# as a serial device rather than a network device.
+SERJ=""
+for t in /dev/ttyUSB* /dev/ttyACM* /dev/cdc-wdm*; do
+    [ -e "$t" ] || continue
+    [ -n "$SERJ" ] && SERJ="$SERJ,"
+    SERJ="$SERJ\"$(esc "$t")\""
+done
+
+# ---- is this a modem that needs a dial profile, or a self-contained uplink? ----
+#
+# A phone or a HiLink dongle does its own dialing and just hands us DHCP — there
+# is nothing to configure. A bare modem exposes a control channel (cdc-wdm for
+# QMI/MBIM, ttyUSB for AT) and will not attach to a network until we give it an
+# APN. Only the second case gets the config button.
+ISMODEM=0
+case " $ALLDRV " in
+    *" qmi_wwan "*|*" cdc_mbim "*|*" option "*|*" usb_wwan "*|*" huawei_cdc_ncm "*|*" sierra_net "*|*" cdc_acm "*)
+        ISMODEM=1 ;;
+esac
+[ -n "$SERJ" ] && ISMODEM=1
+
+SUGG=""; SUGGDEV=""
+case " $ALLDRV " in
+    *" cdc_mbim "*)                      SUGG="mbim" ;;
+    *" qmi_wwan "*)                      SUGG="qmi"  ;;
+    *" huawei_cdc_ncm "*|*" cdc_ncm "*)  SUGG="ncm"  ;;
+    *" option "*|*" usb_wwan "*|*" cdc_acm "*) SUGG="3g" ;;
+esac
+case "$SUGG" in
+    qmi|mbim)
+        for t in /dev/cdc-wdm*; do [ -e "$t" ] && { SUGGDEV="$t"; break; }; done ;;
+    ncm|3g)
+        # Huawei and most AT sticks put the command port on the third serial
+        # node; the first two are usually PC-UI / diagnostics.
+        for t in /dev/ttyUSB2 /dev/ttyUSB1 /dev/ttyUSB0 /dev/ttyACM0; do
+            [ -e "$t" ] && { SUGGDEV="$t"; break; }
+        done ;;
+esac
+
+CPROTO=$(uci -q get network.tethering.proto)
+HASPW=0; [ -n "$(uci -q get network.tethering.password)" ] && HASPW=1
+HASPIN=0; [ -n "$(uci -q get network.tethering.pincode)" ] && HASPIN=1
+MODEMJ=$(printf '{"is_modem":%s,"suggest_proto":"%s","suggest_device":"%s","proto":"%s","configured":%s,"profile":{"device":"%s","apn":"%s","auth":"%s","username":"%s","pdptype":"%s","dialnumber":"%s","delay":"%s","has_password":%s,"has_pin":%s}}' \
+    "$(jbool "$ISMODEM")" "$(esc "$SUGG")" "$(esc "$SUGGDEV")" "$(esc "$CPROTO")" \
+    "$([ "$CPROTO" = "dhcp" ] && echo false || echo true)" \
+    "$(esc "$(uci -q get network.tethering.device)")" \
+    "$(esc "$(uci -q get network.tethering.apn)")" \
+    "$(esc "$(uci -q get network.tethering.auth)")" \
+    "$(esc "$(uci -q get network.tethering.username)")" \
+    "$(esc "$(uci -q get network.tethering.pdptype)")" \
+    "$(esc "$(uci -q get network.tethering.dialnumber)")" \
+    "$(esc "$(uci -q get network.tethering.delay)")" \
+    "$(jbool "$HASPW")" "$(jbool "$HASPIN")")
+
+CLASHJ="null"
+if [ -f "$CLASHMARK" ]; then
+    IFS='|' read -r c_t c_w c_d < "$CLASHMARK"
+    CLASHJ="{\"tether\":\"$(esc "$c_t")\",\"with\":\"$(esc "$c_w")\",\"dev\":\"$(esc "$c_d")\"}"
+fi
+
+MUX=0; pgrep usbmuxd >/dev/null 2>&1 && MUX=1
+
+LOGJ=$(logread -e tethering 2>/dev/null | tail -14 | awk '
+    { gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); gsub(/\t/," ")
+      if(out!="") out=out ","; out=out "\"" $0 "\"" }
+    END{ print out }')
+
+printf '{"ok":true,"ts":%s,' "$(date +%s)"
+printf '"enabled":%s,"device":"%s","present":%s,"driver":"%s","kind":"%s","mac":"%s","carrier":%s,' \
+    "$([ "$DISABLED" = "1" ] && echo false || echo true)" \
+    "$(esc "$DEV")" "$(jbool "$PRESENT")" "$(esc "$DRV")" \
+    "$(esc "$(kind_of "$DRV")")" "$(esc "$MAC")" "$(jnum "$CARRIER")"
+printf '"iface":{"up":%s,"ip":"%s","gw":"%s","uptime":%s,"dns":[%s]},' \
+    "$(jbool "$TUP")" "$(esc "$TIP")" "$(esc "$TGW")" "$(jnum "$TUPTIME")" "$TDNS"
+printf '"clash":%s,"usbmuxd":%s,"active":"%s","modem":%s,' \
+    "$CLASHJ" "$(jbool "$MUX")" "$ACTIVE" "$MODEMJ"
+printf '"uplinks":[%s,%s,%s],' \
+    "$(iface_json wan 'Ethernet')" \
+    "$(iface_json tethering 'USB')" \
+    "$(iface_json wwan 'Wi-Fi')"
+printf '"usb":[%s],"serial":[%s],"log":[%s]}' "$USBJ" "$SERJ" "$LOGJ"
+exit 0

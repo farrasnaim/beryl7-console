@@ -1,0 +1,528 @@
+#!/bin/sh
+# /www/cgi-bin/dashboard-api  —  JSON data layer for the Beryl 7 dashboard (vanilla OpenWrt).
+#
+# Design note: ubus already emits valid JSON, so this script *embeds* those documents
+# verbatim rather than re-serialising them field-by-field in ash. That removes the whole
+# class of printf/IFS/sort quirks that plagued the GL-stock version.
+
+CLASSMAP=/etc/dashboard/classmap
+# The interface actually carrying internet traffic. This used to be pinned to
+# network.wan.device, which reads ~0 while travelling: on a Wi-Fi or USB uplink
+# the default route moves to that device and eth0 goes quiet. pbr keeps its
+# tunnel routes in separate tables (pbr_wg_*, by fwmark), so the main table's
+# default is always the physical uplink, never a WireGuard interface.
+# rate-api derives it identically — the two must agree or the throughput ribbon
+# would step between two different interfaces when the 1s sampler hands back.
+WANIF=$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
+[ -n "$WANIF" ] || WANIF=$(uci -q get network.wan.device 2>/dev/null)
+[ -n "$WANIF" ] || WANIF=eth0
+STATE=/tmp/.dashwan
+
+esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+jnum() { case "$1" in ''|*[!0-9-]*) printf '0' ;; *) printf '%s' "$1" ;; esac; }
+
+# ---------- POST guard (CSRF origin check) ----------
+# NOTE: the body is read up-front (below), NOT here. `action` may arrive in the
+# POST body, so it must be available before we dispatch — reading it inside this
+# function would leave ACTION empty and silently fall through to the read path.
+POST_MAX=8192
+guard_post() {
+    [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
+    gp_src="${HTTP_ORIGIN:-$HTTP_REFERER}"
+    gp_src="${gp_src#*://}"; gp_src="${gp_src%%[:/]*}"
+    gp_ok=0
+    case "$gp_src" in
+        "") gp_ok=0 ;;
+        localhost|127.0.0.1|::1) gp_ok=1 ;;
+        *) for gp_ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
+             [ "$gp_ip" = "$gp_src" ] && { gp_ok=1; break; }
+           done ;;
+    esac
+    [ "$gp_ok" = 1 ] || { printf '{"ok":false,"error":"bad origin"}'; exit 0; }
+}
+
+qs_get() {
+    # read a key out of QUERY_STRING or POST BODY.
+    # sub() not $2: a value may itself contain '=' (base64, urlencoded text).
+    _hay="${QUERY_STRING}&${BODY}"
+    printf '%s' "$_hay" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}'
+}
+# URL-decode in awk, not sed: busybox sed silently drops the backslash in a
+# `\\x\1` replacement, so the usual sed+printf%b trick returns the string with
+# its escapes stripped. (Same trap already hit in vpn-api.)
+urldec() {
+    printf '%s' "$1" | awk '
+    BEGIN{ for(i=0;i<16;i++){ h=sprintf("%X",i); H[h]=i; H[tolower(h)]=i } }
+    { gsub(/\+/," "); s=$0; n=length(s); out=""
+      for(i=1;i<=n;i++){ c=substr(s,i,1)
+        if(c=="%" && i+2<=n){ a=substr(s,i+1,1); b=substr(s,i+2,1)
+          if((a in H) && (b in H)){ out=out sprintf("%c",H[a]*16+H[b]); i+=2; continue } }
+        out=out c }
+      printf "%s", out }'
+}
+qs_get_dec() { urldec "$(qs_get "$1")"; }
+
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+# Read the POST body up-front (bounded) so `action` can be parsed from it.
+BODY=""
+if [ "$REQUEST_METHOD" = "POST" ]; then
+    CL="${CONTENT_LENGTH:-0}"; case "$CL" in ''|*[!0-9]*) CL=0 ;; esac
+    if [ "$CL" -gt "$POST_MAX" ]; then
+        printf '{"ok":false,"error":"body too large"}'; exit 0
+    fi
+    [ "$CL" -gt 0 ] && BODY=$(dd bs=1 count="$CL" 2>/dev/null)
+fi
+
+ACTION=$(qs_get action)
+
+# Any POST must pass the origin check, even if the action is unknown/absent —
+# otherwise a cross-site POST would fall through to the read path and leak status.
+[ "$REQUEST_METHOD" = "POST" ] && guard_post
+
+# ...and any WRITE must be a POST. Without this, `setdev` — the one write here
+# that deliberately has no password, because renaming a device cannot disrupt
+# the network — was reachable with a plain GET, so an <img src> on any page the
+# owner visited could silently rename their devices. The other three APIs
+# already carried this clause; dashboard-api was the one that did not.
+case "$ACTION" in
+    "") ;;
+    *) [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; } ;;
+esac
+
+# =========================== WRITE ACTIONS ===========================
+PASSWORD="changeme"
+
+# rename a device / change its class (classmap metadata only)
+#
+# No password: this is cosmetic metadata, it cannot disrupt the network, and it
+# matches the same call made for the VPN toggle. guard_post still applies, so a
+# cross-site page can't rewrite your device names.
+if [ "$ACTION" = "setdev" ]; then
+    MAC=$(qs_get_dec mac); NEWNAME=$(qs_get_dec name); NEWCLASS=$(qs_get_dec class)
+    MAC=$(printf '%s' "$MAC" | tr 'a-f' 'A-F')
+    case "$MAC" in
+        [0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]) ;;
+        *) printf '{"ok":false,"error":"bad mac"}'; exit 0 ;;
+    esac
+    case "$NEWCLASS" in
+        computer|laptop|phone|pad|television|watch|smartappliances|router|default) ;;
+        *) printf '{"ok":false,"error":"bad class"}'; exit 0 ;;
+    esac
+    # The classmap is pipe-delimited and line-based, so a name may contain
+    # neither. Strip separators/control chars rather than rejecting, and cap the
+    # length so one entry can't bloat the file.
+    NEWNAME=$(printf '%s' "$NEWNAME" | tr -d '|\n\r\t' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | cut -c1-40)
+    [ -n "$NEWNAME" ] || { printf '{"ok":false,"error":"name cannot be empty"}'; exit 0; }
+
+    mkdir -p /etc/dashboard
+    [ -f "$CLASSMAP" ] || : > "$CLASSMAP"
+    # carry over ip/zone from the existing row, else infer from the live lease
+    OLDIP=$(awk -F'|' -v m="$MAC" '!/^#/ && toupper($1)==m {print $4; exit}' "$CLASSMAP" 2>/dev/null)
+    OLDZONE=$(awk -F'|' -v m="$MAC" '!/^#/ && toupper($1)==m {print $5; exit}' "$CLASSMAP" 2>/dev/null)
+    if [ -z "$OLDIP" ]; then
+        OLDIP=$(awk -v m="$(printf '%s' "$MAC" | tr 'A-F' 'a-f')" '$2==m {print $3; exit}' /tmp/dhcp.leases 2>/dev/null)
+    fi
+    if [ -z "$OLDZONE" ]; then
+        case "$OLDIP" in
+            192.168.9.*)  OLDZONE=guest ;;
+            192.168.10.*) OLDZONE=iot ;;
+            192.168.8.*)  OLDZONE=lan ;;
+            *)            OLDZONE="" ;;
+        esac
+    fi
+
+    # Serialise concurrent saves. NOTE two traps here, both hit for real:
+    #  * flock on this box is BUSYBOX flock — it supports only -sxun, there is
+    #    no -w/timeout flag, so `flock -w 5 9` fails instantly.
+    #  * `exit` inside a ( subshell ) exits only the subshell, so an error path
+    #    there would print its error and then fall through to print success too.
+    # Hence: retry loop with -n, and no subshell around the critical section.
+    exec 9>>/tmp/.classmap.lock
+    locked=0; tries=0
+    while [ "$tries" -lt 5 ]; do
+        if flock -n 9 2>/dev/null; then locked=1; break; fi
+        tries=$((tries+1)); sleep 1
+    done
+    [ "$locked" = 1 ] || { printf '{"ok":false,"error":"busy, try again"}'; exit 0; }
+
+    TMPF="$CLASSMAP.$$"
+    awk -F'|' -v m="$MAC" -v nm="$NEWNAME" -v cl="$NEWCLASS" -v ip="$OLDIP" -v zn="$OLDZONE" '
+      BEGIN { done=0 }
+      /^#/ { print; next }
+      NF < 3 { print; next }
+      {
+        if (toupper($1) == m) { printf "%s|%s|%s|%s|%s\n", m, nm, cl, ip, zn; done=1 }
+        else print
+        next
+      }
+      END { if (!done) printf "%s|%s|%s|%s|%s\n", m, nm, cl, ip, zn }
+    ' "$CLASSMAP" > "$TMPF" 2>/dev/null
+    if [ -s "$TMPF" ]; then
+        mv "$TMPF" "$CLASSMAP"
+        flock -u 9 2>/dev/null
+    else
+        rm -f "$TMPF"
+        flock -u 9 2>/dev/null
+        printf '{"ok":false,"error":"write failed"}'; exit 0
+    fi
+
+    printf '{"ok":true,"action":"setdev","mac":"%s","name":"%s","class":"%s"}' \
+        "$(esc "$MAC")" "$(esc "$NEWNAME")" "$(esc "$NEWCLASS")"
+    exit 0
+fi
+
+# radio restart (fix24g -> radio0, fix5g -> radio1)
+if [ "$ACTION" = "fix24g" ] || [ "$ACTION" = "fix5g" ]; then
+    P=$(qs_get pw)
+    [ "$P" = "$PASSWORD" ] || { printf '{"ok":false,"error":"wrong password"}'; exit 0; }
+    [ "$ACTION" = "fix24g" ] && R=radio0 || R=radio1
+    ( wifi down "$R" >/dev/null 2>&1; sleep 2; wifi up "$R" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+    printf '{"ok":true,"action":"%s"}' "$ACTION"
+    exit 0
+fi
+
+# block / unblock a MAC on a specific wifi-iface section
+if [ "$ACTION" = "aclset" ]; then
+    P=$(qs_get pw); MAC=$(qs_get mac); SEC=$(qs_get sec); BLK=$(qs_get block)
+    [ "$P" = "$PASSWORD" ] || { printf '{"ok":false,"error":"wrong password"}'; exit 0; }
+    MAC=$(printf '%s' "$MAC" | sed 's/%3A/:/g; s/%3a/:/g' | tr 'a-f' 'A-F')
+    case "$MAC" in
+        [0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]) ;;
+        *) printf '{"ok":false,"error":"bad mac"}'; exit 0 ;;
+    esac
+    case "$SEC" in *[!a-zA-Z0-9_]*|"") printf '{"ok":false,"error":"bad section"}'; exit 0 ;; esac
+    [ "$(uci -q get wireless.$SEC)" = "wifi-iface" ] || { printf '{"ok":false,"error":"unknown section"}'; exit 0; }
+
+    # runtime ifname for this section (for the live deauth)
+    IFACE=$(ubus call network.wireless status 2>/dev/null | awk -v want="$SEC" '
+        /"section":/ { gsub(/[",]/,""); s=$2 }
+        /"ifname":/  { gsub(/[",]/,""); if (s==want) { print $2; exit } }')
+
+    if [ "$BLK" = "1" ]; then
+        uci set wireless.$SEC.macfilter='deny'
+        cur=$(uci -q get wireless.$SEC.maclist)
+        case " $cur " in *" $MAC "*) ;; *) uci add_list wireless.$SEC.maclist="$MAC" ;; esac
+        uci commit wireless
+        [ -n "$IFACE" ] && ubus call hostapd.$IFACE del_client \
+            "{\"addr\":\"$MAC\",\"deauth\":true,\"reason\":1,\"ban_time\":60000}" >/dev/null 2>&1
+        wifi reload >/dev/null 2>&1 &
+        printf '{"ok":true,"action":"block","mac":"%s"}' "$(esc "$MAC")"
+    else
+        uci -q del_list wireless.$SEC.maclist="$MAC"
+        [ -z "$(uci -q get wireless.$SEC.maclist)" ] && uci -q delete wireless.$SEC.macfilter
+        uci commit wireless
+        wifi reload >/dev/null 2>&1 &
+        printf '{"ok":true,"action":"unblock","mac":"%s"}' "$(esc "$MAC")"
+    fi
+    exit 0
+fi
+
+# =========================== READ / STATUS ===========================
+
+# ---- system ----
+UP=$(cut -d. -f1 /proc/uptime 2>/dev/null); UP=$(jnum "$UP")
+TEMP=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null); TEMP=$(jnum "$TEMP")
+LOAD=$(awk '{print $1}' /proc/loadavg 2>/dev/null)
+HOST=$(uci -q get system.@system[0].hostname || echo OpenWrt)
+# Fan RPM — locate by hwmon *name*, not a fixed hwmonN index (numbering is not
+# stable across boots). GL's firmware showed this under CPU temp.
+FAN=0
+for h in /sys/class/hwmon/hwmon*/; do
+    [ "$(cat "$h/name" 2>/dev/null)" = "pwmfan" ] || continue
+    FAN=$(cat "$h/fan1_input" 2>/dev/null); break
+done
+FAN=$(jnum "$FAN")
+MEMT=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null)
+MEMA=$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null)
+
+# ---- wan throughput (delta since last poll) ----
+RXB=$(cat /sys/class/net/$WANIF/statistics/rx_bytes 2>/dev/null); RXB=$(jnum "$RXB")
+TXB=$(cat /sys/class/net/$WANIF/statistics/tx_bytes 2>/dev/null); TXB=$(jnum "$TXB")
+NOW=$(date +%s)
+WRX=0; WTX=0
+if [ -f "$STATE" ]; then
+    read -r pt prx ptx pdev < "$STATE" 2>/dev/null
+    pt=$(jnum "$pt"); prx=$(jnum "$prx"); ptx=$(jnum "$ptx")
+    d=$((NOW - pt))
+    # WANIF can now change under us when the uplink fails over, and the two
+    # interfaces' counters have nothing to do with each other — so a delta is
+    # only meaningful when the previous sample came from the same device.
+    if [ "$d" -gt 0 ] && [ "$d" -lt 120 ] && [ "$pdev" = "$WANIF" ]; then
+        [ "$RXB" -ge "$prx" ] && WRX=$(( (RXB - prx) / d ))
+        [ "$TXB" -ge "$ptx" ] && WTX=$(( (TXB - ptx) / d ))
+    fi
+fi
+printf '%s %s %s %s\n' "$NOW" "$RXB" "$TXB" "$WANIF" > "$STATE" 2>/dev/null
+
+WANIP=$(ubus call network.interface.wan status 2>/dev/null | awk -F'"' '/"address":/{print $4; exit}')
+
+# ---- classmap -> json ----
+CMJ="{}"
+if [ -f "$CLASSMAP" ]; then
+    CMJ=$(awk -F'|' '
+        /^#/ || NF<3 { next }
+        {
+            mac=toupper($1); name=$2; cls=$3; ip=$4; zone=$5
+            gsub(/\\/,"\\\\",name); gsub(/"/,"\\\"",name)
+            printf "%s\"%s\":{\"name\":\"%s\",\"class\":\"%s\",\"ip\":\"%s\",\"zone\":\"%s\"}", (c++?",":""), mac, name, cls, ip, zone
+        }
+        END { }' "$CLASSMAP")
+    CMJ="{$CMJ}"
+fi
+
+# ---- leases -> json (incl. expiry epoch for lease-remaining calc) ----
+LJ=$(awk '{
+        exp=$1; mac=toupper($2); ip=$3; nm=$4
+        gsub(/\\/,"\\\\",nm); gsub(/"/,"\\\"",nm)
+        printf "%s\"%s\":{\"ip\":\"%s\",\"name\":\"%s\",\"exp\":%s}", (c++?",":""), mac, ip, nm, (exp~/^[0-9]+$/?exp:0)
+    }' /tmp/dhcp.leases 2>/dev/null)
+LJ="{$LJ}"
+
+# ---- vpn policy map: MAC -> tunnel label ----
+# Only devices whose policy is enabled AND whose tunnel interface actually exists
+# count as "on VPN" — a parked policy (see sync_pbr in vpn-api) is not routing
+# anything, so badging it would be a lie.
+VPNJ=""
+VPNSTALE=""     # devices force-routed to a tunnel that is DOWN (blackholed)
+vidx=0
+NOWTS=$(date +%s)
+while [ "$vidx" -lt 64 ]; do
+    pn=$(uci -q get pbr.@policy[$vidx].name 2>/dev/null) || break
+    [ -n "$pn" ] || break
+    case "$pn" in
+        dash_*)
+            sa=$(uci -q get pbr.@policy[$vidx].src_addr 2>/dev/null)
+            inf=$(uci -q get pbr.@policy[$vidx].interface 2>/dev/null)
+            en=$(uci -q get pbr.@policy[$vidx].enabled 2>/dev/null)
+            if [ "$en" = "1" ] && [ -n "$inf" ] && ip link show "$inf" >/dev/null 2>&1; then
+                lbl=$(uci -q get network.$inf.label 2>/dev/null); [ -n "$lbl" ] || lbl="${inf#wg_}"
+                sa=$(printf '%s' "$sa" | tr 'a-f' 'A-F')
+                VPNJ="$VPNJ${VPNJ:+,}\"$(esc "$sa")\":\"$(esc "$lbl")\""
+                # TRAVEL TRAP: with pbr strict_enforcement=1 a device whose tunnel
+                # is down is fail-closed = has NO internet, silently. Common when a
+                # hotel/cafe blocks WireGuard, or before captive-portal sign-in.
+                # Flag it so the UI can say "pause the VPN" instead of leaving the
+                # owner staring at a dead device with no idea why.
+                hs=$(wg show "$inf" latest-handshakes 2>/dev/null | awk 'NR==1{print $2+0}')
+                : "${hs:=0}"
+                if [ "$hs" -eq 0 ] || [ $((NOWTS - hs)) -gt 200 ]; then
+                    VPNSTALE="$VPNSTALE${VPNSTALE:+,}{\"mac\":\"$(esc "$sa")\",\"label\":\"$(esc "$lbl")\"}"
+                fi
+            fi ;;
+    esac
+    vidx=$((vidx+1))
+done
+VPNJ="{$VPNJ}"
+VPNSTALE="[$VPNSTALE]"
+
+# ---- host hints (may be large but is valid json) ----
+HH=$(ubus call luci-rpc getHostHints 2>/dev/null)
+[ -n "$HH" ] || HH="{}"
+
+# ---- access points ----
+APS=""
+for sec in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+    mode=$(uci -q get wireless.$sec.mode)
+    [ "$mode" = "ap" ] || continue
+    dis=$(uci -q get wireless.$sec.disabled)
+    [ "$dis" = "1" ] && continue
+    net=$(uci -q get wireless.$sec.network)
+    dev=$(uci -q get wireless.$sec.device)
+    band=$(uci -q get wireless.$dev.band)
+    # runtime ifname for this section
+    ifn=$(ubus call network.wireless status 2>/dev/null | awk -v want="$sec" '
+        /"section":/ { gsub(/[",]/,""); s=$2 }
+        /"ifname":/  { gsub(/[",]/,""); if (s==want) { print $2; exit } }')
+    [ -n "$ifn" ] || continue
+    info=$(ubus call iwinfo info "{\"device\":\"$ifn\"}" 2>/dev/null); [ -n "$info" ] || info="{}"
+    assoc=$(ubus call iwinfo assoclist "{\"device\":\"$ifn\"}" 2>/dev/null); [ -n "$assoc" ] || assoc='{"results":[]}'
+    mfilt=$(uci -q get wireless.$sec.macfilter)
+    mlist=$(uci -q get wireless.$sec.maclist)
+    mlj=""
+    for m in $mlist; do mlj="$mlj${mlj:+,}\"$(esc "$m")\""; done
+    APS="$APS${APS:+,}{\"section\":\"$(esc "$sec")\",\"ifname\":\"$(esc "$ifn")\",\"network\":\"$(esc "$net")\",\"band\":\"$(esc "$band")\",\"macfilter\":\"$(esc "$mfilt")\",\"maclist\":[$mlj],\"info\":$info,\"assoc\":$assoc}"
+done
+
+# ---- air / survey (single phy: one dump returns both in-use bands) ----
+AIRJ=$(iw dev phy0.1-ap0 survey dump 2>/dev/null | awk '
+    /frequency:/ { inuse = ($0 ~ /\[in use\]/); if (inuse) f=$2+0 }
+    inuse && /channel active time/ { a[f]=$4+0 }
+    inuse && /channel busy time/   { b[f]=$4+0 }
+    END {
+        g24a=g24b=g5a=g5b=0
+        for (f in a) if (f<3000) { g24a=a[f]; g24b=b[f] } else { g5a=a[f]; g5b=b[f] }
+        printf "{\"g24\":{\"active\":%d,\"busy\":%d},\"g5\":{\"active\":%d,\"busy\":%d}}", g24a,g24b,g5a,g5b
+    }')
+[ -n "$AIRJ" ] || AIRJ='null'
+
+# ---- per-station detail that ONLY `iw` exposes (assoclist has no equivalent) ----
+# airtime durations, per-antenna RSSI, ack signal, DTIM/beacon, expected throughput.
+# Bracket handling avoids awk char-classes entirely (busybox honours no escapes
+# inside [...]); index()/substr() is the portable way to read "-56, -57".
+STAJ=$(for _i in /sys/class/net/phy0.*; do
+        iw dev "${_i##*/}" station dump 2>/dev/null
+      done | awk '
+        /^Station/ { mac=toupper($2); next }
+        mac=="" { next }
+        /tx duration:/         { txd[mac]=$3+0; next }
+        /rx duration:/         { rxd[mac]=$3+0; next }
+        /last ack signal:/     { split($0,p,":"); split(p[2],q," "); ack[mac]=q[1]+0;  next }
+        /avg ack signal:/      { split($0,p,":"); split(p[2],q," "); acka[mac]=q[1]+0; next }
+        /airtime weight:/      { wt[mac]=$3+0; next }
+        /DTIM period:/         { dtim[mac]=$3+0; next }
+        /beacon interval:/     { split($0,p,":"); bi[mac]=p[2]+0; next }
+        /expected throughput:/ { split($0,p,":"); v=p[2]; sub(/Mbps/,"",v); thr[mac]=v+0; next }
+        /signal:/ {
+            if ($0 !~ /ack/) {
+                i=index($0,"["); j=index($0,"]")
+                if (i>0 && j>i) { c=substr($0,i+1,j-i-1); gsub(/ /,"",c); ch[mac]=c }
+            }
+            next
+        }
+        END {
+            for (m in txd)
+                printf "%s\"%s\":{\"txd\":%d,\"rxd\":%d,\"ack\":%d,\"acka\":%d,\"wt\":%d,\"dtim\":%d,\"bi\":%d,\"ethr\":%d,\"chains\":\"%s\"}", \
+                    (n++?",":""), m, txd[m], rxd[m], ack[m], acka[m], wt[m], dtim[m], bi[m], thr[m], ch[m]
+        }')
+STAJ="{$STAJ}"
+
+# Per-client connection counts used to be built here by walking
+# /proc/net/nf_conntrack. The only consumer was the "Open flows" row in the
+# client detail, removed 2026-08-09, so the whole scan went with it — it cost
+# ~12ms of the response for data nobody read.
+
+# ---- neighbour reachability (REACHABLE / STALE / FAILED …) ----
+NBJ=$(ip neigh show 2>/dev/null | awk '
+        /lladdr/ { m=toupper($5); s=$NF; if (s!="" && m!="") printf "%s\"%s\":\"%s\"", (n++?",":""), m, s }')
+NBJ="{$NBJ}"
+
+# ---- non-Wi-Fi LAN devices (so the VPN page can route an Ethernet machine) ----
+# pbr matches on `ether saddr`, so a wired PC is routable exactly like a Wi-Fi
+# client — but the device picker was built purely from Wi-Fi assoclists, so an
+# Ethernet machine could never be selected.
+#
+# "Not currently associated" is NOT the same as "wired": a sleeping iPhone keeps
+# its DHCP lease and ARP entry and would be mislabelled Ethernet. The bridge FDB
+# is authoritative — it records which bridge port each MAC was last seen on:
+#   port eth1   -> genuinely wired
+#   port phy0.* -> Wi-Fi
+#   absent      -> idle / aged out (FDB entries expire ~5 min), link unknown
+# So each host is classified honestly rather than guessed at.
+WIFIMACS=$(for _i in /sys/class/net/phy0.*; do
+             iw dev "${_i##*/}" station dump 2>/dev/null | awk '/^Station/{print toupper($2)}'
+           done)
+FDBWIRED=$(bridge fdb show 2>/dev/null | awk '$3 !~ /^phy0/ && $3 != "" && !/permanent|self/ {print toupper($1)}' | sort -u)
+LANPFX=$(uci -q get network.lan.ipaddr 2>/dev/null | cut -d. -f1-3)
+WIREDJ=""
+if [ -n "$LANPFX" ]; then
+WIREDJ=$( {
+    ip -4 neigh show dev br-lan 2>/dev/null | awk '/lladdr/{print toupper($3), $1}'
+    awk '{print toupper($2), $3}' /tmp/dhcp.leases 2>/dev/null
+  } | awk -v wifi="$WIFIMACS" -v wired="$FDBWIRED" -v pfx="$LANPFX." '
+      BEGIN {
+        n=split(wifi,  w, "\n"); for (i=1; i<=n; i++) if (w[i] != "") W[w[i]]=1
+        m=split(wired, e, "\n"); for (i=1; i<=m; i++) if (e[i] != "") E[e[i]]=1
+      }
+      {
+        mac=$1; ip=$2
+        if (mac == "" || ip == "") next
+        if (index(ip, pfx) != 1) next     # LAN subnet only (keeps iot/guest out)
+        if (mac in W) next                # associated on Wi-Fi -> already listed
+        if (mac in seen) next
+        seen[mac]=1
+        printf "%s{\"mac\":\"%s\",\"ip\":\"%s\",\"link\":\"%s\"}", \
+               (c++?",":""), mac, ip, ((mac in E) ? "wired" : "idle")
+      }')
+fi
+WIREDJ="[$WIREDJ]"
+
+# ---- optional vendor map: /etc/dashboard/oui, lines "AA:BB:CC|Vendor" ----
+# Deliberately empty by default — no OUI database ships on OpenWrt and guessing a
+# vendor from memory would put fabricated data on screen. Populate to enable.
+OUIJ=$(awk -F'|' '/^#/||NF<2{next}{
+        v=$2; gsub(/\\/,"\\\\",v); gsub(/"/,"\\\"",v)
+        printf "%s\"%s\":\"%s\"", (n++?",":""), toupper($1), v
+      }' /etc/dashboard/oui 2>/dev/null)
+OUIJ="{$OUIJ}"
+
+# ---- WAN latency ring buffer (written by /usr/sbin/dashmon each minute) ----
+WLJ=$(awk 'NF>=3 && $1~/^[0-9]+$/ {printf "%s[%d,%s,%d]", (c++?",":""), $1, $2, $3+0}' /tmp/.wanlat 2>/dev/null)
+WLJ="[$WLJ]"
+
+# ---- join/leave events (dashmon), names joined from the classmap ----
+EVJ=$(tail -n 12 /tmp/.presence 2>/dev/null | awk -F'|' '
+    NR==FNR { if ($0 !~ /^#/ && NF>=2) n[toupper($1)]=$2; next }
+    {
+        split($0,x," "); if (x[1]!~/^[0-9]+$/) next
+        ev=(x[2]=="join")?"join":"leave"; mac=toupper(x[3]); nm=(mac in n)?n[mac]:""
+        gsub(/\\/,"\\\\",nm); gsub(/"/,"\\\"",nm)
+        printf "%s{\"t\":%d,\"ev\":\"%s\",\"mac\":\"%s\",\"name\":\"%s\",\"band\":\"%s\"}", (c++?",":""), x[1], ev, mac, nm, x[4]
+    }' "$CLASSMAP" -)
+EVJ="[$EVJ]"
+
+# ---- per-device traffic accounting (nlbwmon; null until it has data) ----
+NLJ=$(nlbw -c json -g mac 2>/dev/null)
+case "$NLJ" in '{'*'}') ;; *) NLJ='null' ;; esac
+
+printf '{"ok":true,"ts":%s,' "$NOW"
+printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_total":%s,"mem_avail":%s},' \
+    "$(esc "$HOST")" "$UP" "$TEMP" "$FAN" "$(esc "$LOAD")" "$(jnum "$MEMT")" "$(jnum "$MEMA")"
+# ---- per-lane byte counters -------------------------------------------------
+# Every lane drawn on the topology is exactly one netdev: each AP has its own
+# phy0.x-apN, and the wired lane is the LAN bridge's non-wireless port(s). One
+# counter per lane lets the client answer "is this lane carrying traffic" the
+# same way for all of them, instead of the three unrelated guesses it used to
+# make (station idle time for Wi-Fi, a hardcoded false for IoT, and merely
+# "a wired device exists" for Ethernet, which was true essentially always).
+# Beacons do not appear in these counters — measured 4 B/s on an idle AP over
+# 32 hours — so the numbers are real client traffic.
+LBJ=""
+lb_add() {   # $1 = key, $2 = netdev
+    _lr=$(cat "/sys/class/net/$2/statistics/rx_bytes" 2>/dev/null)
+    _lt=$(cat "/sys/class/net/$2/statistics/tx_bytes" 2>/dev/null)
+    case "$_lr" in ''|*[!0-9]*) _lr=0 ;; esac
+    case "$_lt" in ''|*[!0-9]*) _lt=0 ;; esac
+    LBJ="$LBJ${LBJ:+,}\"$(esc "$1")\":$((_lr + _lt))"
+}
+for _wd in /sys/class/net/phy*; do
+    [ -d "$_wd" ] || continue
+    _wn=$(basename "$_wd")
+    lb_add "$_wn" "$_wn"
+done
+_wired=0
+for _bp in /sys/class/net/br-lan/brif/*; do
+    _bn=$(basename "$_bp" 2>/dev/null)
+    case "$_bn" in phy*|'*') continue ;; esac
+    _br=$(cat "/sys/class/net/$_bn/statistics/rx_bytes" 2>/dev/null)
+    _bt=$(cat "/sys/class/net/$_bn/statistics/tx_bytes" 2>/dev/null)
+    case "$_br" in ''|*[!0-9]*) _br=0 ;; esac
+    case "$_bt" in ''|*[!0-9]*) _bt=0 ;; esac
+    _wired=$((_wired + _br + _bt))
+done
+LBJ="$LBJ${LBJ:+,}\"wired\":$_wired"
+printf '"lanebytes":{%s},' "$LBJ"
+
+printf '"wan":{"ip":"%s","rx_rate":%s,"tx_rate":%s,"rx_bytes":%s,"tx_bytes":%s},' \
+    "$(esc "$WANIP")" "$WRX" "$WTX" "$RXB" "$TXB"
+
+# ---- which uplink owns the default route (for the dashboard hero) ----
+ACTDEV=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+UPACT="none"
+if [ -n "$ACTDEV" ]; then
+    for _n in wan wwan tethering; do
+        _l=$(ubus call network.interface.$_n status 2>/dev/null \
+              | awk -F'"' '/"l3_device"/{print $4; exit}')
+        [ "$_l" = "$ACTDEV" ] && { UPACT="$_n"; break; }
+    done
+fi
+printf '"uplink":{"active":"%s","dev":"%s"},' "$UPACT" "$(esc "$ACTDEV")"
+printf '"air":%s,"sta":%s,"neigh":%s,"oui":%s,"wired":%s,"wanlat":%s,"events":%s,"nlbw":%s,' \
+    "$AIRJ" "$STAJ" "$NBJ" "$OUIJ" "$WIREDJ" "$WLJ" "$EVJ" "$NLJ"
+printf '"classmap":%s,' "$CMJ"
+printf '"vpn":%s,' "$VPNJ"
+printf '"vpn_stale":%s,' "$VPNSTALE"
+printf '"leases":%s,' "$LJ"
+printf '"hosts":%s,' "$HH"
+printf '"aps":[%s]}' "$APS"

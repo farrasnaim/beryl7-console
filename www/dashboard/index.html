@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Overview — Beryl 7</title>
+<link rel="stylesheet" href="/os.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="spine"></aside>
+  <main class="main">
+    <div class="topline"></div>
+
+    <header class="head">
+      <div>
+        <h1 class="head__t">Overview</h1>
+        <p class="head__s" id="subtitle">Reading the network…</p>
+      </div>
+    </header>
+
+    <!-- THE HERO: the network, drawn directly on the page. No container —
+         the topology is the product, not a widget inside it. -->
+    <div class="face--open">
+      <div style="overflow-x:auto;scrollbar-width:none">
+        <div id="topo" style="padding:8px 0 14px"></div>
+      </div>
+    </div>
+
+    <!-- Clients before Radios: what is connected is the question this page is
+         opened to answer; the radios are the equipment serving them. -->
+    <div class="sect">
+      <span class="sect__t">Clients</span>
+      <span class="sect__m" id="cliCount"></span>
+    </div>
+    <div class="face">
+      <section class="panel">
+        <div class="panel__b panel__b--flush" id="clients">
+          <div class="panel__b" style="padding:16px 24px"><div class="sk" style="width:70%"></div>
+            <div class="sk" style="width:52%;margin-top:10px"></div>
+            <div class="sk" style="width:61%;margin-top:10px"></div></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Radios: an open instrument band. Lanes separated by air, not borders. -->
+    <div class="face--open">
+      <div class="sect">
+        <span class="sect__t">Radios</span>
+        <span class="sect__m" id="radioAside"></span>
+      </div>
+      <div id="radios"></div>
+    </div>
+
+    <!-- Diagnostics: quieter, contained, lower on the page. -->
+    <div class="face">
+      <div class="grid g-2-1">
+        <section class="panel">
+          <div class="panel__h">
+            <span class="panel__t">Throughput</span>
+            <div class="panel__aside"><span class="dim n" id="tpNow" style="font-size:10.5px"></span></div>
+          </div>
+          <div class="panel__b">
+            <div id="ribbon"></div>
+            <div class="cap"><span id="ribL"></span><span>up above · down below</span><span id="ribR"></span></div>
+            <div class="rowsep"></div>
+            <div id="spark"></div>
+            <div class="cap"><span id="spkL"></span><span id="spkM">round-trip to 1.1.1.1 · 4h</span><span id="spkR"></span></div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel__h"><span class="panel__t">System</span>
+            <div class="panel__aside" id="sysChip"></div></div>
+          <div class="panel__b" id="sys"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Maintenance actions moved to Settings (2026-08-09): configuration
+         lives there, observation lives here. Traffic today stays — it is a
+         reading, and it earns the open slot Maintenance vacated. -->
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h">
+          <span class="panel__t">Traffic today</span>
+          <div class="panel__aside"><span class="row__cap" id="trafTotal"></span></div>
+        </div>
+        <div class="panel__b" id="traffic"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<nav class="mobilebar" aria-label="Sections"></nav>
+
+<script src="/os.js"></script>
+<script>
+(function () {
+'use strict';
+var API = '/cgi-bin/dashboard-api';
+var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
+
+OS.buildShell('/dashboard/');
+
+var MQM = matchMedia('(max-width: 640px)');
+if (MQM.addEventListener) MQM.addEventListener('change', function () { if (last) render(last); });
+var expanded = {};      /* mac -> true, survives the poll re-render */
+var advOpen  = {};      /* mac|band -> true, per-link radio fold     */
+var last = null;
+
+/* ------------------------------------------------------------ derivation --
+   One pass over the payload builds the device model the whole page reads
+   from. Doing this once per poll (instead of per widget) keeps the render
+   cheap on a phone. */
+function model(d) {
+    var byMac = {}, macfilterBySec = {}, aps = d.aps || [];
+
+    function ensure(mac) {
+        mac = String(mac).toUpperCase();
+        if (!byMac[mac]) {
+            var cm = (d.classmap || {})[mac] || {};
+            var h  = (d.hosts || {})[mac] || {};
+            var L  = (d.leases || {})[mac] || null;
+            byMac[mac] = {
+                mac: mac,
+                cls: cm.class || 'default',
+                zone: cm.zone || '',
+                name: cm.name || (L && L.name && L.name !== '*' ? L.name : null) ||
+                      (h.name ? String(h.name).replace(/\.lan$/, '') : null) || mac,
+                named: !!(cm.name),
+                ip: cm.ip || (L && L.ip) || (h.ipaddrs && h.ipaddrs[0]) || '',
+                ip6: (h.ip6addrs || []).slice(0, 2),
+                host: h.name ? String(h.name).replace(/\.lan$/, '') : '',
+                links: [], medium: 'idle', vpn: (d.vpn || {})[mac] || null,
+                x: (d.sta || {})[mac] || {},
+                neigh: (d.neigh || {})[mac] || '',
+                blocked: []
+            };
+        }
+        return byMac[mac];
+    }
+
+    aps.forEach(function (ap) {
+        macfilterBySec[ap.section] = ap;
+        var res = (ap.assoc && ap.assoc.results) || [];
+        res.forEach(function (st) {
+            var dv = ensure(st.mac);
+            dv.links.push({
+                band: ap.band === '5g' ? '5' : '2.4',
+                ssid: (ap.info && ap.info.ssid) || '',
+                section: ap.section,
+                net: ap.network,
+                chan: (ap.info && ap.info.channel) || 0,
+                st: st
+            });
+        });
+        /* a deny-list section with this MAC on it == blocked here */
+        if (ap.macfilter === 'deny') {
+            (ap.maclist || []).forEach(function (m) {
+                var dv = ensure(m);
+                dv.blocked.push({ section: ap.section, ssid: (ap.info && ap.info.ssid) || ap.section });
+            });
+        }
+    });
+    (d.wired || []).forEach(function (w) {
+        var dv = ensure(w.mac);
+        if (!dv.ip && w.ip) dv.ip = w.ip;
+        dv.wiredLink = w.link;
+    });
+
+    var out = [];
+    Object.keys(byMac).forEach(function (m) {
+        var dv = byMac[m];
+        if (dv.links.length) {
+            /* strongest link decides the medium the device is filed under */
+            dv.links.sort(function (a, b) { return (b.st.signal || -99) - (a.st.signal || -99); });
+            dv.medium = dv.links[0].band === '5' ? '5' : '2.4';
+            dv.signal = dv.links[0].st.signal;
+            dv.idleMs = Math.min.apply(null, dv.links.map(function (l) { return +l.st.inactive || 0; }));
+        } else if (dv.wiredLink === 'wired') {
+            dv.medium = 'eth';
+        } else if (dv.blocked.length && !dv.wiredLink) {
+            dv.medium = 'blocked';
+        } else {
+            dv.medium = 'idle';
+        }
+        out.push(dv);
+    });
+
+    /* traffic + connection counts, keyed differently by each source */
+    var nl = d.nlbw;
+    if (nl && nl.columns && nl.data) {
+        var ci = {}; nl.columns.forEach(function (c, i) { ci[c] = i; });
+        nl.data.forEach(function (r) {
+            var mac = String(r[ci.mac] || '').toUpperCase();
+            if (byMac[mac]) byMac[mac].traffic = {
+                dn: +r[ci.rx_bytes] || 0, up: +r[ci.tx_bytes] || 0, conns: +r[ci.conns] || 0
+            };
+        });
+    }
+    out.forEach(function (dv) {
+        dv.gen = dv.links.length
+            ? Math.max.apply(null, dv.links.map(function (l) { return OS.genOf(l.st); }))
+            : 0;
+    });
+    /* within a band: newest Wi-Fi generation first, then name A-Z */
+    var order = { eth: 0, '5': 1, '2.4': 2, blocked: 3, idle: 4 };
+    out.sort(function (a, b) {
+        if (order[a.medium] !== order[b.medium]) return order[a.medium] - order[b.medium];
+        if (a.gen !== b.gen) return b.gen - a.gen;
+        return a.name.localeCompare(b.name);
+    });
+    return { devices: out, aps: aps };
+}
+
+/* ------------------------------------------------------------- topology -- */
+var UPNAME = { wan: 'Ethernet', wwan: 'Wi-Fi', tethering: 'USB', none: 'None' };
+
+function renderTopo(d, M) {
+    var box = $('#topo'); clear(box);
+    var up = (d.uplink && d.uplink.active) || 'none';
+    var online = up !== 'none';
+    var lat = d.wanlat && d.wanlat.length ? d.wanlat[d.wanlat.length - 1] : null;
+    var loss = lat ? +lat[2] : 100;
+    var rx = (d.wan && d.wan.rx_rate) || 0, tx = (d.wan && d.wan.tx_rate) || 0;
+    var flowing = online && (rx + tx) > 2048;
+    var vpnCount = Object.keys(d.vpn || {}).length;
+    var staleVpn = (d.vpn_stale || []).length;
+    var clients = M.devices.filter(function (v) { return v.medium !== 'idle' && v.medium !== 'blocked'; }).length;
+
+    var sy = d.sys || {}, ld = parseFloat(sy.load) || 0;
+    var memF = sy.mem_total ? (sy.mem_total - sy.mem_avail) / sy.mem_total : 0;
+    var tC = sy.temp ? sy.temp / 1000 : 0;
+    var health = (tC > 85 || memF > 0.9 || ld > 4) ? ['Degraded', 'bad']
+               : (tC > 75 || memF > 0.75 || ld > 2.8) ? ['Warm', 'warn'] : ['Nominal', null];
+
+    /* Lane activity: ONE rule for every lane — its own netdev moved more than
+       2 KB/s since the last poll, the same threshold `flowing` uses for the
+       WAN. Previously each lane answered this differently (station idle time /
+       hardcoded false / "a wired device exists"), so Ethernet dashed
+       permanently and IoT never could. Deltas are kept across renders so
+       re-rendering the same payload does not blank the flow. */
+    var lb = d.lanebytes || {};
+    if (renderTopo.lb && d.ts > renderTopo.lbT) {
+        var dt = d.ts - renderTopo.lbT, prev = renderTopo.lb, out = {};
+        Object.keys(lb).forEach(function (k) {
+            var p = prev[k];
+            out[k] = (p != null && lb[k] >= p) ? ((lb[k] - p) / dt) > 2048 : false;
+        });
+        renderTopo.act = out;
+    }
+    if (!renderTopo.lb || d.ts > renderTopo.lbT) { renderTopo.lb = lb; renderTopo.lbT = d.ts; }
+    var act = renderTopo.act || {};
+
+    var lanes = [];
+    M.aps.forEach(function (ap) {
+        if (ap.network !== 'lan') return;
+        var nm = ap.band === '5g' ? '5 GHz' : '2.4 GHz';
+        var cnt = ((ap.assoc && ap.assoc.results) || []).length;
+        lanes.push({ name: nm, clients: cnt, active: !!act[ap.ifname] });
+    });
+    var iot = M.aps.filter(function (a) { return a.network === 'iot'; });
+    if (iot.length) {
+        var icnt = 0, iact = false;
+        iot.forEach(function (a) {
+            icnt += ((a.assoc && a.assoc.results) || []).length;
+            if (act[a.ifname]) iact = true;
+        });
+        lanes.push({ name: 'IoT 2.4 GHz', clients: icnt, active: iact });
+    }
+    var ethN = M.devices.filter(function (v) { return v.medium === 'eth'; }).length;
+    lanes.push({ name: 'Ethernet', clients: ethN, active: !!act.wired });
+
+    var vpnLabel = '';
+    if (vpnCount) {
+        var names = {}; Object.keys(d.vpn).forEach(function (k) { names[d.vpn[k]] = 1; });
+        var tn = Object.keys(names).join(', ');
+        vpnLabel = vpnCount + (vpnCount === 1 ? ' device via ' : ' devices via ') + tn;
+    }
+
+    box.appendChild(OS.topology({
+        online: online && loss < 100,
+        flowing: flowing,
+        latency: lat && lat[1] > 0 ? Math.round(lat[1]) + ' ms round-trip' : 'not responding',
+        uplink: UPNAME[up] || up,
+        uplinkSub: (d.wan && d.wan.ip) || 'no address',
+        router: sy.host || 'Beryl 7',
+        routerSub: health[0] === 'Nominal'
+            ? 'up ' + OS.dur(sy.uptime || 0) : health[0].toLowerCase() + ' · ' + ld.toFixed(2) + ' load',
+        lanes: lanes,
+        vpn: vpnCount > 0,
+        vpnUp: vpnCount > 0 && !staleVpn,
+        vpnLabel: vpnLabel
+    }, MQM.matches));
+
+    /* Rail mirrors the same truth. Internet and Router are no longer rows.
+       For Wi-Fi in / USB in this page only knows whether they CARRY the route —
+       it cannot see "plugged in but on standby" — so when they are not carrying
+       it passes null and the row keeps its descriptor instead of asserting a
+       state this payload cannot support. */
+    OS.stage('source', UPNAME[up] || up, online ? 'live' : 'fault');
+    OS.stage('routing', vpnCount ? vpnCount + ' tunnelled' : 'Direct',
+             staleVpn ? 'fault' : vpnCount ? 'live' : '');
+    OS.stage('clients', clients + (clients === 1 ? ' device' : ' devices'), 'live');
+    OS.stage('repeater', up === 'wwan' ? 'Carrying the uplink' : null,
+             up === 'wwan' ? 'live' : '');
+    OS.stage('tether', up === 'tethering' ? 'Carrying the uplink' : null,
+             up === 'tethering' ? 'live' : '');
+    OS.flagTab('/vpn/', !!staleVpn);
+
+    setTxt($('#subtitle'), online
+        ? 'Online via the ' + (UPNAME[up] || up) + ' uplink. ' + clients +
+          ' device' + (clients === 1 ? '' : 's') + ' connected' +
+          (vpnCount ? ', ' + vpnCount + ' routed through a tunnel.' : '.')
+        : 'No route to the internet. Check the Wi-Fi or USB uplink.');
+}
+
+/* -------------------------------------------------------------- readouts - */
+/* ------------------------------------------------------------ throughput --
+   The ribbon is the only thing on this page that changes second to second, so
+   it gets its own counters-only endpoint at 1s while the 5s poll keeps owning
+   everything else. Measured on this router: 8.5ms of CPU per rate-api call
+   against dashboard-api's 435ms, i.e. ~0.2% of the four cores instead of 7.5%.
+   The delta is computed HERE, from the router's monotonic uptime, so there is
+   no whole-second rounding and two open tabs cannot corrupt each other. */
+var RATE_API = '/cgi-bin/rate-api';
+var FAST_MS = 1000;          /* sample period while the session is active */
+var FAST_WINDOW = 300000;    /* 5 minutes, renewed by any interaction     */
+var RING_MAX = 300;          /* 5 min at 1s, and the ribbon is 300px wide */
+var ring = { t: [], dn: [], up: [], ms: [] };
+var rPrev = null, fastTimer = null, fastBusy = false, activeUntil = 0;
+/* Explicit "the 1s sampler is running" flag. It cannot be inferred from
+   fastTimer/fastBusy: pushSample runs from inside the fetch callback, at the
+   one moment when fastBusy is already false and fastTimer is not yet
+   rescheduled — so both read false while sampling is very much alive. */
+var fastOn = false;
+var lastLat = [];        /* dashmon's 4h ring, used whenever fast mode is off */
+
+function pushSample(dn, up, ms) {
+    ring.dn.push(dn); ring.up.push(up); ring.t.push(Date.now());
+    ring.ms.push(ms == null ? null : ms);
+    if (ring.dn.length > RING_MAX) {
+        ring.dn.shift(); ring.up.shift(); ring.t.shift(); ring.ms.shift();
+    }
+    drawRibbon();
+    drawLatency();
+}
+
+function drawRibbon() {
+    var rb = $('#ribbon'); clear(rb);
+    var n = ring.dn.length;
+    if (n > 1) {
+        var g = OS.ribbon(ring.dn, ring.up, 84);
+        rb.appendChild(g);
+        var pk = OS.brate(g._peak);
+        /* the left edge is the OLDEST sample, so label the span the chart
+           actually covers — which also makes the 1s/5s switch self-evident */
+        setTxt($('#ribL'), 'last ' + OS.dur((ring.t[n - 1] - ring.t[0]) / 1000));
+        setTxt($('#ribR'), 'peak ' + pk[0] + ' ' + pk[1]);
+    } else {
+        var ph = el('div'); ph.style.cssText = 'height:84px;display:grid;place-items:center';
+        ph.appendChild(el('div', 'dim', 'collecting…'));
+        ph.firstChild.style.fontSize = '11px';
+        rb.appendChild(ph);
+        setTxt($('#ribL'), ''); setTxt($('#ribR'), '');
+    }
+    var cur = OS.brate(n ? ring.dn[n - 1] : 0), cu = OS.brate(n ? ring.up[n - 1] : 0);
+    setTxt($('#tpNow'), '↓ ' + cur[0] + ' ' + cur[1] + '   ↑ ' + cu[0] + ' ' + cu[1]);
+}
+
+/* Latency is the same measurement at two rates — dashmon's 1-minute samples
+   over 4h, and rate-api's 1s samples while the session is live. One chart,
+   switched by which data is current, exactly like the ribbon above it. The
+   caption always names the window so the two are never confused. */
+function drawLatency() {
+    var sp = $('#spark'); if (!sp) return;
+    /* Live only while the 1s sampler is actually running. Keying this off the
+       ring contents instead let an expired session keep showing a frozen trace
+       under a "last Nm" label that went on growing. */
+    var first = -1, lost = 0, got = 0, i;
+    for (i = 0; i < ring.ms.length; i++) {
+        if (ring.ms[i] == null) { if (first >= 0) lost++; }
+        else { if (first < 0) first = i; got++; }
+    }
+    var live = fastOn && got > 1;
+    var vals, leftTxt, midTxt;
+
+    if (live) {
+        vals = ring.ms.slice(first);
+        /* span measured from the first live sample, not the first sample of
+           the ring — the throughput ring can be much older than this trace */
+        var span = (ring.t[ring.t.length - 1] - ring.t[first]) / 1000;
+        leftTxt = 'last ' + OS.dur(span);
+        midTxt = 'round-trip to 1.1.1.1' + (lost ? '  ·  ' + lost + ' lost' : '');
+    } else {
+        vals = lastLat.map(function (r) { return +r[1]; });
+        leftTxt = lastLat.length ? OS.clock(lastLat[0][0]) : '';
+        midTxt = 'round-trip to 1.1.1.1  ·  4h';
+    }
+
+    clear(sp);
+    var g = OS.spark(vals, 46);
+    sp.appendChild(g);
+    setTxt($('#spkL'), leftTxt);
+    setTxt($('#spkM'), midTxt);
+    setTxt($('#spkR'), g._range
+        ? Math.round(g._range[0]) + '–' + Math.round(g._range[1]) + ' ms' : '');
+}
+
+function fastTick() {
+    fastTimer = null;
+    if (document.visibilityState !== 'visible' || Date.now() > activeUntil) { fastStop(); return; }
+    if (fastBusy) { fastTimer = setTimeout(fastTick, FAST_MS); return; }
+    fastBusy = true;
+    var ctl = ('AbortController' in window) ? new AbortController() : null;
+    var killer = setTimeout(function () { if (ctl) ctl.abort(); }, 4000);
+    fetch(RATE_API, { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            clearTimeout(killer); fastBusy = false;
+            if (j && j.ok) {
+                /* discard the delta across a reboot (uptime resets), an uplink
+                   change (different counters) or a counter wrap */
+                if (rPrev && rPrev.dev === j.dev && j.up > rPrev.up &&
+                    j.rx >= rPrev.rx && j.tx >= rPrev.tx) {
+                    var s = j.up - rPrev.up;
+                    pushSample((j.rx - rPrev.rx) / s, (j.tx - rPrev.tx) / s, j.ping);
+                }
+                rPrev = j;
+                if (lastSys && j.load != null) {
+                    lastSys.load = j.load;
+                    lastSys.temp = j.temp;
+                    lastSys.fan_rpm = j.fan;
+                    lastSys.mem_total = j.memt;
+                    lastSys.mem_avail = j.mema;
+                    lastSys.uptime = j.up;
+                    paintSys(lastSys);
+                }
+            }
+            fastTimer = setTimeout(fastTick, FAST_MS);
+        })
+        .catch(function () {
+            clearTimeout(killer); fastBusy = false;
+            /* the 5s poll owns link state and reports its own errors; a missed
+               sample here is worth a longer gap, not a toast */
+            rPrev = null;
+            fastTimer = setTimeout(fastTick, FAST_MS * 3);
+        });
+}
+function fastStart() {
+    activeUntil = Date.now() + FAST_WINDOW;
+    if (!fastTimer && !fastBusy && document.visibilityState === 'visible') {
+        fastOn = true;
+        fastTimer = setTimeout(fastTick, 0);
+    }
+}
+function fastStop() {
+    clearTimeout(fastTimer); fastTimer = null; rPrev = null; fastOn = false;
+    /* drop the live latency trace but keep array parity with the throughput
+       ring, so a resumed session starts a fresh trace instead of stitching
+       one across the gap */
+    for (var i = 0; i < ring.ms.length; i++) ring.ms[i] = null;
+}
+
+function renderCharts(d) {
+    /* While the 1s sampler runs it owns the ribbon. Once the session goes idle
+       the 5s poll keeps it advancing on the server-side rate, so the chart
+       never freezes — it just gets coarser, which the span label shows. */
+    if (!fastOn) {
+        pushSample((d.wan && d.wan.rx_rate) || 0, (d.wan && d.wan.tx_rate) || 0, null);
+    }
+    lastLat = d.wanlat || [];
+    drawLatency();
+}
+
+/* System is fed by whichever source is currently fresher: the 1s sampler while
+   the session is live, the 5s poll otherwise. rate-api reports these in the
+   same units as dashboard-api so they merge without conversion. */
+var lastSys = null;
+function renderSys(d) {
+    lastSys = d.sys || {};
+    paintSys(lastSys);
+}
+function paintSys(sys) {
+    var box = $('#sys'); if (!box) return;
+    clear(box);
+    sys = sys || {};
+    var load = parseFloat(sys.load) || 0;
+    var cores = 4;
+    var memUsed = (sys.mem_total || 0) - (sys.mem_avail || 0);
+    var memPct = sys.mem_total ? memUsed / sys.mem_total : 0;
+    var t = sys.temp ? sys.temp / 1000 : 0;
+
+    function bar(label, valTxt, frac, tone, meta) {
+        var r = el('div'); r.style.marginBottom = '14px';
+        var top = el('div'); top.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px';
+        top.appendChild(el('span', 'ro__k', label));
+        top.appendChild(el('span', 'n', valTxt)).style.fontSize = '12px';
+        r.appendChild(top);
+        r.appendChild(OS.meter(frac, tone, true));
+        if (meta) { var m = el('div', 'ro__m', meta); m.style.marginTop = '5px'; r.appendChild(m); }
+        box.appendChild(r);
+    }
+    bar('Load average', load.toFixed(2), Math.min(1, load / cores),
+        load > cores ? 'bad' : load > cores * 0.7 ? 'warn' : null,
+        (load / cores * 100).toFixed(0) + '% of ' + cores + ' cores, 1 min average');
+    bar('Memory', Math.round(memUsed / 1024) + ' / ' + Math.round((sys.mem_total || 0) / 1024) + ' MB',
+        memPct, memPct > 0.9 ? 'bad' : memPct > 0.75 ? 'warn' : null,
+        Math.round((sys.mem_avail || 0) / 1024) + ' MB available');
+    bar('Temperature', (t ? t.toFixed(1) : '—') + ' °C', Math.min(1, t / 100),
+        t > 85 ? 'bad' : t > 75 ? 'warn' : null,
+        sys.fan_rpm ? 'fan at ' + sys.fan_rpm + ' rpm' : 'fan idle');
+    var upRow = el('div');
+    upRow.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px';
+    upRow.appendChild(el('span', 'ro__k', 'Uptime'));
+    var upV = el('span', 'n', OS.dur(sys.uptime || 0));
+    upV.style.fontSize = '12px';
+    upRow.appendChild(upV);
+    box.appendChild(upRow);
+
+    var chipBox = $('#sysChip'); clear(chipBox);
+    var worst = (t > 85 || memPct > 0.9 || load > cores) ? ['DEGRADED', 'bad']
+              : (t > 75 || memPct > 0.75 || load > cores * 0.7) ? ['WARM', 'warn']
+              : ['NOMINAL', 'ok'];
+    chipBox.appendChild(OS.stateWord(worst[0], worst[1]));
+}
+
+/* --------------------------------------------------------------- clients - */
+var MEDIA = {
+    eth:     { k: 'Ethernet',  note: 'wired to the LAN port' },
+    '5':     { k: '5 GHz',     note: '' },
+    '2.4':   { k: '2.4 GHz',   note: '' },
+    blocked: { k: 'Blocked',   note: 'denied by MAC filter' },
+    idle:    { k: 'Not connected', note: 'known, currently offline' }
+};
+
+function renderClients(d, M) {
+    var box = $('#clients'); clear(box);
+    var devs = M.devices;
+    var onlineN = devs.filter(function (v) { return v.medium !== 'idle' && v.medium !== 'blocked'; }).length;
+    setTxt($('#cliCount'), onlineN + ' online · ' + devs.length + ' known');
+
+    if (!devs.length) {
+        box.appendChild(OS.emptyState('No devices seen yet',
+            'Devices appear here the moment they connect or take a DHCP lease.', 'dev'));
+        return;
+    }
+    var groups = {};
+    devs.forEach(function (v) { (groups[v.medium] = groups[v.medium] || []).push(v); });
+
+    /* Offline devices are counted in the header but not rendered: the
+       Overview is the CURRENT state of the network, not its roster. */
+    ['eth', '5', '2.4', 'blocked'].forEach(function (key) {
+        var list = groups[key];
+        if (!list || !list.length) return;
+        var g = el('div', 'tbl__group');
+        g.appendChild(el('span', 'tbl__gk', MEDIA[key].k));
+        if (MEDIA[key].note) { var nn = el('span', 'row__sub', MEDIA[key].note); g.appendChild(nn); }
+        g.appendChild(el('span', 'tbl__gn', String(list.length)));
+        box.appendChild(g);
+        list.forEach(function (v) { box.appendChild(rowFor(v, d)); if (expanded[v.mac]) box.appendChild(detailFor(v, d)); });
+    });
+}
+
+function rowFor(v, d) {
+    var r = el('div', 'row row--entity');
+    r.style.gridTemplateColumns = 'minmax(0,1fr) auto auto auto';
+    r.setAttribute('role', 'button');
+    r.setAttribute('tabindex', '0');
+    r.setAttribute('aria-expanded', expanded[v.mac] ? 'true' : 'false');
+
+    var id = el('div', 'row__id re-id');
+    var ic = el('div', 'row__ico');
+    ic.appendChild(OS.icon(OS.CLASS_ICON[v.cls] || 'dev'));
+    id.appendChild(ic);
+    var txt = el('div'); txt.style.minWidth = '0';
+    var title = el('div', 'row__title');
+    title.appendChild(el('span', 'row__nm', v.name));
+    if (v.vpn) title.appendChild(OS.chip('VPN', 'on'));
+    if (v.zone && v.zone !== 'lan') title.appendChild(OS.chip(v.zone, 'flat'));
+    txt.appendChild(title);
+    /* the identity line reads like the operator would say it:
+       "5 GHz · Wi-Fi 7 · 2402 Mb/s" */
+    var subBits = [];
+    if (v.links.length) {
+        var L = v.links[0], st = L.st || {};
+        subBits.push(L.band + ' GHz');
+        subBits.push(OS.GEN[OS.genOf(st)]);
+    } else if (v.medium === 'eth') {
+        subBits.push('wired');
+    }
+    if (v.ip) subBits.push(v.ip);
+    txt.appendChild(el('div', 'row__sub', subBits.join('  ·  ') || v.mac));
+    id.appendChild(txt);
+    r.appendChild(id);
+
+    /* signal, plotted on the calibrated -90..-20 rule */
+    var mid = el('div', 're-sig'); mid.style.cssText = 'display:flex;align-items:center;gap:10px';
+    if (v.medium === '5' || v.medium === '2.4') {
+        var sc = OS.rssiScale(v.signal, true);
+        sc.style.width = '64px';
+        sc.title = v.signal + ' dBm';
+        mid.appendChild(sc);
+        var dbm = el('span', 'row__num', v.signal + ' dBm');
+        dbm.style.cssText += ';color:var(--ink-2);width:56px';
+        mid.appendChild(dbm);
+    }
+    r.appendChild(mid);
+
+    /* the state word: the single uppercase element in the row */
+    var wordBox = el('div', 're-state'); wordBox.style.cssText = 'text-align:right;min-width:82px';
+    if (v.medium === '5' || v.medium === '2.4') {
+        var active = v.idleMs < 3000;
+        var q = OS.quality(v.signal);
+        wordBox.appendChild(OS.stateWord(active ? 'ACTIVE' : q.word,
+            active ? 'ok' : q.tone === 'ok' ? null : q.tone));
+    } else if (v.medium === 'eth') {
+        wordBox.appendChild(OS.stateWord('WIRED', 'ok'));
+    } else if (v.medium === 'blocked') {
+        wordBox.appendChild(OS.stateWord('BLOCKED', 'bad'));
+    } else {
+        wordBox.appendChild(OS.stateWord('OFFLINE', 'idle'));
+    }
+    /* the entity's footprint: what it has moved today, on every row */
+    if (v.traffic && (v.traffic.dn + v.traffic.up) > 0) {
+        wordBox.appendChild(el('div', 'row__cap',
+            OS.bytes(v.traffic.dn + v.traffic.up) + ' today'));
+    } else if (v.links.length && v.idleMs >= 3000) {
+        wordBox.appendChild(el('div', 'row__cap', 'idle ' + OS.dur(v.idleMs / 1000)));
+    }
+    r.appendChild(wordBox);
+
+    /* expand affordance */
+    var caret = el('div', 're-caret'); caret.style.cssText =
+        'width:5px;height:5px;border-right:1.5px solid var(--ink-4);' +
+        'border-bottom:1.5px solid var(--ink-4);transform:rotate(' +
+        (expanded[v.mac] ? '225deg' : '45deg') + ');transition:transform 150ms';
+    r.appendChild(caret);
+
+    function toggle() {
+        expanded[v.mac] = !expanded[v.mac];
+        render(last);
+    }
+    r.addEventListener('click', toggle);
+    r.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+    return r;
+}
+
+function detailFor(v, d) {
+    var box = el('div', 'det');
+
+    /* actions first: this panel is opened to DO something as often as to read */
+    var acts = el('div', 'inline');
+    acts.style.marginBottom = '14px';
+    var rn = el('button', 'btn btn--sm');
+    rn.appendChild(OS.icon('pen')); rn.appendChild(document.createTextNode('Rename'));
+    rn.addEventListener('click', function (e) { e.stopPropagation(); rename(v); });
+    acts.appendChild(rn);
+
+    var rt = el('a', 'btn btn--sm');
+    rt.href = '/vpn/';
+    rt.appendChild(OS.icon('routing'));
+    rt.appendChild(document.createTextNode(v.vpn ? 'Change tunnel' : 'Route via VPN'));
+    acts.appendChild(rt);
+
+    box.appendChild(acts);
+
+    if (v.blocked.length) {
+        box.appendChild(OS.note('Blocked by MAC filter on ' +
+            v.blocked.map(function (b) { return b.ssid; }).join(', ') +
+            '. Unblock it in Settings, under Blocked devices.', 'bad'));
+        box.lastChild.style.marginBottom = '14px';
+    }
+
+    /* identity + traffic */
+    var dl = el('dl', 'kv');
+    function kv(k, val) {
+        if (val == null || val === '') return;
+        dl.appendChild(el('dt', null, k));
+        dl.appendChild(el('dd', null, String(val)));
+    }
+    var vend = (d.oui || {})[v.mac.slice(0, 8)];
+    kv('MAC', v.mac + (vend ? '  ' + vend : ''));
+    if (v.ip) kv('IPv4', v.ip);
+    v.ip6.forEach(function (a, i) { kv(i ? '' : 'IPv6', a); });
+    if (v.host && v.host !== v.name) kv('Hostname', v.host);
+    kv('Zone', v.zone || 'lan');
+    kv('Reachability', v.neigh ? (v.neigh === 'REACHABLE' ? 'reachable'
+        : v.neigh === 'FAILED' ? 'not answering ARP' : v.neigh.toLowerCase()) : null);
+    kv('Internet route', v.vpn ? v.vpn + '  ·  VPN' : 'Direct  ·  normal uplink');
+    if (v.traffic) kv('Today', '↓ ' + OS.bytes(v.traffic.dn) + '   ↑ ' + OS.bytes(v.traffic.up));
+    box.appendChild(dl);
+
+    /* per-link radio detail */
+    v.links.forEach(function (l) {
+        var st = l.st, x = v.x || {};
+        var sec = el('div', 'det__wifi');
+        box.appendChild(sec);
+        var head = el('div');
+        head.style.cssText = 'display:flex;align-items:center;gap:9px;margin-bottom:9px;flex-wrap:wrap';
+        head.appendChild(el('span', 'row__cap', l.band + ' GHz'));
+        var nm = el('span'); nm.style.cssText = 'font-size:12.5px;font-weight:500';
+        nm.textContent = l.ssid; head.appendChild(nm);
+        head.appendChild(OS.chip(OS.GEN[OS.genOf(st)], 'flat'));
+        head.appendChild(OS.chip(((st.tx && st.tx.mhz) || 0) + ' MHz', 'flat'));
+        var q2 = OS.quality(st.signal);
+        var sc2 = OS.rssiScale(st.signal, true); sc2.style.cssText = 'width:64px;margin-left:auto';
+        head.appendChild(sc2);
+        head.appendChild(OS.stateWord(q2.word, q2.tone === 'ok' ? 'ok' : q2.tone));
+        sec.appendChild(head);
+
+        var d2 = el('dl', 'kv');
+        function kv2(k, val) {
+            if (val == null || val === '') return;
+            d2.appendChild(el('dt', null, k)); d2.appendChild(el('dd', null, String(val)));
+        }
+        var snr = (st.signal != null && st.noise != null) ? (st.signal - st.noise) : null;
+        kv2('Signal', st.signal + ' dBm' + (snr != null ? '   SNR ' + snr + ' dB' : ''));
+        if (x.chains && x.chains.indexOf(',') > 0) kv2('Per antenna', x.chains.split(',').join(' / ') + ' dBm');
+        if (st.noise != null) kv2('Noise floor', st.noise + ' dBm');
+        /* one row, one unit — the two rates are read against each other far more
+           often than they are read alone */
+        kv2('TX / RX rate', Math.round((st.tx && st.tx.rate || 0) / 1000) + ' / ' +
+                            Math.round((st.rx && st.rx.rate || 0) / 1000) + ' Mb/s');
+        /* the honest counterpart to the PHY rates above: what the driver thinks
+           the link can actually carry once overhead and retries are paid */
+        if (st.thr) kv2('Expected throughput', Math.round(st.thr / 1000) + ' Mb/s');
+        kv2('Connected', OS.dur(st.connected_time));
+        /* Channel dropped: l.chan IS ap.info.channel, the same value the Radios
+           section prints for this band — it could never disagree. */
+        sec.appendChild(d2);
+
+        var det = document.createElement('details');
+        det.className = 'adv';
+        det.style.cssText = 'border-top:1px solid var(--line);margin-top:10px';
+        var akey = v.mac + '|' + l.band;
+        det.open = !!advOpen[akey];
+        det.addEventListener('toggle', function () { advOpen[akey] = det.open; });
+        var sum = document.createElement('summary');
+        sum.textContent = 'Driver counters';
+        sum.style.padding = '9px 0';
+        det.appendChild(sum);
+        var d3 = el('dl', 'kv');
+        function kv3(k, val) {
+            if (val == null || val === '') return;
+            d3.appendChild(el('dt', null, k)); d3.appendChild(el('dd', null, String(val)));
+        }
+        function chainTxt(r) {
+            if (!r) return '';
+            var p = [];
+            if (r.mcs != null) p.push('MCS ' + r.mcs);
+            if (r.nss) p.push(r.nss + ' stream' + (r.nss === 1 ? '' : 's'));
+            if (r.mhz) p.push(r.mhz + ' MHz');
+            if (r.short_gi) p.push('short GI');
+            return p.join(' · ');
+        }
+        kv3('Transmit', chainTxt(st.tx));
+        kv3('Receive', chainTxt(st.rx));
+        if (st.signal_avg != null) kv3('Signal average', st.signal_avg + ' dBm');
+        if (st.tx && st.tx.packets != null) kv3('Packets sent', (+st.tx.packets).toLocaleString());
+        if (st.rx && st.rx.packets != null) kv3('Packets received', (+st.rx.packets).toLocaleString());
+        if (st.tx && st.tx.retries != null) {
+            var pk = +st.tx.packets || 0, rt = +st.tx.retries || 0;
+            kv3('Retries', rt.toLocaleString() + (pk ? '  ' + (rt * 100 / pk).toFixed(1) + '% of sent' : ''));
+        }
+        if (st.tx && st.tx.failed != null) kv3('Send failures', (+st.tx.failed).toLocaleString());
+        if (st.rx && st.rx.drop_misc != null) kv3('Receive drops', (+st.rx.drop_misc).toLocaleString());
+        if (x.dtim) kv3('DTIM period', x.dtim);
+        if (x.bi) kv3('Beacon interval', x.bi + ' TU');
+        var flags = [];
+        if (st.authorized) flags.push('authorised');
+        if (st.mfp) flags.push('PMF 802.11w');
+        if (st.wme) flags.push('WMM');
+        if (st.preamble) flags.push(st.preamble + ' preamble');
+        if (flags.length) kv3('Association', flags.join(' · '));
+        det.appendChild(d3);
+        if (st.tx && +st.tx.failed > 0 && +st.tx.failed === +st.tx.retries) {
+            var w = OS.note('Retries and failures read identically here — a known mt76 ' +
+                            'counter quirk on this chip, not a real error rate.', null);
+            w.style.marginTop = '10px';
+            det.appendChild(w);
+        }
+        sec.appendChild(det);
+    });
+
+    return box;
+}
+
+function rename(v) {
+    var wrap = el('div');
+    var f1 = el('div', 'field');
+    f1.appendChild(el('label', 'label', 'Display name'));
+    var i1 = el('input', 'input'); i1.value = v.named ? v.name : '';
+    i1.placeholder = v.host || v.mac;
+    f1.appendChild(i1); wrap.appendChild(f1);
+    var f2 = el('div', 'field');
+    f2.appendChild(el('label', 'label', 'Category'));
+    var sel = el('select', 'select');
+    [['phone', 'Phone'], ['pad', 'Tablet'], ['laptop', 'Laptop'], ['computer', 'Desktop computer'],
+     ['television', 'TV / streaming'], ['watch', 'Watch'], ['smartappliances', 'Smart home device'],
+     ['router', 'Router / access point'], ['default', 'Unknown']].forEach(function (o) {
+        var op = el('option', null, o[1]); op.value = o[0];
+        if (o[0] === v.cls) op.selected = true;
+        sel.appendChild(op);
+    });
+    f2.appendChild(sel); wrap.appendChild(f2);
+    f2.appendChild(el('div', 'hint', 'The name and icon are stored on the router and used everywhere in this console.'));
+
+    OS.dialog({ title: 'Rename device', body: wrap, okText: 'Save' }).then(function (go) {
+        if (!go) return;
+        var nm = i1.value.trim();
+        if (!nm) { OS.toast('Name cannot be empty.', 'bad'); return; }
+        OS.act(null, API, { action: 'setdev', mac: v.mac, name: nm, 'class': sel.value },
+               { ok: 'Renamed to ' + nm + '.' });
+    });
+}
+
+/* ---------------------------------------------------------------- radios - */
+function renderRadios(d, M) {
+    var box = $('#radios'); clear(box);
+    if (!M.aps.length) {
+        box.appendChild(OS.emptyState('No radio is up', 'Both radios are down or turned off.', 'wifi'));
+        return;
+    }
+    /* one lane per radio: identity + true spectrum position, divided by air */
+    var wrap = el('div', 'radioband');
+    M.aps.forEach(function (ap, i) {
+        var inf = ap.info || {}, n = ((ap.assoc && ap.assoc.results) || []).length;
+        var lane = el('div', 'lane');
+
+        var top = el('div'); top.style.cssText = 'display:flex;align-items:baseline;gap:8px;min-width:0';
+        var nm = el('span', null, inf.ssid || ap.section);
+        nm.style.cssText = 'font-size:14.5px;font-weight:600;letter-spacing:-.015em;' +
+            'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+        top.appendChild(nm);
+        if (ap.network !== 'lan') top.appendChild(OS.chip(ap.network, 'flat'));
+        if (ap.macfilter === 'deny' && (ap.maclist || []).length)
+            top.appendChild(OS.chip((ap.maclist || []).length + ' blocked', 'warn'));
+        var cnt = el('span', 'row__cap'); cnt.style.marginLeft = 'auto';
+        cnt.textContent = n + (n === 1 ? ' client' : ' clients');
+        top.appendChild(cnt);
+        lane.appendChild(top);
+
+        var meta = el('div', 'row__sub');
+        var gen = { be: 'Wi-Fi 7', ax: 'Wi-Fi 6', ac: 'Wi-Fi 5' }[inf.hwmode] || '';
+        meta.textContent = [(ap.band === '5g' ? '5 GHz' : '2.4 GHz'), gen,
+            'ch ' + (inf.channel || '?'),
+            inf.txpower != null ? 'tx ' + inf.txpower + ' dBm' : '']
+            .filter(Boolean).join('  ·  ');
+        meta.style.marginTop = '2px';
+        lane.appendChild(meta);
+
+        /* the instrument: where this radio actually sits in its band */
+        var mhz = parseInt(String(inf.htmode || '').replace(/[A-Z]+/, ''), 10) || 20;
+        var specEl = OS.spectrum(ap.band, inf.channel || 1, inf.center_chan1 || inf.channel, mhz, 44);
+        specEl.style.marginTop = '10px';
+        lane.appendChild(specEl);
+
+        /* airtime under the spectrum, on a calibrated 0-100 with a tick at the
+           70% congestion threshold */
+        var air = d.air || {};
+        var g = ap.band === '5g' ? air.g5 : air.g24;
+        if (g && g.active && ap.network === 'lan') {
+            var pct = airPct(ap.band, g);
+            if (pct != null) {
+                var row = el('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:10px';
+                var lab = el('span', 'row__cap', 'airtime');
+                lab.style.width = '48px'; lab.style.flex = 'none';
+                row.appendChild(lab);
+                var sc = OS.scale(pct, 0, 100, [70], pct > 70 ? 'warn' : null, true);
+                sc.style.flex = '1';
+                row.appendChild(sc);
+                var v = el('span', 'n', pct + '%');
+                v.style.cssText = 'font-size:11px;width:36px;text-align:right;flex:none';
+                row.appendChild(v);
+                var word = pct > 70 ? OS.stateWord('CONGESTED', 'warn')
+                         : pct > 30 ? OS.stateWord('BUSY', null)
+                         : OS.stateWord('CLEAR', 'ok');
+                word.style.marginLeft = '6px';
+                row.appendChild(word);
+                lane.appendChild(row);
+            }
+        }
+        wrap.appendChild(lane);
+    });
+    box.appendChild(wrap);
+}
+
+/* busy%% as a delta between polls (true "right now"); first sample falls back
+   to the boot-lifetime ratio. */
+var prevAirSnap = {};
+function airPct(band, g) {
+    var prev = prevAirSnap[band];
+    prevAirSnap[band] = { active: g.active, busy: g.busy };
+    if (prev && g.active > prev.active) {
+        var da = g.active - prev.active, db = g.busy - prev.busy;
+        if (db >= 0 && db <= da) return Math.round(db * 100 / da);
+    }
+    return g.active > 0 ? Math.round(g.busy * 100 / g.active) : null;
+}
+
+function renderTraffic(d, M) {
+    var box = $('#traffic'); clear(box);
+    /* Every device the router accounted for today, minus the IoT network —
+       plugs and bulbs trading a few hundred KB are noise beside real devices,
+       and they sit on their own isolated network anyway. Nothing here is a
+       fixed list: this is whatever nlbwmon saw, so a device that joined five
+       minutes ago appears on its own as soon as it moves data. Membership is
+       read from the live association (l.net), not a stored classmap, so a
+       brand-new IoT gadget is excluded without being known in advance. */
+    var all = M.devices.filter(function (v) {
+        if (!v.traffic || (v.traffic.dn + v.traffic.up) <= 0) return false;
+        if (v.zone === 'iot') return false;
+        return !v.links.some(function (l) { return l.net === 'iot'; });
+    });
+    var grand = 0;
+    all.forEach(function (v) { grand += v.traffic.dn + v.traffic.up; });
+    setTxt($('#trafTotal'), grand ? OS.bytes(grand) + ' total' : '');
+    if (!all.length) {
+        box.appendChild(el('div', 'hint', 'No per-device accounting yet today.'));
+        return;
+    }
+    all.sort(function (a, b) { return (b.traffic.dn + b.traffic.up) - (a.traffic.dn + a.traffic.up); });
+    var rows = all;
+    var top = rows[0].traffic.dn + rows[0].traffic.up || 1;
+    /* full-width panel now: two columns of meters on desktop, one on a phone —
+       a lone 900px meter says less than two 440px ones */
+    var grid = el('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));' +
+                         'gap:4px 32px';
+    rows.forEach(function (v) {
+        var tot = v.traffic.dn + v.traffic.up;
+        var r = el('div'); r.style.marginBottom = '9px';
+        var t = el('div'); t.style.cssText = 'display:flex;justify-content:space-between;gap:8px;margin-bottom:4px';
+        var nm = el('span'); nm.style.cssText = 'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        nm.textContent = v.name; t.appendChild(nm);
+        var vv = el('span', 'n'); vv.style.cssText = 'font-size:11px;color:var(--ink-3);flex:none';
+        vv.textContent = '↓ ' + OS.bytes(v.traffic.dn) + '   ↑ ' + OS.bytes(v.traffic.up);
+        t.appendChild(vv);
+        r.appendChild(t);
+        r.appendChild(OS.meter(tot / top, null, true));
+        grid.appendChild(r);
+    });
+    box.appendChild(grid);
+}
+
+/* ----------------------------------------------------------------- boot -- */
+function render(d) {
+    if (!d || !d.ok) return;
+    last = d;
+    var M = model(d);
+    renderTopo(d, M);
+    renderCharts(d);
+    renderSys(d);
+    renderClients(d, M);
+    renderRadios(d, M);
+    renderTraffic(d, M);
+}
+
+OS.tp = new OS.Transport(API, render, {
+    interval: 5000,
+    onError: function (msg, fails) {
+        if (fails === 3) OS.toast('Lost contact with the router (' + msg + '). Retrying with a longer gap.', 'bad');
+    }
+});
+OS.tp.start();
+
+/* draw the placeholder before the first sample lands, so the panel does not
+   jump when the ribbon appears ~2s later (it needs two samples for a delta) */
+drawRibbon();
+drawLatency();
+['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) {
+    document.addEventListener(ev, fastStart, { passive: true });
+});
+document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') fastStart(); else fastStop();
+});
+fastStart();
+})();
+</script>
+</body>
+</html>

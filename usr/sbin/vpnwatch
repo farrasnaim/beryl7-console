@@ -1,0 +1,76 @@
+#!/bin/sh
+# /usr/sbin/vpnwatch — optional "stay online" behaviour for VPN-routed devices.
+#
+# THE TRAP THIS ADDRESSES: pbr runs with strict_enforcement=1, so a device pinned
+# to a tunnel that is DOWN is fail-closed — it has no internet at all, silently.
+# That is correct and desirable at home (never leak), but on the road it is a
+# stranding: hotels commonly block WireGuard, and the tunnel auto-starts at boot,
+# so the iPad can be dead on arrival with no obvious cause.
+#
+# THIS IS OFF BY DEFAULT. Leaking traffic that was meant to be tunnelled is a
+# security decision that belongs to the owner, not to a script, so nothing here
+# runs unless the mode is explicitly set to "open":
+#
+#   /etc/dashboard/vpn-failmode  ==  closed   (default) -> do nothing, stay fail-closed
+#                                ==  open               -> keep devices online
+#
+# In "open" mode: when a routed device's tunnel has no recent handshake, its pbr
+# policy is disabled so the device falls back to the normal uplink; when the
+# tunnel returns, the policy is re-enabled automatically. Only policies THIS
+# script paused are ever resumed, so a deliberate manual pause is never undone.
+
+MODEFILE=/etc/dashboard/vpn-failmode
+MARK=/etc/dashboard/vpn-autopaused      # persistent: must survive a reboot
+STALE_AFTER=180                         # seconds without a handshake = down
+LOG="logger -t vpnwatch"
+
+mode=$(cat "$MODEFILE" 2>/dev/null); : "${mode:=closed}"
+[ "$mode" = "open" ] || exit 0
+
+[ -d /etc/dashboard ] || exit 0
+touch "$MARK" 2>/dev/null
+
+now=$(date +%s)
+changed=0
+idx=0
+while [ "$idx" -lt 64 ]; do
+    pname=$(uci -q get pbr.@policy[$idx].name 2>/dev/null) || break
+    [ -n "$pname" ] || break
+    case "$pname" in
+        dash_*)
+            piface=$(uci -q get pbr.@policy[$idx].interface 2>/dev/null)
+            pen=$(uci -q get pbr.@policy[$idx].enabled 2>/dev/null)
+            case "$piface" in
+                wg_*)
+                    hs=$(wg show "$piface" latest-handshakes 2>/dev/null | awk 'NR==1{print $2+0}')
+                    case "$hs" in ''|*[!0-9]*) hs=0 ;; esac
+                    age=$((now - hs))
+                    if [ "$hs" -eq 0 ] || [ "$age" -gt "$STALE_AFTER" ]; then
+                        # tunnel is down
+                        if [ "$pen" = "1" ]; then
+                            uci set pbr.@policy[$idx].enabled='0'
+                            grep -qxF "$pname" "$MARK" 2>/dev/null || echo "$pname" >> "$MARK"
+                            changed=1
+                            $LOG "tunnel $piface unreachable -> paused '$pname' so the device stays online"
+                        fi
+                    else
+                        # tunnel is healthy — resume ONLY what we paused
+                        if [ "$pen" != "1" ] && grep -qxF "$pname" "$MARK" 2>/dev/null; then
+                            uci set pbr.@policy[$idx].enabled='1'
+                            grep -vxF "$pname" "$MARK" > "$MARK.n" 2>/dev/null
+                            mv "$MARK.n" "$MARK" 2>/dev/null
+                            changed=1
+                            $LOG "tunnel $piface healthy again -> resumed '$pname'"
+                        fi
+                    fi ;;
+            esac ;;
+    esac
+    idx=$((idx+1))
+done
+
+if [ "$changed" = "1" ]; then
+    uci commit pbr
+    [ -x /usr/sbin/beryl-vpndns ] && /usr/sbin/beryl-vpndns   # DNS redirects must follow the pause/resume
+    /etc/init.d/pbr reload >/dev/null 2>&1 || /etc/init.d/pbr restart >/dev/null 2>&1
+fi
+exit 0

@@ -1,0 +1,1395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Beryl 7 — Dashboard</title>
+<script>
+(function(){try{var t=localStorage.getItem('theme');
+if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark';}
+document.documentElement.setAttribute('data-theme',t);}
+catch(e){document.documentElement.setAttribute('data-theme','dark');}})();
+</script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  position:relative;
+  min-height:100vh; background:var(--bg); color:var(--fg);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  -webkit-font-smoothing:antialiased;
+  padding:20px 18px 60px; max-width:1120px; margin:0 auto;
+}
+body::before{
+  content:""; position:fixed; inset:-15%; z-index:-1; pointer-events:none;
+  background-repeat:no-repeat;
+  background-image:
+    radial-gradient(1000px 560px at center, var(--tint1), transparent 60%),
+    radial-gradient(900px 520px at center, var(--tint2), transparent 60%);
+  background-position: 15% -10%, 92% 105%;
+  animation: drift1 26s ease-in-out infinite alternate;
+}
+@keyframes drift1{
+  0%   { background-position: 15% -10%, 92% 105%; }
+  50%  { background-position: 27%   2%, 80%  92%; }
+  100% { background-position:  8% -18%, 97% 112%; }
+}
+@media (prefers-reduced-motion: reduce){ body::before{ animation:none; } }
+
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:4px}
+h1{font-size:19px;font-weight:650;letter-spacing:-.01em;margin:0}
+.hmeta{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:7px;font-variant-numeric:tabular-nums}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--ok);
+  box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent);
+  animation:pl 2.4s infinite;cursor:pointer}
+.pulse.off{background:var(--bad);animation:none}
+@keyframes pl{
+  0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent)}
+  70%{box-shadow:0 0 0 6px color-mix(in srgb, var(--ok) 0%, transparent)}
+  100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 0%, transparent)}
+}
+
+nav{display:flex;gap:14px;margin:14px 0 4px;font-size:12.5px}
+nav a{color:var(--mut);text-decoration:none;padding-bottom:4px;border-bottom:1.5px solid transparent}
+nav a:hover{color:var(--fg)}
+nav a.on{color:var(--fg);border-bottom-color:var(--accent-hi);font-weight:600}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));
+  gap:20px 22px;padding:20px 2px 20px;margin-bottom:22px;border-bottom:1px solid var(--border)}
+.stat .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);font-weight:600}
+.stat .v{font-size:19px;font-weight:650;letter-spacing:-.01em;margin-top:4px;font-variant-numeric:tabular-nums}
+.stat .u{font-size:11px;color:var(--mut);font-weight:500;margin-left:2px}
+.stat .v2{font-size:11px;color:var(--dim);margin-top:2px;font-variant-numeric:tabular-nums}
+.stat .v2:empty{display:none}
+
+/* ---- hero: VPN-down travel warning ---- */
+.herowarn{margin-top:14px;padding:12px 14px;border-radius:11px;
+  background:color-mix(in srgb,var(--warn,#e0a53b) 14%,transparent);
+  border:1px solid color-mix(in srgb,var(--warn,#e0a53b) 45%,transparent);
+  display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;
+  font-size:13.5px;line-height:1.5;color:var(--fg)}
+.herowarn__btn{flex:none;margin-left:auto;font:inherit;font-weight:600;font-size:12.5px;
+  cursor:pointer;padding:7px 13px;border-radius:8px;border:1px solid var(--accent-hi);
+  background:var(--accent-hi);color:#fff}
+.herowarn__btn:hover{filter:brightness(1.06)}
+.herowarn__btn:disabled{opacity:.6;cursor:default}
+@media(max-width:520px){.herowarn__btn{margin-left:0;width:100%}}
+
+/* ---- device modal: folded driver detail ---- */
+.advsec{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
+.advsec>summary{cursor:pointer;list-style:none;font-size:11px;font-weight:650;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--dim);padding:2px 0;
+  display:flex;align-items:center;gap:6px;min-height:24px}
+.advsec>summary::-webkit-details-marker{display:none}
+.advsec>summary::after{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;
+  border-bottom:1.5px solid currentColor;transform:rotate(45deg);transition:transform .18s;margin-top:-2px}
+.advsec[open]>summary::after{transform:rotate(225deg);margin-top:2px}
+.advsec>summary:hover{color:var(--fg)}
+.advsec>summary:focus-visible{outline:2px solid var(--accent-hi);outline-offset:2px;border-radius:4px}
+.advsec .devrow:first-of-type{margin-top:4px}
+.advnote{font-size:11px;line-height:1.5;color:var(--mut);margin-top:8px;
+  padding:7px 9px;background:var(--surface2);border-radius:7px}
+@media(prefers-reduced-motion:reduce){.advsec>summary::after{transition:none}}
+
+/* ---- network health: a telemetry footer docked inside the hero card ----
+   Three compartments of ONE card, not three cards nested in a card. The hero
+   already supplies a surface, a border and a radius; repeating all three inside
+   it reads as card-in-card clutter. Hairlines divide instead, and a faint
+   recessed band separates "what state am I in" (top) from "how is it going"
+   (bottom). The bleed margins reach the hero's own padding edges; the hero's
+   overflow:hidden clips the band to its rounded bottom corners. */
+.health{display:grid;grid-template-columns:repeat(3,1fr);
+  margin:15px -1.15rem -1.05rem;border-top:1px solid var(--border);
+  background:var(--surface2)}
+.hcard{padding:13px 15px 14px;min-width:0;border-left:1px solid var(--border)}
+.hcard:first-child{border-left:none;padding-left:1.15rem}
+.hcard:last-child{padding-right:1.15rem}
+/* --mut, not --dim, for every small label in this band. The recessed tint lifts
+   the background, which drops --dim to ~4.1:1 in both themes — under AA for
+   10px text. --mut measures 5.05 (dark) / 4.91 (light) and still reads as
+   secondary. These four classes only ever appear inside .health. */
+.hcard h3{margin:0 0 9px;font-size:10px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.pulseline{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.pulseline .big{font-size:22px;font-weight:650;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.pulseline .big u{font-size:11px;color:var(--mut);text-decoration:none;font-weight:500;margin-left:2px}
+.pulseline .lossb{font-size:10.5px;font-weight:600;color:var(--ok-fg)}
+.pulseline .lossb.bad{color:var(--bad)}
+/* The grid stretches all three compartments to the tallest one, and this is the
+   shortest. Rather than leave a ragged hole under the chart, anchor the chart to
+   the band's baseline: number at the top, trace along the bottom. */
+#hcPulse{display:flex;flex-direction:column}
+#hcPulse .spark{margin-top:auto}
+.spark{width:100%;height:44px;display:block}
+.spark polyline{fill:none;stroke:var(--accent-hi);stroke-width:1.6;stroke-linejoin:round}
+.spark .fillp{fill:var(--tint1);stroke:none}
+.sparkcap{display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--mut);margin-top:3px;font-variant-numeric:tabular-nums}
+/* At the narrowest 3-column width this line has no slack, and its content is
+   dynamic — a bad night makes "12–24 ms" into "112–1240 ms". Pin the two data
+   ends and let the descriptive middle be the thing that truncates. */
+.sparkcap>span:first-child,.sparkcap>span:last-child{flex:none}
+.sparkcap>span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.evlist{display:flex;flex-direction:column;gap:7px;max-height:150px;overflow-y:auto}
+.evrow{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0}
+.evrow .edot{width:6px;height:6px;border-radius:50%;flex:none}
+.evrow.join .edot{background:var(--ok)}
+.evrow.leave .edot{background:var(--mut)}
+.evrow .enm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.evrow .ewhat{color:var(--mut);flex:none}
+.evrow .etime{margin-left:auto;color:var(--mut);font-size:10.5px;flex:none;font-variant-numeric:tabular-nums}
+.evempty{font-size:12px;color:var(--mut)}
+.trlist{display:flex;flex-direction:column;gap:8px}
+.trrow{min-width:0}
+.trrow .trtop{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin-bottom:3px}
+.trrow .trnm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trrow .trv{color:var(--mut);flex:none;font-variant-numeric:tabular-nums}
+/* The band itself is --surface2, so the old track colour would be invisible on
+   it; step the track up one level instead of tinting the band down. */
+.trrow .trbar{height:4px;border-radius:2px;background:var(--line-hi,var(--border));overflow:hidden}
+.trrow .trbar i{display:block;height:100%;background:var(--accent-hi);border-radius:2px}
+/* Narrow: swipe, don't stack. Stacking three compartments makes the hero ~630px
+   on a 375x812 phone and shoves the statistics row below the fold — the exact
+   thing the hero exists to prevent. A snap carousel keeps the band at the height
+   of one compartment, so Internet Health is the first thing on screen and the
+   other two are one swipe away. The 12% peek of the next panel is the
+   affordance; no dots needed. Placed after every .health base rule above so
+   these actually win. Breakpoint is 940px rather than 880 because below that a
+   third of the row leaves the sparkline caption ("16:23 · WAN latency · last
+   4 h · 12–24 ms") under ~265px, where it starts to collide. */
+@media(max-width:940px){
+  .health{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:88%;
+    overflow-x:auto;scroll-snap-type:x mandatory;
+    -webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;
+    scrollbar-width:none}
+  .health::-webkit-scrollbar{display:none}
+  .hcard{scroll-snap-align:start;padding:12px 15px 13px}
+  .evlist{max-height:128px}
+  .trlist{max-height:140px;overflow-y:auto}
+}
+/* Tablet / landscape phone: wide enough for two panels at a time, so one
+   full-width panel would just be wasted space. */
+@media(min-width:641px) and (max-width:940px){
+  .health{grid-auto-columns:52%}
+}
+@media(prefers-reduced-motion:reduce){.health{scroll-behavior:auto}}
+
+.radio{margin-bottom:28px}
+.rhead{display:flex;align-items:baseline;gap:9px;margin-bottom:12px;padding-left:1px}
+.rname{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.rkind{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--dim)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.card{
+  position:relative; background:var(--surface); border:1px solid var(--border);
+  border-radius:13px; padding:14px 15px 12px;
+  transition:transform .4s cubic-bezier(.2,.7,.3,1),opacity .4s,border-color .2s;
+  overflow:hidden;
+}
+.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--cardline,var(--dim));opacity:.6}
+.card:hover{border-color:var(--dim)}
+.card.enter{opacity:0;transform:translateY(8px) scale(.985)}
+.card.leave{opacity:0;transform:scale(.97)}
+
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px}
+.who{min-width:0;display:flex;align-items:center;gap:9px}
+.dicon{flex-shrink:0;width:19px;height:19px;color:var(--mut);opacity:.85}
+.dicon svg{width:100%;height:100%;display:block}
+.whotext{min-width:0}
+.nmrow{display:flex;align-items:center;gap:6px;min-width:0}
+.nm{font-size:14.5px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nm.unk{color:var(--mut);font-weight:550}
+.mldtag{font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--mut);
+  border:1px solid var(--border);border-radius:5px;padding:1.5px 5px;flex-shrink:0}
+.blktag{font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--bad);
+  border:1px solid color-mix(in srgb,var(--bad) 40%,transparent);border-radius:5px;padding:1.5px 5px;flex-shrink:0}
+.vpntag{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;
+  letter-spacing:.05em;color:var(--ok-fg);
+  border:1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+  border-radius:5px;padding:1.5px 5px 1.5px 4px;flex-shrink:0}
+.vpntag svg{width:9px;height:9px;display:block}
+.subrow{display:flex;align-items:center;gap:6px;margin-top:2px}
+.sub{font-size:11px;color:var(--dim);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub.masked{user-select:none;-webkit-user-select:none}
+.eye{flex-shrink:0;width:13px;height:13px;color:var(--dim);cursor:pointer;opacity:.7}
+.eye:hover{opacity:1}
+.eye svg{width:100%;height:100%;display:block}
+
+.sigicon{flex-shrink:0}
+.sigicon svg{width:18px;height:18px;display:block;overflow:visible}
+.sigicon .wdot,.sigicon .wa{color:var(--dim);transition:color .3s}
+.sigicon .wdot.on,.sigicon .wa.on{color:var(--sc,var(--ok))}
+
+.linkwrap{display:flex;flex-direction:column;gap:10px}
+.linkblock+.linkblock{border-top:1px solid var(--border);padding-top:10px}
+.lhead{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:8px;font-size:12px}
+.lhead .band{font-weight:650;color:var(--fg);text-transform:uppercase;font-size:10.5px;letter-spacing:.04em}
+.lhead .dot{width:5px;height:5px;border-radius:50%;background:var(--dim);flex-shrink:0}
+.lhead .dot.on{background:var(--ok)}
+.lhead .meta{color:var(--mut)}
+
+.rates{display:grid;gap:6px}
+.rate{display:grid;grid-template-columns:20px 1fr 58px;align-items:center;gap:9px}
+.rate .lb{font-size:10px;font-weight:700;color:var(--dim);letter-spacing:.05em}
+.rate .tr{display:block;height:3px;border-radius:2px;background:var(--surface2);overflow:hidden}
+.rate .fl{display:block;height:3px;border-radius:2px;width:0;background:var(--cardline,var(--dim));
+  transition:width .7s cubic-bezier(.2,.75,.25,1),background .4s}
+.rate .vl{font-size:12px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;
+  transition:color .35s;white-space:nowrap}
+.rate .vl u{font-size:10px;color:var(--dim);font-weight:500;text-decoration:none;margin-left:2px}
+.vl.chg{color:var(--fg)}
+
+.foot{display:flex;justify-content:space-between;align-items:center;gap:8px;
+  margin-top:11px;padding-top:9px;border-top:1px solid var(--border);
+  font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+
+.troubleshoot{display:none;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)}
+.troubleshoot.show{display:block}
+.troubleshoot h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--mut);margin:0 0 9px}
+.toolgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;grid-auto-rows:1fr}
+@media (max-width:820px){ .toolgrid{grid-template-columns:1fr;grid-auto-rows:auto} }
+.toolsrow{position:relative;display:flex;flex-direction:column;gap:8px;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:11px 13px 11px 16px;overflow:hidden}
+.toolsrow::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
+  background:var(--bad);opacity:.6}
+.toolinfo{min-width:0}
+.toolname{font-size:12.5px;font-weight:600}
+.tooldesc{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.4}
+.toolsrow .toolbtn{margin-top:auto}
+.toolbtn{font:inherit;font-size:11.5px;font-weight:600;color:var(--fg);flex-shrink:0;
+  align-self:flex-start;background:var(--surface2);border:1px solid var(--border);
+  border-radius:7px;padding:7px 12px;cursor:pointer}
+.toolbtn:hover{border-color:var(--accent-hi)}
+.toolbtn:disabled{opacity:.5;cursor:default}
+.toolstat{font-size:11px;color:var(--mut);min-height:1em}
+
+.modalbg{position:fixed;inset:0;background:rgba(0,0,0,.5);
+  display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+.modalbg.on{display:flex}
+.modal{background:var(--bg);border:1px solid var(--border);border-radius:14px;
+  padding:20px;width:100%;max-width:360px;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+.modal h3{margin:0 0 14px;font-size:15px}
+.mlabel{display:block;font-size:11.5px;color:var(--mut);margin-bottom:12px}
+.mlabel select,.mlabel input{display:block;width:100%;margin-top:5px;font:inherit;font-size:13px;
+  color:var(--fg);background:var(--surface2);border:1px solid var(--border);
+  border-radius:7px;padding:8px 9px}
+.modalbtns{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+
+.devmodal{max-width:420px;max-height:85vh;overflow-y:auto}
+.devhead{display:flex;align-items:center;gap:11px;margin-bottom:12px}
+.devhead .dicon{width:26px;height:26px;color:var(--mut);flex-shrink:0}
+.devheadtext{min-width:0;flex:1}
+.devhead h3{margin:0;font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.devbadges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.devbadge{font-size:10.5px;font-weight:600;color:var(--mut);
+  border:1px solid var(--border);border-radius:6px;padding:3px 7px}
+/* pen affordances: one on the name, one on the category badge */
+.penbtn{flex-shrink:0;background:none;border:0;padding:2px;cursor:pointer;color:var(--dim);
+  width:22px;height:22px;line-height:0;border-radius:5px}
+.penbtn:hover{color:var(--accent-hi);background:var(--surface2)}
+.penbtn svg{width:13px;height:13px;display:block}
+.devbadge.editable{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.devbadge.editable:hover{border-color:var(--accent-hi);color:var(--fg)}
+.devbadge.editable svg{width:10px;height:10px;opacity:.7}
+.devedit{display:none;border:1px solid var(--border);border-radius:10px;
+  padding:12px;margin-bottom:14px;background:var(--surface)}
+.devedit.on{display:block}
+.devedit .mlabel{margin-bottom:10px}
+.edsave{background:var(--accent-hi);color:var(--bg);border-color:var(--accent-hi)}
+.devblocked{font-size:12px;border-radius:9px;padding:9px 11px;margin-bottom:14px}
+.devblocked.ok{color:var(--mut);background:var(--surface)}
+.devblocked.bad{color:var(--bad);background:color-mix(in srgb, var(--bad) 12%, transparent);
+  border:1px solid color-mix(in srgb, var(--bad) 35%, transparent)}
+.devlinkcard{border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px}
+.devlinkcard h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--fg)}
+.devrow{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
+.devrow .dk{color:var(--dim)}
+.devrow .dv{font-variant-numeric:tabular-nums;text-align:right;word-break:break-all}
+.empty{color:var(--mut);font-size:13.5px;padding:26px 0}
+@media (max-width:520px){
+  body{padding:16px 13px 46px}
+  .grid{grid-template-columns:1fr}
+  .stat .v{font-size:17px}
+}
+</style>
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<header class="appbar">
+  <div class="appbar__brand">
+    <span class="nav__dot" id="pulse"></span>
+    <span class="appbar__name"><span class="t-long">Farras's GL.iNet Beryl 7 🔱</span><span class="t-short">Beryl 7 🔱</span></span>
+  </div>
+  <div class="appbar__tools">
+    <span class="nav__status" id="stamp">connecting…</span>
+    <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle colour theme" title="Toggle light / dark">
+      <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
+  </div>
+</header>
+<nav class="tabbar" aria-label="Sections">
+  <a class="tabbar__item is-active" aria-current="page" href="/dashboard/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.7V21h14V9.7"/></svg><span>Home</span></a>
+  <a class="tabbar__item" href="/vpn/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5.2c0 4.3-2.9 7.9-7 9.8-4.1-1.9-7-5.5-7-9.8V6z"/><path d="m9.2 11.8 2 2 3.6-3.9"/></svg><span>VPN</span></a>
+  <a class="tabbar__item" href="/repeater/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 11.8a11 11 0 0 1 15 0"/><path d="M7.6 14.9a7 7 0 0 1 8.8 0"/><circle cx="12" cy="18.4" r="1.5" fill="currentColor" stroke="none"/></svg><span>Repeater</span></a>
+  <a class="tabbar__item" href="/tethering/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7h2.5a5 5 0 0 1 0 10H15"/><path d="M9 7H6.5a5 5 0 0 0 0 10H9"/><path d="M8.5 12h7"/></svg><span>Tethering</span></a>
+</nav>
+<section class="hero" id="hero">
+  <div class="hero__state"><span class="hero__dot"></span><span id="heroTitle">Checking connection…</span></div>
+  <div class="hero__sub" id="heroSub"> </div>
+  <div class="hero__chips" id="heroChips"></div>
+  <!-- #vpnWarn is injected by renderHero() between the chips and this band. -->
+  <div class="health" id="health" role="group" aria-label="Network health">
+    <div class="hcard" id="hcPulse">
+      <h3>Internet Health</h3>
+      <div class="pulseline"><span class="big" id="latNow">—<u>ms</u></span><span class="lossb" id="lossNow"></span></div>
+      <svg class="spark" id="latSpark" viewBox="0 0 300 44" preserveAspectRatio="none" aria-hidden="true"></svg>
+      <div class="sparkcap"><span id="sparkFrom"></span><span>WAN latency · last 4 h</span><span id="sparkMax"></span></div>
+    </div>
+    <div class="hcard" id="hcActivity">
+      <h3>Recent Activity</h3>
+      <div class="evlist" id="evList"><div class="evempty">Watching for joins and leaves…</div></div>
+    </div>
+    <div class="hcard" id="hcTraffic">
+      <h3>Traffic Today</h3>
+      <div class="trlist" id="trList"><div class="evempty">Collecting usage data…</div></div>
+    </div>
+  </div>
+</section>
+
+<div class="stats" id="stats"></div>
+
+<div id="body"><div class="empty">Loading…</div></div>
+
+<section class="troubleshoot" id="troubleshoot">
+  <h2>Troubleshoot</h2>
+  <div class="toolgrid">
+    <div class="toolsrow">
+      <div class="toolinfo">
+        <div class="toolname">Restart 2.4 GHz Radio</div>
+        <div class="tooldesc">Every 2.4 GHz device disconnects for about 15 seconds.</div>
+      </div>
+      <button id="fix24g" class="toolbtn">Restart</button>
+      <div id="fix24gstat" class="toolstat"></div>
+    </div>
+    <div class="toolsrow">
+      <div class="toolinfo">
+        <div class="toolname">Restart 5 GHz Radio</div>
+        <div class="tooldesc">Every 5 GHz device disconnects for about 10 seconds.</div>
+      </div>
+      <button id="fix5g" class="toolbtn">Restart</button>
+      <div id="fix5gstat" class="toolstat"></div>
+    </div>
+    <div class="toolsrow">
+      <div class="toolinfo">
+        <div class="toolname">Block Device</div>
+        <div class="tooldesc">Adds a device to an SSID's deny list and disconnects it in about 5 seconds.</div>
+      </div>
+      <button id="aclOpenBlock" class="toolbtn">Block…</button>
+    </div>
+    <div class="toolsrow">
+      <div class="toolinfo">
+        <div class="toolname">Unblock Device</div>
+        <div class="tooldesc">Removes a device from an SSID's deny list.</div>
+      </div>
+      <button id="aclOpenUnblock" class="toolbtn">Unblock…</button>
+    </div>
+  </div>
+</section>
+
+<div class="modalbg" id="aclOverlay">
+  <div class="modal">
+    <h3 id="aclTitle">Block Device</h3>
+    <label class="mlabel">Device<select id="aclDevice"></select></label>
+    <label class="mlabel">SSID<select id="aclRadio"></select></label>
+    <label class="mlabel">Password<input type="password" id="aclPw" autocomplete="off"></label>
+    <div class="modalbtns"><button id="aclCancel" class="toolbtn">Cancel</button>
+      <button id="aclSubmit" class="toolbtn">Confirm</button></div>
+    <div id="aclStat" class="toolstat" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<div class="modalbg" id="devOverlay">
+  <div class="modal devmodal">
+    <div class="devhead"><span class="dicon" id="devIcon"></span>
+      <div class="devheadtext"><h3 id="devName"></h3></div>
+      <button class="penbtn" id="devEditName" title="Rename this device">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/>
+          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+      </button>
+      <button class="sheetclose" id="devCloseX" type="button" aria-label="Close" title="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button></div>
+    <div class="devbadges" id="devBadges"></div>
+    <div class="devedit" id="devEdit">
+      <label class="mlabel">Device name
+        <input type="text" id="edName" maxlength="40" autocomplete="off"></label>
+      <label class="mlabel">Category
+        <select id="edClass">
+          <option value="phone">Phone</option>
+          <option value="pad">Tablet</option>
+          <option value="laptop">Laptop</option>
+          <option value="computer">Desktop Computer</option>
+          <option value="television">TV / Streaming</option>
+          <option value="watch">Watch</option>
+          <option value="smartappliances">Smart Home Device</option>
+          <option value="router">Router / Access Point</option>
+          <option value="default">Unknown</option>
+        </select></label>
+      <div class="modalbtns">
+        <button class="toolbtn" id="edCancel">Cancel</button>
+        <button class="toolbtn edsave" id="edSave">Save</button>
+      </div>
+      <div class="toolstat" id="edMsg"></div>
+    </div>
+    <div class="devblocked ok" id="devBlocked"></div>
+    <div id="devLinks"></div>
+    <div class="modalbtns"><button id="devClose" class="toolbtn">Close</button></div>
+  </div>
+</div>
+
+<script>
+(function(){
+var API='/cgi-bin/dashboard-api';
+function bandColor(b){ return (b==='2.4') ? 'var(--accent-lo)' : 'var(--accent-hi)'; }
+function bandWeight(b){ return b==='6'?0 : b==='5'?1 : 2; }
+var GENNAME={7:"Wi-Fi 7",6:"Wi-Fi 6",5:"Wi-Fi 5",4:"Wi-Fi 4",0:"Legacy"};
+
+var ICONS={
+  phone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><line x1="10.5" y1="18.2" x2="13.5" y2="18.2"/></svg>',
+  pad:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="2.5" width="17" height="19" rx="2"/><line x1="10.7" y1="18.2" x2="13.3" y2="18.2"/></svg>',
+  laptop:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="10" rx="1.3"/><path d="M2.5 19.5h19l-1.6-3.5H4.1z"/></svg>',
+  computer:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="11.5" rx="1.3"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="15.5" x2="12" y2="20"/></svg>',
+  television:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><line x1="8" y1="20" x2="16" y2="20"/><line x1="12" y1="16.5" x2="12" y2="20"/></svg>',
+  watch:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="6.5" width="10" height="11" rx="2.6"/><path d="M9.2 6.5 9.6 3h4.8l.4 3.5M9.2 17.5l.4 3.5h4.8l.4-3.5"/></svg>',
+  smartappliances:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 7 13h5l-2 9 7-12h-5z"/></svg>',
+  router:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="10" width="18" height="8" rx="1.5"/><circle cx="8" cy="14" r=".9" fill="currentColor" stroke="none"/><path d="M12 10V6M8.5 6.5 12 3l3.5 3.5"/></svg>',
+  default:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg>'
+};
+var VPN_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg>';
+var EYE_OFF='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.2A10.6 10.6 0 0 1 12 5c5 0 9 4 10 7-.4 1.1-1.3 2.5-2.6 3.8M6.6 6.6C4.4 8 2.9 10 2 12c1 3 5 7 10 7 1.4 0 2.7-.3 3.9-.8"/><path d="M9.5 9.8a3 3 0 0 0 4.2 4.2"/></svg>';
+var EYE_ON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12c1-3 5-7 10-7s9 4 10 7c-1 3-5 7-10 7s-9-4-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+var body=document.getElementById('body'),stats=document.getElementById('stats'),
+    stamp=document.getElementById('stamp'),pulse=document.getElementById('pulse');
+var secs=new Map(), cards=new Map(), booted=false;
+
+(function(){
+  var tbtn=document.getElementById('themeToggle');
+  var media=window.matchMedia?window.matchMedia('(prefers-color-scheme: light)'):null;
+  function current(){
+    return document.documentElement.getAttribute('data-theme')
+        || ((media&&media.matches)?'light':'dark');
+  }
+  if(tbtn) tbtn.addEventListener('click',function(){
+    var next = current()==='dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme',next);
+    try{ localStorage.setItem('theme',next); }catch(e){}
+  });
+})();
+
+function el(t,c,x){var e=document.createElement(t); if(c)e.className=c;
+  if(x!=null)e.textContent=x; return e;}
+function wifiTier(s){ s=+s;
+  if(s>=-60) return {lvl:3,c:'var(--ok)'};
+  if(s>=-70) return {lvl:2,c:'var(--warn)'};
+  if(s>=-80) return {lvl:1,c:'var(--bad)'};
+  return {lvl:0,c:'var(--bad)'};
+}
+function dur(s){ s=+s; var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  return d?d+'d '+h+'h' : h?h+'h '+m+'m' : m+'m'; }
+// dur() bottoms out at minutes (it formats uptime); idle is usually seconds,
+// where dur() would render every value under a minute as "0m".
+function durS(sec){ sec=Math.round(+sec||0); return sec<60 ? sec+'s' : dur(sec); }
+function bandLabel(b){ return b+' GHz'; }
+function fmtBytes(n){ n=+n||0;
+  if(n>=1073741824) return (n/1073741824).toFixed(1)+' GB';
+  if(n>=1048576) return (n/1048576).toFixed(1)+' MB';
+  if(n>=1024) return (n/1024).toFixed(1)+' KB';
+  return n+' B';
+}
+function setTxt(n,v){ if(n.firstChild&&n.firstChild.nodeValue===String(v))return false;
+  n.textContent=v; return true; }
+
+/* ============================================================
+   adapt(): my robust API shape -> the render engine's contract.
+   All grouping/dedup/name-resolution happens here, in JS.
+   ============================================================ */
+function htParse(ht){ var m=/^([A-Za-z]+)(\d+)$/.exec(ht||'');
+  return m?{gen:m[1].toUpperCase(),w:+m[2]}:{gen:(ht||'').toUpperCase(),w:0}; }
+function phyOf(r){ if(!r)return {phy:'legacy',gen:0,w:20};
+  if(r.eht)return {phy:'EHT',gen:7,w:r.mhz||20};
+  if(r.he) return {phy:'HE', gen:6,w:r.mhz||20};
+  if(r.vht)return {phy:'VHT',gen:5,w:r.mhz||20};
+  if(r.ht) return {phy:'HT', gen:4,w:r.mhz||20};
+  return {phy:'legacy',gen:0,w:r.mhz||20}; }
+function nameOf(mac,D){
+  var cm=(D.classmap||{})[mac]||{}, L=(D.leases||{})[mac]||null, h=(D.hosts||{})[mac]||{};
+  if(cm.name) return cm.name;
+  if(L&&L.name&&L.name!=='*'&&L.name!=='?') return L.name;
+  if(h.name) return String(h.name).replace(/\.lan$/,'');
+  return '?';
+}
+function ipOf(mac,D){
+  var cm=(D.classmap||{})[mac]||{}, L=(D.leases||{})[mac]||null, h=(D.hosts||{})[mac]||{};
+  return (L&&L.ip)||(h.ipaddrs&&h.ipaddrs[0])||cm.ip||'';
+}
+function adapt(D){
+  var now=D.ts||Math.floor(Date.now()/1000);
+  var total=0;
+  (D.aps||[]).forEach(function(a){ total+=((a.assoc&&a.assoc.results)||[]).length; });
+
+  var b24=null,b5=null;
+  (D.aps||[]).forEach(function(a){ if(a.band==='2g'&&!b24)b24=a; if(a.band==='5g'&&!b5)b5=a; });
+  function bandTile(a,label){ if(!a)return null; var h=htParse(a.info.htmode);
+    return {band:label,htgen:h.gen,apwidth:h.w,channel:a.info.channel||0}; }
+  var bands=[]; var t5=bandTile(b5,'5'),t24=bandTile(b24,'2.4');
+  if(t5)bands.push(t5); if(t24)bands.push(t24);   // render reverses -> shows 2.4 then 5
+
+  var tiles={clients_total:total,
+    temp_c:D.sys.temp?Math.round(D.sys.temp/1000):null, fan_rpm:null,
+    wan_rx_kbps:Math.round((D.wan.rx_rate||0)/1024),
+    wan_tx_kbps:Math.round((D.wan.tx_rate||0)/1024)};
+
+  var radios=[], blocked=[];
+  (D.aps||[]).forEach(function(a){
+    var bl=a.band==='2g'?'2.4 GHz':'5 GHz', ss=a.info.ssid||a.ifname;
+    radios.push({sec:a.section,label:ss+' — '+bl});
+    (a.maclist||[]).forEach(function(m){
+      m=m.toUpperCase();
+      blocked.push({sec:a.section,mac:m,name:nameOf(m,D),label:ss+' '+bl});
+    });
+  });
+
+  /* group APs by SSID -> one section, dedup clients by MAC, links per band */
+  var gmap={},gorder=[];
+  (D.aps||[]).forEach(function(a){
+    var ss=a.info.ssid||a.ifname;
+    if(!gmap[ss]){gmap[ss]={id:ss,name:ss,net:a.network,clients:{}};gorder.push(ss);}
+    ((a.assoc&&a.assoc.results)||[]).forEach(function(st){
+      var m=st.mac.toUpperCase(), g=gmap[ss];
+      var p=phyOf(st.rx||{});
+      // `st` is carried through untouched: the API embeds iwinfo's assoclist verbatim,
+      // so every field it exposes (noise, thr, mcs/nss/gi, packets, mfp, …) is already
+      // here and the modal can read it without another round trip.
+      var link={band:a.band==='2g'?'2.4':'5',phy:p.phy,gen:p.gen,width:p.w,
+        tx:(st.tx&&st.tx.rate||0)/1000, rx:(st.rx&&st.rx.rate||0)/1000,
+        signal:st.signal||0, idle:st.inactive||0, conn:st.connected_time||0, ghost:0,
+        rxb:(st.rx&&st.rx.bytes)||0, txb:(st.tx&&st.tx.bytes)||0, st:st, ifname:a.ifname};
+      if(!g.clients[m]){
+        var cm=(D.classmap||{})[m]||{}, L=(D.leases||{})[m]||null;
+        // vpn holds the tunnel LABEL (e.g. "UK#640") when pbr is actively routing
+        // this MAC, or '' otherwise — the API only lists live, enabled policies.
+        var _h=(D.hosts||{})[m]||{};
+        g.clients[m]={mac:m,name:nameOf(m,D),ip:ipOf(m,D),
+          ipv6:(_h.ip6addrs&&_h.ip6addrs[0])||'',
+          ipv6s:(_h.ip6addrs||[]).filter(function(a){return !!a;}),
+          hostname:(L&&L.name&&L.name!=='*'&&L.name!=='?')?L.name:'',
+          class:cm.class||'default',vpn:(D.vpn||{})[m]||'',total_rx:0,total_tx:0,
+          lease_in:(L&&L.exp)?(L.exp-now):null,links:[]};
+      }
+      var c=g.clients[m];
+      c.links.push(link); c.total_rx+=link.rxb; c.total_tx+=link.txb;
+    });
+  });
+  /* Mark vestigial band-steering leftovers.
+     Vanilla has no true MLD (mt76 ships no MLO code — see the runbook), so under
+     band-steering a device should only ever hold ONE real link. A stale low-band
+     association lingers as a much older-generation link at ~0 TX: the iPhone Air
+     shows "Wi-Fi 7 · EHT · 160MHz" alongside a junk "Wi-Fi 4 · HT · 20MHz".
+     Idle time can't be the discriminator (a real link idles 6-25s when the device
+     is just sitting there) — generation + band can. Flagged, not deleted, so the
+     card can stay clean while the device modal still shows everything. */
+  Object.keys(gmap).forEach(function(ss){
+    var g=gmap[ss];
+    Object.keys(g.clients).forEach(function(m){
+      var c=g.clients[m];
+      if(c.links.length<2) return;
+      var best=c.links.reduce(function(a,b){
+        if((+b.gen)!==(+a.gen)) return (+b.gen>+a.gen)?b:a;
+        return (bandWeight(a.band)<=bandWeight(b.band))?a:b;
+      });
+      c.links.forEach(function(l){
+        l.vestigial = (l!==best) &&
+                      ((+l.gen) < (+best.gen)) &&
+                      (bandWeight(l.band) > bandWeight(best.band));
+      });
+    });
+  });
+
+  var wz={lan:0,guest:1,iot:2};
+  gorder.sort(function(a,b){ return (wz[gmap[a].net]==null?3:wz[gmap[a].net])-(wz[gmap[b].net]==null?3:wz[gmap[b].net]); });
+  var groups=gorder.map(function(ss){ var g=gmap[ss];
+    var bset={}; Object.keys(g.clients).forEach(function(m){ g.clients[m].links.forEach(function(l){bset[l.band]=1;}); });
+    var kind=(g.net||'').toUpperCase()+' · '+Object.keys(bset).sort().reverse().map(function(b){return b+'G';}).join('+');
+    return {id:g.id,name:g.name,kind:kind,clients:Object.keys(g.clients).map(function(m){return g.clients[m];})};
+  });
+
+  var d=new Date(now*1000);
+  return {time:d.toLocaleTimeString(),uptime:D.sys.uptime||0,tiles:tiles,bands:bands,
+    radios:radios,blocked:blocked,groups:groups};
+}
+
+/* ---------------- render engine (from the original) ---------------- */
+function stat(k){ var t=stats.querySelector('[data-k="'+k+'"]');
+  if(!t){ t=el('div','stat'); t.dataset.k=k; t.appendChild(el('div','k'));
+    var v=el('div','v'); v.appendChild(document.createTextNode('')); v.appendChild(el('span','u'));
+    t.appendChild(v); t.appendChild(el('div','v2')); stats.appendChild(t);} return t; }
+function setStat(k,label,val,unit,sub){ var t=stat(k),v=t.querySelector('.v');
+  setTxt(t.querySelector('.k'), label);
+  v.firstChild.nodeValue=val; v.querySelector('.u').textContent=unit||'';
+  setTxt(t.querySelector('.v2'), sub||''); }
+
+function linkBlock(cardNode, wrap, l, accent){
+  var lb=cardNode._links.get(l.band);
+  if(!lb){
+    lb=el('div','linkblock');
+    lb.innerHTML=
+      '<div class="lhead"><span class="band"></span><span class="dot"></span><span class="meta"></span></div>'+
+      '<div class="rates">'+
+        '<div class="rate" data-r="tx"><span class="lb">TX</span><span class="tr"><span class="fl"></span></span><span class="vl"></span></div>'+
+        '<div class="rate" data-r="rx"><span class="lb">RX</span><span class="tr"><span class="fl"></span></span><span class="vl"></span></div>'+
+      '</div>';
+    cardNode._links.set(l.band, lb);
+    wrap.appendChild(lb);
+  }
+  var f=function(s){return lb.querySelector(s)};
+  setTxt(f('.band'), bandLabel(l.band));
+  var meta=f('.meta'), dot=f('.dot');
+  var active=+l.idle<3000;
+  dot.classList.toggle('on', active);
+  var gname=GENNAME[l.gen]||GENNAME[0];
+  setTxt(meta, gname+' · '+l.width+' MHz'+(active?'':' · idle '+Math.round(l.idle/1000)+'s'));
+
+  var ce=cardNode._ceil.get(l.band) || {maxTx:+l.tx||1, maxRx:+l.rx||1};
+  ['tx','rx'].forEach(function(k){
+    var r=lb.querySelector('[data-r="'+k+'"]'), v=r.querySelector('.vl'),
+        fl=r.querySelector('.fl'), val=+l[k];
+    var ceil=(k==='tx'?ce.maxTx:ce.maxRx)||1;
+    var rounded=Math.round(val);
+    var changed=v.dataset.v!==undefined && +v.dataset.v!==rounded;
+    v.dataset.v=rounded;
+    v.innerHTML=''; v.appendChild(document.createTextNode(rounded));
+    v.appendChild(el('u','','Mb/s'));
+    fl.style.width=(rounded<=0 ? 0 : Math.max(3,Math.min(100,val/ceil*100)))+'%';
+    fl.style.background=accent;
+    if(changed && booted){ v.classList.add('chg'); setTimeout(function(){v.classList.remove('chg')},700); }
+  });
+}
+
+function card(key,c){
+  var n=cards.get(key);
+  if(!n){
+    n=el('div','card enter');
+    n.innerHTML=
+      '<div class="top"><div class="who"><span class="dicon"></span>'+
+      '<div class="whotext"><div class="nmrow"><div class="nm"></div>'+
+      '<span class="mldtag" data-x="mld">MLD</span>'+
+      '<span class="vpntag" data-x="vpn">'+VPN_SVG+'VPN</span>'+
+      '<span class="blktag" data-x="blk">BLOCKED</span></div>'+
+      '<div class="subrow"><span class="sub masked">••••••••••••••</span>'+
+      '<span class="eye" data-x="eye">'+EYE_OFF+'</span></div></div></div>'+
+      '<div class="sigicon">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">'+
+          '<circle class="wdot" cx="12" cy="19" r="1.3" fill="currentColor" stroke="none"/>'+
+          '<path class="wa" data-t="1" d="M9 16Q12 12.2 15 16"/>'+
+          '<path class="wa" data-t="2" d="M6.3 13.2Q12 7.8 17.7 13.2"/>'+
+          '<path class="wa" data-t="3" d="M3.6 10.4Q12 3 20.4 10.4"/>'+
+        '</svg>'+
+      '</div></div>'+
+      '<div class="linkwrap"></div>'+
+      '<div class="foot"><span class="rssi"></span><span class="ct"></span></div>';
+    n._links=new Map();
+    n._ceil=new Map();
+    n._revealed=false;
+    cards.set(key,n);
+    n._new=true;
+    n.querySelector('[data-x="eye"]').addEventListener('click', function(e){
+      e.stopPropagation();
+      n._revealed=!n._revealed;
+      var sub=n.querySelector('.sub'), eye=n.querySelector('[data-x="eye"]');
+      eye.innerHTML=n._revealed?EYE_ON:EYE_OFF;
+      sub.classList.toggle('masked', !n._revealed);
+      setTxt(sub, n._revealed ? (n._subtext||'') : '••••••••••••••');
+    });
+    n.style.cursor='pointer';
+    n.addEventListener('click', function(){ openDeviceModal(key); });
+  }
+  n._data=c;
+
+  var unk=c.name==='?';
+  var nm=n.querySelector('.nm');
+  setTxt(nm, unk ? 'Unknown device' : c.name);
+  nm.classList.toggle('unk', unk);
+
+  // Links the CARD shows: real ones only. (The modal still lists every link.)
+  var shown=c.links.filter(function(l){ return !l.vestigial; });
+  if(!shown.length) shown=c.links;
+
+  // Not "MLD": vanilla can't do MLO, so >1 link here is a genuine simultaneous
+  // dual-band association, never a multi-link device. Label it truthfully.
+  var mldTag=n.querySelector('[data-x="mld"]');
+  mldTag.style.display = shown.length>1 ? '' : 'none';
+  if(shown.length>1) setTxt(mldTag, shown.length+' LINKS');
+  var vpnTag=n.querySelector('[data-x="vpn"]');
+  vpnTag.style.display = c.vpn ? '' : 'none';
+  if(c.vpn) vpnTag.title='Routed through '+c.vpn;
+  n.querySelector('[data-x="blk"]').style.display = c._blocked ? '' : 'none';
+  var iconHTML=ICONS[c.class]||ICONS.default;
+  var icon=n.querySelector('.dicon');
+  if(icon.dataset.cls!==c.class){ icon.innerHTML=iconHTML; icon.dataset.cls=c.class; }
+  n._subtext = c.ip ? c.mac+' · '+c.ip : c.mac;
+  if(n._revealed) setTxt(n.querySelector('.sub'), n._subtext);
+
+  var sigEl=n.querySelector('.sigicon');
+  var rssiEl=n.querySelector('.rssi');
+  var best=shown.reduce(function(a,b){return (+b.signal>+a.signal)?b:a});
+  var tier=wifiTier(best.signal);
+  sigEl.querySelectorAll('.wdot,.wa').forEach(function(e){
+    var lvl=e.dataset.t?+e.dataset.t:0;
+    e.classList.toggle('on', lvl<=tier.lvl);
+    e.style.setProperty('--sc', tier.c);
+  });
+  setTxt(rssiEl, Math.round(best.signal)+' dBm');
+  var bestConn=Math.max.apply(null, shown.map(function(l){return +l.conn}));
+  setTxt(n.querySelector('.ct'), 'up '+dur(bestConn));
+
+  shown.forEach(function(l){
+    var sig=l.phy+'|'+l.width;
+    var ce=n._ceil.get(l.band);
+    if(!ce || ce.sig!==sig) ce={sig:sig,maxTx:0,maxRx:0};
+    ce.maxTx=Math.max(ce.maxTx, +l.tx);
+    ce.maxRx=Math.max(ce.maxRx, +l.rx);
+    n._ceil.set(l.band, ce);
+  });
+
+  var hasHighBand=shown.some(function(l){ return l.band!=='2.4'; });
+  var accent=bandColor(hasHighBand ? '5' : '2.4');
+  // --cardline, never --accent: writing --accent here would shadow the brand
+  // token for everything inside the card (theme.css paints .btn.danger and the
+  // focus ring from it).
+  n.style.setProperty('--cardline', accent);
+
+  var wrap=n.querySelector('.linkwrap');
+  var seenLinks={};
+  var ordered=shown.slice().sort(function(a,b){
+    var gd=(+b.gen)-(+a.gen);
+    return gd!==0 ? gd : bandWeight(a.band)-bandWeight(b.band);
+  });
+  ordered.forEach(function(l){ seenLinks[l.band]=1; linkBlock(n, wrap, l, accent); });
+  n._links.forEach(function(lb,band){
+    if(!seenLinks[band]){ n._links.delete(band); lb.remove(); }
+  });
+  return n;
+}
+
+function section(r){
+  var s=secs.get(r.id);
+  if(!s){
+    s=el('div','radio');
+    s.innerHTML='<div class="rhead"><span class="rname"></span><span class="rkind"></span></div><div class="grid"></div>';
+    secs.set(r.id,s);
+  }
+  setTxt(s.querySelector('.rname'), r.name);
+  setTxt(s.querySelector('.rkind'), r.kind);
+  return s;
+}
+
+function renderHero(raw,d){
+  var hero=document.getElementById('hero'); if(!hero) return;
+  var up=(raw.uplink&&raw.uplink.active)||'none';
+  var online = up!=='none';
+  hero.classList.toggle('offline', !online);
+  // Name the router's own uplink, never what is upstream of it: the WAN port may
+  // face a fibre ONT, a landlord's switch, a hotel port or another router, and the
+  // router cannot tell which. The address on the next line says the rest.
+  var names={wan:'Ethernet', wwan:'Wi‑Fi repeater', tethering:'USB tethering'};
+  setTxt(hero.querySelector('#heroTitle'), online?'Online':'Offline');
+  setTxt(hero.querySelector('#heroSub'), online
+    ? 'via '+(names[up]||up)+((raw.wan&&raw.wan.ip)?' · '+raw.wan.ip:'')
+    : 'no route to the internet — check Repeater or Tethering');
+  var chips=hero.querySelector('#heroChips');
+  while(chips.firstChild) chips.removeChild(chips.firstChild);
+  function chip(val,label){ var c=el('span','chip'); var b=document.createElement('b');
+    b.textContent=val; c.appendChild(b);
+    c.appendChild(document.createTextNode(' '+label)); chips.appendChild(c); }
+  var t=d.tiles||{};
+  if(online) chip('↓'+(t.wan_rx_kbps||0)+' ↑'+(t.wan_tx_kbps||0),'KB/s');
+  chip(t.clients_total||0,'devices');
+  var n=0,v=raw.vpn||{}; for(var k in v) n++;
+  if(n) chip(n,'via VPN');
+
+  // Travel trap: a device force-routed to a DOWN tunnel is fail-closed — no
+  // internet, silently. Surface it loudly with a one-tap way to pause the VPN,
+  // because at a hotel with no PC this is otherwise an unsolvable mystery.
+  var stale=raw.vpn_stale||[];
+  var warn=document.getElementById('vpnWarn');
+  if(!warn){
+    warn=el('div','herowarn'); warn.id='vpnWarn'; warn.style.display='none';
+    // Before the telemetry band, not after it: this is the one thing on the page
+    // that means "you have no internet right now", so it must not sit below a
+    // latency chart. insertBefore falls back to append if the band ever moves.
+    hero.insertBefore(warn, document.getElementById('health'));
+  }
+  if(stale.length){
+    warn.innerHTML='';
+    var names=stale.map(function(s){
+      var nm=nameOf(s.mac,raw); return (nm&&nm!=='?')?nm:s.mac;
+    });
+    var lab=stale[0].label||'VPN';
+    var msg=el('span',null,
+      names.join(', ')+(stale.length>1?' are':' is')+' routed through the '+lab+
+      ' tunnel, but it is DOWN — so '+(stale.length>1?'they have':'it has')+
+      ' no internet. Common on hotel Wi-Fi that blocks VPNs, or before captive sign-in.');
+    warn.appendChild(msg);
+    var b=el('button','herowarn__btn','Pause VPN routing');
+    b.addEventListener('click',function(){ pauseVpnRouting(b); });
+    warn.appendChild(b);
+    warn.style.display='';
+  } else {
+    warn.style.display='none';
+  }
+}
+
+// Passwordless by design (matches the VPN page's own connect/disconnect rule);
+// guard_post still enforces same-origin. Disables every dash_ pbr policy so the
+// affected devices fall back to normal WAN and regain internet immediately.
+function pauseVpnRouting(btn){
+  if(btn){ btn.disabled=true; btn.textContent='Pausing…'; }
+  fetch('/cgi-bin/vpn-api',{method:'POST',cache:'no-store',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'action=pauseall'})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(btn){ btn.textContent=j.ok?'Paused — devices back online':'Failed: '+(j.error||'unknown'); }
+      setTimeout(tick,1500);
+    })
+    .catch(function(){ if(btn){ btn.disabled=false; btn.textContent='Pause VPN routing'; } });
+}
+
+/* ---------------- network health row (air / pulse / events / traffic) ---------------- */
+var prevAir=null;
+function renderAir(raw){
+  var a=raw.air; if(!a||!a.g24) return;
+  // busy% is computed as a delta between polls (a true "right now" number);
+  // the first sample falls back to the boot-lifetime ratio.
+  function pct(cur,prev){
+    if(prev && cur.active>prev.active){
+      var da=cur.active-prev.active, db=cur.busy-prev.busy;
+      if(db>=0 && db<=da) return Math.round(db*100/da);
+    }
+    return cur.active>0 ? Math.round(cur.busy*100/cur.active) : null;
+  }
+  var p24=pct(a.g24, prevAir&&prevAir.g24), p5=pct(a.g5, prevAir&&prevAir.g5);
+  prevAir=a;
+  if(p24!=null) setStat('air24','2.4 GHz Air', p24, '%', 'busy');
+  if(p5!=null)  setStat('air5','5 GHz Air', p5, '%', 'busy');
+}
+function renderPulse(raw){
+  var w=raw.wanlat||[]; if(!w.length) return;
+  var last=w[w.length-1], lat=+last[1], loss=+last[2];
+  var big=document.getElementById('latNow');
+  big.innerHTML=''; big.appendChild(document.createTextNode(lat>=0?Math.round(lat):'—'));
+  big.appendChild(el('u','','ms'));
+  var lb=document.getElementById('lossNow');
+  lb.textContent = loss>0 ? loss+'% loss' : 'no loss';
+  lb.className='lossb'+(loss>0?' bad':'');
+  var pts=w.filter(function(s){return +s[1]>=0;});
+  if(pts.length<2) return;
+  var min=Infinity,max=-Infinity;
+  pts.forEach(function(s){var v=+s[1]; if(v<min)min=v; if(v>max)max=v;});
+  if(max-min<4){var m=(max+min)/2; min=m-2; max=m+2;}
+  var W=300,H=44,P=3;
+  var line=pts.map(function(s,i){
+    var x=(i/(pts.length-1))*(W-2*P)+P;
+    var y=H-P-((+s[1]-min)/(max-min))*(H-2*P);
+    return x.toFixed(1)+','+y.toFixed(1);
+  }).join(' ');
+  document.getElementById('latSpark').innerHTML=
+    '<polygon class="fillp" points="'+P+','+(H-P)+' '+line+' '+(W-P)+','+(H-P)+'"/>'+
+    '<polyline points="'+line+'"/>';
+  var t0=new Date(pts[0][0]*1000);
+  document.getElementById('sparkFrom').textContent=
+    ('0'+t0.getHours()).slice(-2)+':'+('0'+t0.getMinutes()).slice(-2);
+  document.getElementById('sparkMax').textContent=Math.round(min)+'–'+Math.round(max)+' ms';
+}
+/* "since 08:45" while today, "since Fri 08:45" once it crosses a day. */
+function bootedAt(ts,up){
+  if(!up) return '';
+  var b=new Date(((ts||Math.floor(Date.now()/1000))-up)*1000);
+  var hm=('0'+b.getHours()).slice(-2)+':'+('0'+b.getMinutes()).slice(-2);
+  var sameDay=b.toDateString()===new Date().toDateString();
+  return 'since '+(sameDay?hm:
+    ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][b.getDay()]+' '+hm);
+}
+function agoS(t,now){ var s=Math.max(0,now-t);
+  if(s<60)return s+'s ago'; if(s<3600)return Math.round(s/60)+'m ago';
+  return Math.round(s/3600)+'h ago'; }
+function renderEvents(raw){
+  var evs=(raw.events||[]).slice().reverse();
+  if(!evs.length) return;
+  var now=raw.ts||Math.floor(Date.now()/1000);
+  var box=document.getElementById('evList'); box.innerHTML='';
+  evs.forEach(function(e){
+    var r=el('div','evrow '+(e.ev==='join'?'join':'leave'));
+    r.appendChild(el('span','edot'));
+    var nm=e.name||nameOf(e.mac,raw); if(!nm||nm==='?') nm=e.mac;
+    r.appendChild(el('span','enm',nm));
+    r.appendChild(el('span','ewhat',(e.ev==='join'?'joined':'left')+
+      (e.band&&e.band!=='-'?' · '+e.band+' GHz':'')));
+    r.appendChild(el('span','etime',agoS(e.t,now)));
+    box.appendChild(r);
+  });
+}
+function renderTraffic(raw){
+  var n=raw.nlbw; if(!n||!n.columns||!n.data||!n.data.length) return;
+  var ci={}; n.columns.forEach(function(c,i){ci[c]=i;});
+  var rows=n.data.map(function(r){
+    return {mac:String(r[ci.mac]||'').toUpperCase(), dn:+r[ci.rx_bytes]||0, up:+r[ci.tx_bytes]||0};
+  }).filter(function(r){return r.mac && (r.dn+r.up)>0;});
+  if(!rows.length) return;
+  rows.sort(function(a,b){return (b.dn+b.up)-(a.dn+a.up);});
+  rows=rows.slice(0,5);
+  var top=rows[0].dn+rows[0].up||1;
+  var box=document.getElementById('trList'); box.innerHTML='';
+  rows.forEach(function(r){
+    var nm=nameOf(r.mac,raw); if(nm==='?') nm=r.mac;
+    var row=el('div','trrow'), t=el('div','trtop');
+    t.appendChild(el('span','trnm',nm));
+    t.appendChild(el('span','trv','↓'+fmtBytes(r.dn)+' ↑'+fmtBytes(r.up)));
+    row.appendChild(t);
+    var bar=el('div','trbar'), fill=document.createElement('i');
+    fill.style.width=Math.max(3,Math.round((r.dn+r.up)*100/top))+'%';
+    bar.appendChild(fill); row.appendChild(bar); box.appendChild(row);
+  });
+}
+
+/* ---------------- per-device lookups used by the modal ---------------- */
+var staMap={}, connMap={}, neighMap={}, ouiMap={}, nlbwMap={};
+function buildLookups(raw){
+  staMap=raw.sta||{}; connMap=raw.conns||{}; neighMap=raw.neigh||{}; ouiMap=raw.oui||{};
+  nlbwMap={};
+  var n=raw.nlbw;
+  if(n&&n.columns&&n.data){
+    var ci={}; n.columns.forEach(function(c,i){ci[c]=i;});
+    n.data.forEach(function(r){
+      nlbwMap[String(r[ci.mac]||'').toUpperCase()]=
+        {dn:+r[ci.rx_bytes]||0, up:+r[ci.tx_bytes]||0, conns:+r[ci.conns]||0};
+    });
+  }
+}
+/* A MAC with bit 1 of the first octet set is locally administered — i.e. the
+   device invented it. Apple/Android do this per-SSID for privacy, which is why
+   such a device has no discoverable vendor and may reappear under a new MAC. */
+function isPrivateMac(mac){
+  var o=parseInt(String(mac).slice(0,2),16);
+  return !isNaN(o) && (o&2)===2;
+}
+function vendorOf(mac){
+  if(isPrivateMac(mac)) return 'Private address';
+  return ouiMap[String(mac).slice(0,8).toUpperCase()]||'';
+}
+function snrOf(st){
+  if(!st||st.noise==null||st.signal==null) return null;
+  var s=+st.signal-+st.noise;
+  return (isFinite(s)&&s>0)?Math.round(s):null;
+}
+function snrWord(v){
+  return v>=40?'excellent':v>=25?'good':v>=15?'fair':'poor';
+}
+
+var lastD=null;
+function render(raw){
+  var d=adapt(raw); lastD=d; renderHero(raw,d);
+  buildLookups(raw);
+  var blockedByMac={}; (d.blocked||[]).forEach(function(b){ (blockedByMac[b.mac]=blockedByMac[b.mac]||[]).push(b); });
+
+  (d.bands||[]).slice().reverse().forEach(function(b){
+    var gen={EHT:'Wi-Fi 7',HE:'Wi-Fi 6',VHT:'Wi-Fi 5',HT:'Wi-Fi 4'}[b.htgen]||b.htgen;
+    setStat('band-'+b.band, bandLabel(b.band), 'ch'+b.channel, '', (gen?gen+' · ':'')+b.apwidth+' MHz');
+  });
+  var t=d.tiles;
+  setStat('clients', 'Devices', t.clients_total||0, '', 'connected');
+  setStat('cpu temp', 'CPU', t.temp_c!=null?t.temp_c:'—', t.temp_c!=null?'°C':'',
+    raw.sys.fan_rpm ? raw.sys.fan_rpm+' RPM' : ('load '+(raw.sys.load||'')));
+  // Sub-line is the boot moment, not the WAN IP: the hero already states the
+  // uplink and its address, and "how long up" pairs with "since when", not with
+  // an unrelated network address.
+  setStat('uptime', 'Uptime', dur(d.uptime), '', bootedAt(raw.ts, d.uptime));
+  renderAir(raw); renderPulse(raw); renderEvents(raw); renderTraffic(raw);
+
+  var seen={}, prevSec=null;
+  (d.groups||[]).forEach(function(r){
+    var s=section(r), grid=s.querySelector('.grid');
+    var want = prevSec ? prevSec.nextSibling : body.firstChild;
+    if(s !== want) body.insertBefore(s, want);
+    prevSec = s;
+    r.clients.sort(function(a,b){
+      var ag=Math.max.apply(null,a.links.map(function(l){return +l.gen})),
+          bg=Math.max.apply(null,b.links.map(function(l){return +l.gen}));
+      if(bg!==ag) return bg-ag;
+      var an=a.name==='?'?'￿':a.name.toLowerCase(),
+          bn=b.name==='?'?'￿':b.name.toLowerCase();
+      return an<bn?-1:an>bn?1:0;
+    });
+    r.clients.forEach(function(c){
+      c._blocked=!!blockedByMac[c.mac];
+      var key=r.id+'|'+c.mac; seen[key]=1;
+      var n=card(key,c);
+      if(n.parentNode!==grid) grid.appendChild(n);
+      if(n._new){ n._new=false;
+        requestAnimationFrame(function(){requestAnimationFrame(function(){n.classList.remove('enter')})}); }
+    });
+  });
+
+  // Skip while an edit is open: this runs on every 5s poll and would otherwise
+  // wipe whatever the user is halfway through typing.
+  if(devOpenKey && !devEditing && cards.get(devOpenKey) &&
+     document.getElementById('devOverlay').classList.contains('on')){
+    // Rebuilding the body empties the scroll container for an instant, which
+    // clamps scrollTop to 0 — otherwise the reader is yanked back to the top
+    // every 5 seconds. Save and restore around the rebuild.
+    var _box=document.querySelector('#devOverlay .devmodal'),
+        _y=_box?_box.scrollTop:0;
+    renderDeviceModal(cards.get(devOpenKey), blockedByMac);
+    if(_box) _box.scrollTop=_y;
+  }
+
+  cards.forEach(function(n,key){
+    if(!seen[key]){ cards.delete(key); n.classList.add('leave');
+      setTimeout(function(){ n.remove(); },450); }
+  });
+  secs.forEach(function(s,k){ if(!s.querySelector('.card')&&s.parentNode){ s.remove(); secs.delete(k); } });
+
+  var e=body.querySelector('.empty'); if(e) e.remove();
+  stamp.textContent='updated '+d.time;
+  if(!booted){ document.getElementById('troubleshoot').classList.add('show'); }
+  booted=true;
+}
+
+/* ---------------- device modal ---------------- */
+var CLASSNAME={phone:'Phone',pad:'Tablet',laptop:'Laptop',computer:'Desktop Computer',
+  television:'TV / Streaming',watch:'Watch',smartappliances:'Smart Home Device',
+  router:'Router / Access Point',default:'Unknown'};
+
+/* ---- inline edit of name + category (writes /etc/dashboard/classmap) ---- */
+var devEditing=false;
+function openDevEdit(focus){
+  var n=cards.get(devOpenKey); if(!n||!n._data) return;
+  var c=n._data;
+  devEditing=true;                       // freeze the 5s poll re-render
+  document.getElementById('edName').value = (c.name==='?'?'':c.name);
+  var sel=document.getElementById('edClass');
+  sel.value = CLASSNAME[c.class] ? c.class : 'default';
+  document.getElementById('edMsg').textContent='';
+  document.getElementById('edMsg').className='toolstat';
+  document.getElementById('devEdit').classList.add('on');
+  setTimeout(function(){
+    (focus==='class'?sel:document.getElementById('edName')).focus();
+  },30);
+}
+function closeDevEdit(){
+  devEditing=false;
+  document.getElementById('devEdit').classList.remove('on');
+}
+document.getElementById('devEditName').addEventListener('click',function(){ openDevEdit('name'); });
+document.getElementById('edCancel').addEventListener('click',closeDevEdit);
+document.getElementById('edSave').addEventListener('click',function(){
+  var n=cards.get(devOpenKey); if(!n||!n._data) return;
+  var mac=n._data.mac,
+      nm=document.getElementById('edName').value.trim(),
+      cl=document.getElementById('edClass').value,
+      msg=document.getElementById('edMsg'), btn=this;
+  if(!nm){ msg.className='toolstat'; msg.style.color='var(--bad)';
+    msg.textContent='Name cannot be empty.'; return; }
+  btn.disabled=true; msg.style.color=''; msg.textContent='Saving…';
+  fetch(API,{method:'POST',cache:'no-store',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'action=setdev&mac='+encodeURIComponent(mac)+'&name='+encodeURIComponent(nm)+
+         '&class='+encodeURIComponent(cl)})
+    .then(function(r){return r.json()})
+    .then(function(j){
+      btn.disabled=false;
+      if(j.ok){ closeDevEdit(); tick(); }
+      else { msg.style.color='var(--bad)'; msg.textContent='Failed: '+(j.error||'unknown'); }
+    })
+    .catch(function(){ btn.disabled=false; msg.style.color='var(--bad)';
+      msg.textContent='Could not reach the router.'; });
+});
+
+var devOpenKey=null;
+/* Which "Radio detail" folds the reader has opened, keyed device+band.
+   The modal body is rebuilt from scratch on every 5s poll, so a <details>
+   element cannot be the source of truth for its own open state — it would
+   re-collapse under the cursor. Live outside the DOM instead. */
+var advOpen={};
+function openDeviceModal(key){
+  var n=cards.get(key); if(!n || !n._data) return;
+  devOpenKey=key;
+  closeDevEdit();   // never inherit a half-finished edit from the previous card
+  var blockedByMac={}; (lastD&&lastD.blocked||[]).forEach(function(b){ (blockedByMac[b.mac]=blockedByMac[b.mac]||[]).push(b); });
+  renderDeviceModal(n, blockedByMac);
+  document.getElementById('devOverlay').classList.add('on');
+  // Opening a device always starts at the top, whatever the last one was scrolled to.
+  var box=document.querySelector('#devOverlay .devmodal'); if(box) box.scrollTop=0;
+}
+function renderDeviceModal(n, blockedByMac){
+  var c=n._data, unk=c.name==='?';
+  setTxt(document.getElementById('devName'), unk?'Unknown device':c.name);
+  document.getElementById('devIcon').innerHTML=ICONS[c.class]||ICONS.default;
+  var badges=document.getElementById('devBadges'); badges.innerHTML='';
+  function badge(txt){ badges.appendChild(el('span','devbadge',txt)); }
+  // Activity first: "is this thing actually using the network right now?" is
+  // the question this modal gets opened for, and it used to be answerable only
+  // from the very last row of the very last link card.
+  var _shown=c.links.filter(function(l){ return !l.vestigial; });
+  if(_shown.length){
+    var _idle=Math.min.apply(null,_shown.map(function(l){ return +l.idle||0; }));
+    var _act=_idle<3000;
+    badges.appendChild(el('span','devbadge '+(_act?'act':'slp'),
+      _act ? 'Active now' : 'Idle '+durS(_idle/1000)));
+  }
+  // category badge doubles as the second pen affordance.
+  // Built with a text node + a separately-parsed static SVG: this file has no
+  // esc() helper (it relies on textContent everywhere), so the class value must
+  // never be concatenated into innerHTML.
+  var cb=el('span','devbadge editable');
+  cb.appendChild(document.createTextNode(CLASSNAME[c.class]||c.class||'unknown'));
+  var penWrap=document.createElement('span');
+  penWrap.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '+
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+
+    '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+  if(penWrap.firstChild) cb.appendChild(penWrap.firstChild);
+  cb.title='Change category';
+  cb.addEventListener('click',function(){ openDevEdit('class'); });
+  badges.appendChild(cb);
+  if(c.links.length>1) badge(c.links.length+' links');
+  if(c.vpn) badge('VPN · '+c.vpn);
+
+  var here=(blockedByMac||{})[c.mac]||[];
+  var bl=document.getElementById('devBlocked');
+  if(here.length){ bl.className='devblocked bad';
+    setTxt(bl,'Blocked on: '+here.map(function(b){return b.label;}).join(', ')); }
+  else { bl.className='devblocked ok'; bl.textContent='Not blocked on any SSID'; }
+
+  var wrap=document.getElementById('devLinks'); wrap.innerHTML='';
+  var info=el('div','devlinkcard'); info.appendChild(el('h4',null,'Device'));
+  function irow(k,v){ var r=el('div','devrow'); r.appendChild(el('span','dk',k));
+    r.appendChild(el('span','dv',v)); info.appendChild(r); }
+
+  var vend=vendorOf(c.mac);
+  irow('MAC', c.mac+(vend?' · '+vend:''));
+  if(c.ip) irow('IPv4', c.ip);
+  (c.ipv6s&&c.ipv6s.length?c.ipv6s:(c.ipv6?[c.ipv6]:[])).forEach(function(a,i){
+    irow(i===0?'IPv6':'', a);
+  });
+  // The DHCP hostname is what the device calls itself; the title is your alias.
+  if(c.hostname && c.hostname!==c.name) irow('Hostname', c.hostname);
+  var nb=neighMap[c.mac];
+  if(nb) irow('Reachability', nb==='REACHABLE' ? 'reachable' :
+    nb==='FAILED' ? 'not responding to ARP' : nb.toLowerCase());
+  irow('Internet route', c.vpn ? 'VPN — '+c.vpn : 'Normal WAN');
+  var cn=connMap[c.ip];
+  if(cn!=null) irow('Active connections', cn+(cn===1?' flow':' flows'));
+  var nb2=nlbwMap[c.mac];
+  if(nb2 && (nb2.dn+nb2.up)>0)
+    irow('Traffic today', '↓ '+fmtBytes(nb2.dn)+'  ↑ '+fmtBytes(nb2.up)+
+      (nb2.conns?'  · '+nb2.conns+' connections':''));
+  irow('Downloaded (session)', fmtBytes(c.total_rx));
+  irow('Uploaded (session)', fmtBytes(c.total_tx));
+  var _at=staMap[c.mac];
+  if(_at && (_at.txd+_at.rxd)>0)
+    irow('Airtime used', durS((_at.txd+_at.rxd)/1e6)+' · send '+durS(_at.txd/1e6)+' / receive '+durS(_at.rxd/1e6));
+  irow('DHCP lease', c.lease_in==null ? 'no active lease' :
+    (c.lease_in>0 ? 'renews in '+dur(c.lease_in) : 'expired '+dur(-c.lease_in)+' ago'));
+  wrap.appendChild(info);
+
+  c.links.forEach(function(l){
+    var cd=el('div','devlinkcard'), st=l.st||{}, x=staMap[c.mac]||{};
+    cd.appendChild(el('h4',null,bandLabel(l.band)+(l.vestigial?' — stale':'')));
+    function row(k,v){ var r=el('div','devrow'); r.appendChild(el('span','dk',k));
+      r.appendChild(el('span','dv',v)); cd.appendChild(r); return r; }
+    // The card hides this one; say why here rather than dropping it silently.
+    if(l.vestigial){ cd.style.opacity='.6';
+      row('Status','Leftover band-steering association — hidden on the card'); }
+    var ce=n._ceil.get(l.band);
+    row('Mode', (GENNAME[l.gen]||GENNAME[0])+' · '+l.width+' MHz');
+
+    var snr=snrOf(st);
+    row('Signal', Math.round(l.signal)+' dBm'+
+      (snr!=null ? '  ·  SNR '+snr+' dB ('+snrWord(snr)+')' : ''));
+    if(x.chains && x.chains.indexOf(',')>0)
+      row('Per antenna', x.chains.split(',').join(' / ')+' dBm');
+    if(st.noise!=null) row('Noise floor', st.noise+' dBm');
+
+    row('TX now / max', Math.round(l.tx)+' / '+(ce?Math.round(ce.maxTx):Math.round(l.tx))+' Mb/s');
+    row('RX now / max', Math.round(l.rx)+' / '+(ce?Math.round(ce.maxRx):Math.round(l.rx))+' Mb/s');
+    // iwinfo's `thr` and iw's "expected throughput" are the same nl80211 attribute;
+    // show it once, preferring the value that arrived with this poll's assoclist.
+    var ethr = st.thr ? Math.round(st.thr/1000) : (x.ethr||0);
+    if(ethr) row('Expected throughput', ethr+' Mb/s');
+    row('Connected', dur(l.conn));
+    row('Idle', (+l.idle<3000) ? 'active' : durS(l.idle/1000));
+
+    // ---- progressive disclosure: the driver-level detail, folded away ----
+    // Keyed on band rather than list index so the fold follows the right card
+    // when a stale band-steering link ages out and shifts the array.
+    var akey=c.mac+'|'+l.band+(l.vestigial?'|s':'');
+    var det=document.createElement('details'); det.className='advsec';
+    det.open=!!advOpen[akey];
+    det.addEventListener('toggle',function(){ advOpen[akey]=det.open; });
+    var sum=document.createElement('summary'); sum.textContent='Radio detail';
+    det.appendChild(sum);
+    function arow(k,v){ var r=el('div','devrow'); r.appendChild(el('span','dk',k));
+      r.appendChild(el('span','dv',v)); det.appendChild(r); }
+    function chain(d){
+      if(!d) return '';
+      var p=[];
+      if(d.mcs!=null) p.push('MCS '+d.mcs);
+      if(d.nss) p.push(d.nss+(d.nss===1?' stream':' streams'));
+      var gi=(d.he_gi!=null?d.he_gi:d.eht_gi);
+      if(gi!=null) p.push('GI '+({0:'0.8',1:'1.6',2:'3.2'}[gi]||gi)+' µs');
+      if(d.mhz) p.push(d.mhz+' MHz');
+      return p.join(' · ');
+    }
+    var ctx=chain(st.tx), crx=chain(st.rx);
+    if(ctx) arow('Transmit', ctx);
+    if(crx) arow('Receive', crx);
+    if(st.signal_avg!=null) arow('Signal average', st.signal_avg+' dBm');
+    if(x.ack) arow('Ack signal', x.ack+' dBm'+(x.acka?' · avg '+x.acka+' dBm':''));
+    if(st.tx&&st.tx.packets!=null) arow('Packets sent', (+st.tx.packets).toLocaleString());
+    if(st.rx&&st.rx.packets!=null) arow('Packets received', (+st.rx.packets).toLocaleString());
+    if(st.tx&&st.tx.retries!=null){
+      var pk=+st.tx.packets||0, rt=+st.tx.retries||0;
+      arow('Retries', rt.toLocaleString()+(pk?' · '+(rt*100/pk).toFixed(1)+'% of sent':''));
+    }
+    if(st.tx&&st.tx.failed!=null) arow('Send failures', (+st.tx.failed).toLocaleString());
+    if(st.rx&&st.rx.drop_misc!=null) arow('Dropped (rx)', (+st.rx.drop_misc).toLocaleString());
+    if(x.wt) arow('Airtime weight', String(x.wt));
+    if(x.dtim) arow('DTIM period', String(x.dtim));
+    if(x.bi) arow('Beacon interval', x.bi+' TU');
+    var flags=[];
+    if(st.authorized) flags.push('authorised');
+    if(st.authenticated) flags.push('authenticated');
+    if(st.mfp) flags.push('PMF (802.11w)');
+    if(st.wme) flags.push('WMM QoS');
+    if(st.tdls) flags.push('TDLS');
+    if(st.preamble) flags.push(st.preamble+' preamble');
+    if(flags.length) arow('Association', flags.join(' · '));
+    // mt76 duplicates retries into failed for some stations (MT7990 SDO quirk):
+    // say so once rather than letting the numbers quietly mislead.
+    if(st.tx && +st.tx.failed>0 && +st.tx.failed===+st.tx.retries){
+      var w=el('div','advnote','Retries and failures read identically here — a known '+
+        'mt76 counter quirk on this chip, not a real error rate.');
+      det.appendChild(w);
+    }
+    cd.appendChild(det);
+    wrap.appendChild(cd);
+  });
+}
+function closeDevModal(){
+  closeDevEdit();
+  document.getElementById('devOverlay').classList.remove('on'); devOpenKey=null;
+}
+document.getElementById('devClose').addEventListener('click', closeDevModal);
+document.getElementById('devCloseX').addEventListener('click', closeDevModal);
+document.getElementById('devOverlay').addEventListener('click', function(e){
+  if(e.target===this){ closeDevEdit(); this.classList.remove('on'); devOpenKey=null; } });
+
+/* ---------------- troubleshoot: radio restart ---------------- */
+function wireRadioButton(btnId, statId, action, confirmMsg, runMsg, doneMsg){
+  var btn=document.getElementById(btnId), st=document.getElementById(statId);
+  btn.addEventListener('click', function(){
+    if(!confirm(confirmMsg)) return;
+    var pw=prompt('Enter password to continue:');
+    if(pw==null || pw==='') return;
+    btn.disabled=true; st.textContent=runMsg;
+    fetch(API,{method:'POST',cache:'no-store',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'action='+action+'&pw='+encodeURIComponent(pw)})
+      .then(function(r){return r.json()})
+      .then(function(j){ st.textContent=j.ok?doneMsg:'Failed: '+(j.error||'unknown'); btn.disabled=false;
+        setTimeout(function(){st.textContent='';},8000); })
+      .catch(function(){ st.textContent='Could not reach the router.'; btn.disabled=false; });
+  });
+}
+wireRadioButton('fix24g','fix24gstat','fix24g',
+  'Restart the 2.4 GHz radio? Every 2.4 GHz client disconnects briefly (~15s).',
+  'Running… (~15s)', 'Done. 2.4 GHz is reconnecting.');
+wireRadioButton('fix5g','fix5gstat','fix5g',
+  'Restart the 5 GHz radio? Every 5 GHz client disconnects briefly (~10s).',
+  'Running… (~10s)', 'Done. 5 GHz is reconnecting.');
+
+/* ---------------- troubleshoot: block / unblock ---------------- */
+(function(){
+  var overlay=document.getElementById('aclOverlay'), title=document.getElementById('aclTitle'),
+      devSel=document.getElementById('aclDevice'), radSel=document.getElementById('aclRadio'),
+      radRow=radSel.closest('.mlabel'), pwInp=document.getElementById('aclPw'),
+      st=document.getElementById('aclStat'), mode='block';
+  function openModal(m){
+    mode=m; st.textContent=''; pwInp.value=''; devSel.innerHTML=''; radSel.innerHTML='';
+    if(mode==='block'){
+      title.textContent='Block Device'; radRow.style.display='';
+      var seen={},opts=[];
+      (lastD&&lastD.groups||[]).forEach(function(g){ g.clients.forEach(function(c){
+        if(seen[c.mac])return; seen[c.mac]=1;
+        opts.push({mac:c.mac,name:(c.name&&c.name!=='?')?c.name:c.mac}); }); });
+      opts.sort(function(a,b){return a.name.localeCompare(b.name);});
+      opts.forEach(function(o){ var op=document.createElement('option'); op.value=o.mac;
+        op.textContent=o.name+' ('+o.mac+')'; devSel.appendChild(op); });
+      (lastD&&lastD.radios||[]).forEach(function(r){ var op=document.createElement('option');
+        op.value=r.sec; op.textContent=r.label; radSel.appendChild(op); });
+    } else {
+      title.textContent='Unblock Device'; radRow.style.display='none';
+      (lastD&&lastD.blocked||[]).forEach(function(b){ var op=document.createElement('option');
+        op.value=b.sec+'|'+b.mac; op.textContent=b.name+' ('+b.mac+') — '+b.label; devSel.appendChild(op); });
+      if(!devSel.options.length){ var op=document.createElement('option'); op.value='';
+        op.textContent='(no devices currently blocked)'; devSel.appendChild(op); }
+    }
+    overlay.classList.add('on');
+  }
+  document.getElementById('aclOpenBlock').addEventListener('click', function(){ openModal('block'); });
+  document.getElementById('aclOpenUnblock').addEventListener('click', function(){ openModal('unblock'); });
+  document.getElementById('aclCancel').addEventListener('click', function(){ overlay.classList.remove('on'); });
+  overlay.addEventListener('click', function(e){ if(e.target===overlay) overlay.classList.remove('on'); });
+  document.getElementById('aclSubmit').addEventListener('click', function(){
+    if(!devSel.value){ st.textContent='Pick a device first.'; return; }
+    var sec,mac,block;
+    if(mode==='block'){ if(!radSel.value){ st.textContent='Pick an SSID first.'; return; }
+      sec=radSel.value; mac=devSel.value; block=true; }
+    else { var p=devSel.value.split('|'); sec=p[0]; mac=p[1]; block=false; }
+    var pw=pwInp.value; if(!pw){ st.textContent='Password is required.'; return; }
+    var who=devSel.options[devSel.selectedIndex].text.split(' (')[0];
+    if(!confirm((block?'BLOCK ':'UNBLOCK ')+who+'?'+(block?' It will be disconnected (~5s).':''))) return;
+    var btn=document.getElementById('aclSubmit'); btn.disabled=true; st.textContent='Running…';
+    fetch(API,{method:'POST',cache:'no-store',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'action=aclset&sec='+encodeURIComponent(sec)+'&mac='+encodeURIComponent(mac)+
+           '&block='+(block?'1':'0')+'&pw='+encodeURIComponent(pw)})
+      .then(function(r){return r.json()})
+      .then(function(j){ btn.disabled=false;
+        if(j.ok){ st.textContent='Done.'; setTimeout(function(){ overlay.classList.remove('on'); tick(); },1200); }
+        else st.textContent='Failed: '+(j.error||'unknown'); })
+      .catch(function(){ st.textContent='Could not reach the router.'; btn.disabled=false; });
+  });
+})();
+
+/* ---------------- poll ---------------- */
+var failed=0, inflight=false;
+function tick(){
+  if(inflight)return; inflight=true;
+  fetch(API,{cache:'no-store'})
+    .then(function(r){return r.json()})
+    .then(function(d){ if(!d.ok)throw 0; failed=0; pulse.classList.remove('off'); render(d); })
+    .catch(function(){ if(++failed>1){ pulse.classList.add('off'); stamp.textContent='reconnecting…'; } })
+    .then(function(){ inflight=false; });
+}
+tick(); setInterval(tick,5000);
+document.addEventListener('visibilitychange',function(){ if(!document.hidden) tick(); });
+})();
+</script>
+</body>
+</html>

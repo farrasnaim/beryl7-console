@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>USB uplink — Beryl 7</title>
+<link rel="stylesheet" href="/os.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="spine"></aside>
+  <main class="main">
+    <div class="topline"></div>
+
+    <header class="head">
+      <div>
+        <h1 class="head__t">USB uplink</h1>
+        <p class="head__s" id="subtitle">Use a phone or a USB modem as this router’s internet connection.</p>
+      </div>
+      <div class="head__aside">
+        <button class="btn btn--primary" id="redetect"></button>
+      </div>
+    </header>
+
+    <div id="alerts"></div>
+
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h">
+          <span class="panel__t">USB device</span>
+          <div class="panel__aside"><span id="devChip"></span><span class="hslot" id="actSlot"></span></div>
+        </div>
+        <div class="panel__b" id="device">
+          <div class="sk" style="width:52%"></div>
+          <div class="sk" style="width:38%;margin-top:10px"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Same panel as the Wi-Fi uplink page, in the same slot: the page's own
+         subject leads, the shared cross-page panel follows it. -->
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h">
+          <span class="panel__t">Internet sources</span>
+          <div class="panel__aside"><span class="row__cap">lowest metric wins</span></div>
+        </div>
+        <div class="panel__b panel__b--flush" id="sources"></div>
+        <div class="panel__b desk-only" id="priority" style="border-top:1px solid var(--line);padding-top:16px"></div>
+      </section>
+    </div>
+
+    <div class="face">
+      <section class="panel" id="modemPanel" hidden>
+        <div class="panel__h">
+          <span class="panel__t">Modem profile</span>
+          <div class="panel__aside" id="modemChip"></div>
+        </div>
+        <div class="panel__b" id="modem"></div>
+      </section>
+      <details class="adv">
+        <summary>Port diagnostics</summary>
+        <div>
+          <div class="panel__b" id="usb" style="padding-top:14px"></div>
+          <div class="panel__b" id="log" style="border-top:1px solid var(--line);padding-top:14px"></div>
+        </div>
+      </details>
+    </div>
+  </main>
+</div>
+<nav class="mobilebar" aria-label="Sections"></nav>
+
+<script src="/os.js"></script>
+<script>
+(function () {
+'use strict';
+var API = '/cgi-bin/tethering-api';
+var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
+
+OS.buildShell('/tethering/');
+var last = null;
+
+$('#redetect').appendChild(OS.icon('search'));
+$('#redetect').appendChild(document.createTextNode('Scan'));
+OS.dockAction('#actSlot');
+
+/* -------------------------------------------------------------- sources -- */
+function renderSources(d) {
+    var ups = OS.sourcesList($('#sources'), d);
+    OS.failoverControl($('#priority'), ups, function () { OS.tp.refresh(1200); });
+
+    var active = d.active || 'none';
+    OS.stage('tether', active === 'tethering' ? 'Carrying the uplink'
+             : (d.present ? 'Plugged in, standby' : 'Nothing plugged in'),
+             active === 'tethering' ? 'live' : '');
+    OS.stage('source', (ups.filter(function (u) { return u.active; })[0] || {}).label || 'None',
+             active === 'none' ? 'fault' : 'live');
+}
+
+/* --------------------------------------------------------------- device -- */
+function renderDevice(d) {
+    var box = $('#device'); clear(box);
+    var chip = $('#devChip'); clear(chip);
+    var i = d.iface || {};
+
+    if (!d.present) {
+        chip.appendChild(OS.stateWord('NOT DETECTED', 'idle'));
+        box.appendChild(OS.emptyState('No USB device detected',
+            'Plug in a phone with Personal Hotspot enabled, or a USB modem. The router picks it up ' +
+            'automatically — there is nothing to configure first. On iPhone you must tap Trust when ' +
+            'the prompt appears. Use Scan above if it is plugged in but not showing.', 'usb'));
+        setTxt($('#subtitle'), 'Use a phone or a USB modem as this router’s internet connection.');
+        return;
+    }
+
+    /* Same words, same component as this device's row in Internet sources
+       directly below — one fact must not render two ways on one screen. */
+    var st = !d.enabled ? ['OFF', 'idle']
+           : i.up ? (d.active === 'tethering' ? ['CARRYING', 'ok'] : ['STANDBY', null])
+           : d.carrier ? ['NO ADDRESS', 'warn'] : ['NO LINK', 'bad'];
+    chip.appendChild(OS.stateWord(st[0], st[1]));
+
+    var head = el('div');
+    head.style.cssText = 'display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap';
+    var idb = el('div'); idb.style.cssText = 'flex:1;min-width:0';
+    var nm = el('div');
+    nm.style.cssText = 'font-size:19px;font-weight:600;letter-spacing:-.02em';
+    nm.textContent = d.kind || 'USB network device';
+    idb.appendChild(nm);
+    idb.appendChild(el('div', 'row__sub',
+        [d.device, d.driver, d.mac ? d.mac.toUpperCase() : ''].filter(Boolean).join('   ·   ')));
+    head.appendChild(idb);
+    box.appendChild(head);
+
+    if (i.up) {
+        box.appendChild(el('div', 'rowsep'));
+        var strip = el('div');
+        strip.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:16px';
+        strip.appendChild(OS.readout('Address', i.ip || '—', '', 'from the phone or modem', null, true));
+        strip.appendChild(OS.readout('Gateway', i.gw || '—', '', 'next hop', null, true));
+        strip.appendChild(OS.readout('Connected', OS.dur(i.uptime || 0), '', 'since link came up', null, true));
+        if (i.dns && i.dns.length)
+            strip.appendChild(OS.readout('DNS', i.dns[0], '',
+                i.dns.length > 1 ? '+' + (i.dns.length - 1) + ' more' : 'upstream resolver', null, true));
+        box.appendChild(strip);
+    } else if (d.carrier) {
+        var n = OS.note('The USB link is up but no address has been handed out yet. On iPhone this ' +
+            'usually means Personal Hotspot is off, or the Trust prompt has not been accepted.', 'warn');
+        n.style.marginTop = '14px'; box.appendChild(n);
+    }
+
+    box.appendChild(el('div', 'rowsep'));
+    var acts = el('div', 'inline');
+    var tb = el('button', 'btn btn--sm' + (d.enabled ? '' : ' btn--primary'));
+    tb.appendChild(OS.icon('power'));
+    tb.appendChild(document.createTextNode(d.enabled ? 'Disconnect' : 'Connect'));
+    tb.addEventListener('click', function () {
+        OS.act(tb, API, { action: d.enabled ? 'disable' : 'enable' },
+            { ok: d.enabled ? 'USB uplink disconnected.' : 'Connecting…', delay: 1800 });
+    });
+    acts.appendChild(tb);
+
+    if (d.enabled) {
+        var rb = el('button', 'btn btn--sm');
+        rb.appendChild(OS.icon('refresh'));
+        rb.appendChild(document.createTextNode('Reconnect'));
+        rb.addEventListener('click', function () {
+            OS.act(rb, API, { action: 'up' }, { ok: 'Reconnecting…', delay: 3000 });
+        });
+        acts.appendChild(rb);
+    }
+    var fb = el('button', 'btn btn--sm btn--danger');
+    fb.appendChild(OS.icon('x'));
+    fb.appendChild(document.createTextNode('Forget'));
+    fb.addEventListener('click', function () {
+        OS.dialog({
+            title: 'Forget this USB device',
+            body: 'The router stops treating ' + (d.device || 'this device') + ' as an uplink. ' +
+                  'Re-plugging it, or pressing Scan, will pick it up again.',
+            okText: 'Forget', danger: true
+        }).then(function (go) {
+            if (!go) return;
+            OS.act(fb, API, { action: 'forget' }, { ok: 'USB device forgotten.', delay: 1500 });
+        });
+    });
+    acts.appendChild(fb);
+    box.appendChild(acts);
+
+    setTxt($('#subtitle'), i.up
+        ? (d.kind || 'USB device') + ' connected' +
+          (d.active === 'tethering' ? ' and carrying all internet traffic.' : ' on standby behind Ethernet.')
+        : (d.kind || 'USB device') + ' is plugged in but not passing traffic.');
+}
+
+/* ---------------------------------------------------------------- modem -- */
+function renderModem(d) {
+    var m = d.modem || {};
+    var panel = $('#modemPanel');
+    if (!m.is_modem && !m.configured) { panel.hidden = true; return; }
+    panel.hidden = false;
+    var chip = $('#modemChip'); clear(chip);
+    chip.appendChild(OS.stateWord(m.configured ? 'SAVED' : 'NO PROFILE',
+                                  m.configured ? 'ok' : 'idle'));
+    var box = $('#modem'); clear(box);
+    var p = m.profile || {};
+
+    var intro = el('div', 'hint');
+    intro.style.margin = '0 0 14px';
+    intro.textContent = m.is_modem && !m.configured
+        ? 'This looks like a cellular modem. A profile tells it which network to dial. ' +
+          'Suggested protocol: ' + (m.suggest_proto || 'qmi') + '.'
+        : 'Cellular settings for the attached modem.';
+    box.appendChild(intro);
+
+    var g = el('div', 'grid g2');
+    function field(label, key, val, ph, type) {
+        var f = el('div', 'field');
+        f.appendChild(el('label', 'label', label));
+        var inp = el('input', 'input');
+        inp.type = type || 'text';
+        inp.value = val || '';
+        if (ph) inp.placeholder = ph;
+        inp.setAttribute('data-k', key);
+        f.appendChild(inp);
+        g.appendChild(f);
+        return inp;
+    }
+    var fProto = el('div', 'field');
+    fProto.appendChild(el('label', 'label', 'Protocol'));
+    var sel = el('select', 'select'); sel.setAttribute('data-k', 'proto');
+    ['dhcp', 'qmi', 'mbim', 'ncm', '3g'].forEach(function (o) {
+        var op = el('option', null, o === 'dhcp' ? 'dhcp (plain USB network)' : o);
+        op.value = o;
+        if ((m.proto || 'dhcp') === o) op.selected = true;
+        sel.appendChild(op);
+    });
+    fProto.appendChild(sel);
+    g.appendChild(fProto);
+
+    field('Control device', 'device', p.device, m.suggest_device || '/dev/cdc-wdm0');
+    field('APN', 'apn', p.apn, 'internet');
+    var fAuth = el('div', 'field');
+    fAuth.appendChild(el('label', 'label', 'Authentication'));
+    var sa = el('select', 'select'); sa.setAttribute('data-k', 'auth');
+    [['', 'none'], ['pap', 'PAP'], ['chap', 'CHAP'], ['both', 'PAP or CHAP']].forEach(function (o) {
+        var op = el('option', null, o[1]); op.value = o[0];
+        if ((p.auth || '') === o[0]) op.selected = true;
+        sa.appendChild(op);
+    });
+    fAuth.appendChild(sa); g.appendChild(fAuth);
+    field('Username', 'username', p.username, '');
+    field('Password', 'password', '', p.has_password ? '•••••••• (saved)' : '', 'password');
+    field('PIN', 'pincode', '', p.has_pin ? '•••• (saved)' : '', 'password');
+    field('PDP type', 'pdptype', p.pdptype, 'IP / IPV4V6');
+    field('Dial number', 'dialnumber', p.dialnumber, '*99#');
+    field('Startup delay', 'delay', p.delay, 'seconds');
+    box.appendChild(g);
+
+    var acts = el('div', 'inline'); acts.style.marginTop = '4px';
+    var save = el('button', 'btn btn--primary btn--sm', 'Save profile');
+    save.addEventListener('click', function () {
+        var params = { action: 'modemsave' };
+        OS.$$('[data-k]', box).forEach(function (n) { params[n.getAttribute('data-k')] = n.value; });
+        OS.act(save, API, params, { ok: 'Modem profile saved.', delay: 2500 });
+    });
+    acts.appendChild(save);
+
+    if (p.has_password || p.has_pin) {
+        var cw = el('button', 'btn btn--sm', 'Clear saved secrets');
+        cw.addEventListener('click', function () {
+            OS.act(cw, API, { action: 'modemsave', clearpw: 1, clearpin: 1 },
+                { ok: 'Saved password and PIN cleared.' });
+        });
+        acts.appendChild(cw);
+    }
+    if (m.configured) {
+        var cl = el('button', 'btn btn--sm btn--danger', 'Delete profile');
+        cl.addEventListener('click', function () {
+            OS.dialog({ title: 'Delete the modem profile',
+                body: 'The USB uplink goes back to plain DHCP.',
+                okText: 'Delete', danger: true }).then(function (go) {
+                if (!go) return;
+                OS.act(cl, API, { action: 'modemclear' }, { ok: 'Profile deleted.', delay: 2000 });
+            });
+        });
+        acts.appendChild(cl);
+    }
+    box.appendChild(acts);
+}
+
+/* -------------------------------------------------------- diagnostics ---- */
+function renderDiag(d) {
+    var box = $('#usb'); clear(box);
+    box.appendChild(el('div', 'ro__k', 'Devices on the USB bus'));
+    var list = d.usb || [];
+    if (!list.length) {
+        var e = el('div', 'hint'); e.style.marginTop = '8px';
+        e.textContent = 'Nothing enumerated. The port has one physical connector; both USB 2 and ' +
+                        'USB 3 controllers are behind it.';
+        box.appendChild(e);
+    } else {
+        var dl = el('dl', 'kv'); dl.style.marginTop = '10px';
+        list.forEach(function (u) {
+            dl.appendChild(el('dt', null, u.port));
+            dl.appendChild(el('dd', null,
+                [u.id, (u.vendor + ' ' + u.product).trim(), u.drivers, u.kind]
+                    .filter(Boolean).join('   ·   ')));
+        });
+        box.appendChild(dl);
+    }
+    if (d.serial && d.serial.length) {
+        var s = el('div'); s.style.marginTop = '14px';
+        s.appendChild(el('div', 'ro__k', 'Serial / control nodes'));
+        var sd = el('div', 'n'); sd.style.cssText = 'font-size:11.5px;margin-top:6px;color:var(--ink-2)';
+        sd.textContent = d.serial.join('   ');
+        s.appendChild(sd);
+        box.appendChild(s);
+    }
+
+    var lb = $('#log'); clear(lb);
+    lb.appendChild(el('div', 'ro__k', 'Recent USB events'));
+    var lg = d.log || [];
+    if (!lg.length) {
+        var h = el('div', 'hint'); h.style.marginTop = '8px';
+        h.textContent = 'No USB events recorded since boot.';
+        lb.appendChild(h);
+    } else {
+        var pre = el('div', 'n');
+        pre.style.cssText = 'font-size:11px;line-height:1.7;margin-top:8px;color:var(--ink-2);' +
+                            'white-space:pre-wrap;word-break:break-word';
+        pre.textContent = lg.join('\n');
+        lb.appendChild(pre);
+    }
+}
+
+/* --------------------------------------------------------------- alerts -- */
+function renderAlerts(d) {
+    var a = $('#alerts'); clear(a);
+    if (d.clash) {
+        var n = OS.note('Address clash: the device hands out ' + d.clash + ', which overlaps this ' +
+            'router’s own LAN. Traffic cannot be routed until one side changes subnet.', 'bad');
+        var b = el('button', 'btn btn--sm'); b.textContent = 'Dismiss'; b.style.marginLeft = 'auto';
+        b.addEventListener('click', function () { OS.act(b, API, { action: 'clearerr' }, { ok: false }); });
+        n.appendChild(b); n.style.marginBottom = '12px'; a.appendChild(n);
+    }
+    if (d.usbmuxd === false) {
+        var n2 = OS.note('usbmuxd is not running, so an iPhone cannot complete pairing. ' +
+            'iPhone tethering will not work until it is started.', 'warn');
+        n2.style.marginBottom = '12px'; a.appendChild(n2);
+    }
+    OS.flagTab('/tethering/', !!d.clash);
+}
+
+$('#redetect').addEventListener('click', function () {
+    var b = this;
+    OS.post(API, { action: 'redetect' }).then(function (j) {
+        if (j && j.ok) {
+            OS.toast(j.device ? 'Found ' + j.device + '.' : 'No new USB device found.',
+                     j.device ? 'ok' : 'warn');
+            OS.tp.refresh(1200);
+        } else OS.toast('Scan failed: ' + ((j && j.error) || 'unknown error') + '.', 'bad');
+    });
+    b.classList.add('is-busy');
+    setTimeout(function () { b.classList.remove('is-busy'); }, 3000);
+});
+
+function render(d) {
+    if (!d || !d.ok) return;
+    last = d;
+    renderAlerts(d);
+    renderSources(d);
+    renderDevice(d);
+    renderModem(d);
+    renderDiag(d);
+}
+
+/* 8s, not the legacy 5s: nothing on this page changes faster than a plug event,
+   and this endpoint walks sysfs on every call. */
+OS.tp = new OS.Transport(API, render, { interval: 8000 });
+OS.tp.start();
+})();
+</script>
+</body>
+</html>

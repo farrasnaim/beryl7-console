@@ -1,0 +1,223 @@
+# Beryl 7 Console
+
+A hand-built web console for the GL.iNet Beryl 7 (GL-MT3600BE) travel router running vanilla OpenWrt. Five pages of plain HTML, CSS, and JavaScript over busybox-ash CGI — no frameworks, no build step, no external requests, no dependencies beyond what the router already ships.
+
+It replaces day-to-day use of LuCI and the vendor UI for the things a travel router actually does: watching who is connected, joining hotel Wi-Fi, tethering a phone, routing devices through WireGuard tunnels, and adjusting the radios — while leaving LuCI untouched at `/cgi-bin/luci/` for everything else.
+
+> Built for one specific router on one specific network, then published because someone else might need it. Read the code before deploying it — it is small enough that you can.
+
+## The pages
+
+| Page | Path | What it does |
+|---|---|---|
+| **Overview** | `/dashboard/` | Live network topology (uplink → router → tunnels → devices), connected clients with per-device throughput and Wi-Fi signal, radio status, today's traffic, system vitals (load, temperature, fan, memory), and a 1-second throughput + latency chart. Per-device detail view with rates, PHY mode, and block control. |
+| **VPN** | `/vpn/` | WireGuard tunnels: add from a pasted `.conf`, connect/disconnect, and route individual devices through a tunnel via [pbr](https://github.com/stangri/pbr) policies. Fail-closed by default; an optional watchdog can pause routing when a tunnel dies (see `vpnwatch`). Per-device VPN DNS enforcement so routed devices can't leak DNS to the home uplink (see `beryl-vpndns`). |
+| **Wi-Fi uplink** | `/repeater/` | Repeater mode: scan, join, and forget upstream networks (hotel/cafe Wi-Fi). Shows the uplink's health and hands over between sources by route metric. |
+| **USB uplink** | `/tethering/` | USB tethering: iPhone (ipheth/usbmuxd), Android RNDIS, HiLink dongles, and NCM/QMI/MBIM modems, with APN/PIN configuration where the device needs it. Detects whatever netdev the device presents instead of assuming `eth2`. |
+| **Settings** | `/settings/` | Radio configuration (band, channel, width, PHY mode, transmit power, country) with the valid channel/width combinations derived live from what the hardware reports — you cannot select a combination the radio can't do. Plus SSID settings, hostname, timezone, LAN lease settings, device blocking, and radio restart. |
+
+Every page works from 360 px phones to desktop, in light and dark (system-following or manually pinned), with four accent themes (mint, maroon, navy, grey).
+
+## Design
+
+The UI follows a deliberately quiet design language: warm graphite surfaces, a single cool accent, no gradients, no shadows (only focus rings), uppercase reserved for state words. All of it lives in one token system in `www/os.css`:
+
+- **Theming** is a 4-rule matrix per token set — bare default, `prefers-color-scheme` media rule, and `[data-theme="dark"]` / `[data-theme="light"]` overrides — so the manual toggle always beats the system preference in both directions.
+- **Accents** are complete token sets (`--sig`, `--sig-fg`, `--sig-solid`, `--sig-dim`, `--sig-line`), each tuned separately for dark and light grounds. Contrast was computed numerically against alpha-composited backgrounds, not eyeballed.
+- **Typography** is the system font stack. Tabular numerals wherever digits align; monospace only for identifiers (MACs, IPs, interface names).
+
+`www/os.js` is the shared runtime: navigation, theme/accent persistence (pre-paint, so no flash of the wrong theme), dialogs, the SVG topology renderer, and the polling machinery.
+
+## Architecture
+
+```
+browser ── 5s poll ──► /cgi-bin/<page>-api ── JSON state snapshot
+        ── 1s poll ──► /cgi-bin/rate-api   ── counters + ping only
+        ── POST ─────► /cgi-bin/<page>-api ── writes (password-gated)
+
+cron (1 min) ──► dashmon   ── telemetry ring buffers in /tmp
+             ──► apwatch   ── Wi-Fi AP watchdog (recovers a wedged radio)
+             ──► vpnwatch  ── optional VPN fail-open behaviour
+
+hotplug ──► 30-tethering        ── adopt whatever netdev USB tethering presents
+        ──► 31-tethering-clash  ── refuse USB uplinks whose subnet collides
+        ──► 15-travel-dns       ── plaintext DNS on travel uplinks (captive portals)
+        ──► 99-repeater-iot     ── drop the IoT SSID while travelling
+```
+
+Points worth knowing:
+
+- **CGIs are busybox ash.** No bash, no `stat`, no sub-second `sleep`, no `date +%N`. Everything is written against what a stock OpenWrt BusyBox actually provides.
+- **The two-endpoint split is the performance design.** The full state snapshot (`dashboard-api`) costs ~455 ms of CPU per call; the counters endpoint (`rate-api`) costs ~9 ms. The 1-second live charts poll only the cheap endpoint (~0.2% of the four cores), and the full snapshot stays at 5 s.
+- **Telemetry never touches flash.** `dashmon` keeps its ring buffers (WAN latency history, device presence) in `/tmp` — lost on reboot by design, zero flash wear.
+- **State-changing requests are POST-only** and re-validated server-side. GET requests cannot mutate anything.
+- **`beryl-vpndns`** regenerates `/etc/nftables.d/30-beryl-vpndns.nft` from the current pbr policies: IPv4 DNS from VPN-routed devices is DNAT-ed into the tunnel's resolver, and IPv6 DNS from those devices is rejected (not dropped) so clients fail fast to IPv4 instead of leaking their location via the home uplink. The file is generated — it is intentionally not in this repo.
+- **`apwatch`** exists because `wifi reload` bounces both radios (single PHY), and a failed reload with only a phone in your pocket means no AP, no dashboard, and no SSH. It escalates gently: `wifi up` → `wifi reload` → rate-limited reboot, and stops the moment the AP is back.
+
+## Repository layout
+
+```
+www/
+  os.css                     design system: tokens, themes, accents, components
+  os.js                      shared runtime: nav, theming, dialogs, topology, polling
+  dashboard/index.html       Overview
+  vpn/index.html             VPN
+  repeater/index.html        Wi-Fi uplink
+  tethering/index.html       USB uplink
+  settings/index.html        Settings
+  cgi-bin/
+    dashboard-api            full state snapshot + device detail + block/deauth
+    rate-api                 cheap 1s counters: WAN bytes, ping, load, temp, fan, mem
+    vpn-api                  tunnels, per-device routing, fail-mode
+    repeater-api             scan/join/forget, uplink status
+    tethering-api            USB device detection, modem config, uplink control
+    settings-api             radios, SSIDs, hostname, timezone, DHCP, block list
+  theme.css                  v1 design system (superseded — kept for reference)
+  legacy/                    v1 pages (superseded — kept for reference)
+
+usr/sbin/
+  dashmon                    1-minute telemetry collector (cron)
+  apwatch                    Wi-Fi AP watchdog (cron)
+  vpnwatch                   optional VPN dead-tunnel handling (cron)
+  beryl-vpndns               regenerates per-device VPN DNS nftables rules
+
+etc/
+  crontabs/root              the three cron entries
+  dashboard/classmap.example device name/class map — copy to /etc/dashboard/classmap
+  hotplug.d/iface/15-travel-dns        captive-portal-safe DNS on travel uplinks
+  hotplug.d/iface/31-tethering-clash   reject colliding USB subnets (HiLink!)
+  hotplug.d/iface/99-repeater-iot      IoT SSID off while repeating
+  hotplug.d/net/30-tethering           bind any tethering netdev name
+  hotplug.d/usb/40-usbmuxd             disabled stub (see its header for why)
+  init.d/cpugovernor         schedutil instead of a pinned 2.0 GHz
+  sysctl.d/99-local.conf     TCP MTU probing for hotel/tunnel PMTU black holes
+```
+
+Every script carries a header comment explaining what it does and, more importantly, why it exists. The headers are the real documentation.
+
+## Requirements
+
+**Hardware.** Written for and tested on exactly one device: the GL.iNet Beryl 7 (GL-MT3600BE) — MediaTek Filogic, quad-core A53, Wi-Fi 7 (BE3600), one 2.4 GHz + one 5 GHz radio on a single PHY, temperature sensor and fan. Anything else will need porting (below).
+
+**Firmware.** Vanilla OpenWrt 25.12 (developed on GL's OpenWrt-based stock firmware, then migrated). uhttpd with CGI enabled — the stock configuration.
+
+**Packages.**
+
+| Needed by | Packages |
+|---|---|
+| VPN page | `pbr`, `wireguard-tools`, `kmod-wireguard` |
+| USB uplink page | `kmod-usb-net-ipheth` + `usbmuxd` (iPhone), `kmod-usb-net-rndis` (Android), `kmod-usb-net-cdc-ether`, `kmod-usb-net-cdc-ncm` / `qmi` / `mbim` + `uqmi`/`umbim` as needed |
+| Traffic panel | `vnstat2` |
+| Travel DNS hotplug | `https-dns-proxy` (the hotplug is a no-op without it) |
+| Everything else | stock OpenWrt (`iw`, `ubus`, `uci`, `nftables`, BusyBox) |
+
+## Installation
+
+Back up your router first. Then, from this repo's root:
+
+```sh
+# copy the tree onto the router (tar over ssh — stock dropbear has no scp/sftp server)
+ssh root@192.168.8.1 "mkdir -p /tmp/beryl7"
+tar -cf - www usr etc | ssh root@192.168.8.1 "tar -xf - -C /tmp/beryl7"
+
+ssh root@192.168.8.1
+cp -r /tmp/beryl7/www/* /www/
+cp /tmp/beryl7/usr/sbin/* /usr/sbin/
+cp -r /tmp/beryl7/etc/hotplug.d /tmp/beryl7/etc/init.d /tmp/beryl7/etc/sysctl.d /etc/
+
+# CGI scripts and system scripts must be executable — cp does not guarantee it
+chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
+          /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
+          /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
+          /etc/hotplug.d/iface/* /etc/hotplug.d/net/30-tethering /etc/init.d/cpugovernor
+
+# cron: dashmon is required for the Overview's history panels; the watchdogs are optional
+crontab -l > /tmp/cron; cat /tmp/beryl7/etc/crontabs/root >> /tmp/cron; crontab /tmp/cron
+
+# device names/classes for the client list (edit to match your devices)
+mkdir -p /etc/dashboard
+cp /tmp/beryl7/etc/dashboard/classmap.example /etc/dashboard/classmap
+
+# optional: load-based CPU scaling
+/etc/init.d/cpugovernor enable && /etc/init.d/cpugovernor start
+```
+
+Then **set your own write password** (see Security below) and open `http://192.168.8.1/dashboard/`.
+
+To survive sysupgrades, add the installed paths to `/etc/sysupgrade.conf`:
+
+```
+/www/os.css
+/www/os.js
+/www/dashboard
+/www/vpn
+/www/repeater
+/www/tethering
+/www/settings
+/www/cgi-bin/dashboard-api
+/www/cgi-bin/rate-api
+/www/cgi-bin/vpn-api
+/www/cgi-bin/repeater-api
+/www/cgi-bin/tethering-api
+/www/cgi-bin/settings-api
+/usr/sbin/dashmon
+/usr/sbin/apwatch
+/usr/sbin/vpnwatch
+/usr/sbin/beryl-vpndns
+/etc/dashboard
+/etc/crontabs/root
+/etc/hotplug.d/iface/15-travel-dns
+/etc/hotplug.d/iface/31-tethering-clash
+/etc/hotplug.d/iface/99-repeater-iot
+/etc/hotplug.d/net/30-tethering
+/etc/hotplug.d/usb/40-usbmuxd
+/etc/init.d/cpugovernor
+/etc/sysctl.d/99-local.conf
+```
+
+## Security model — read this before deploying
+
+This console is designed for a **trusted home LAN** and makes deliberate trade-offs you should understand:
+
+- **Reading is unauthenticated.** Anyone on the LAN can see the dashboard. On the original network this is enforced at the firewall: guest and IoT zones have `input REJECT`, WAN is `DROP`, so only trusted-LAN clients can reach the pages at all. Replicate that or accept that everyone on your network can watch it.
+- **Writes are gated by a single shared password**, checked server-side only (it never appears in HTML or JS). It ships as `changeme` in four CGIs — **change it before deploying**:
+
+  ```sh
+  sed -i 's/PASSWORD="changeme"/PASSWORD="your-password-here"/' \
+      /www/cgi-bin/dashboard-api /www/cgi-bin/vpn-api \
+      /www/cgi-bin/repeater-api /www/cgi-bin/settings-api
+  ```
+
+- **Some write actions intentionally skip the password** — VPN connect/disconnect and repeater join were judged low-risk-high-friction on a personal router. Grep the CGIs for `pw` handling and tighten to taste.
+- **No TLS.** uhttpd serves plain HTTP on the LAN. The password crosses the wire in cleartext, which is acceptable on a physically-controlled home network and not acceptable anywhere else.
+- **Never expose this to the WAN or a VPS.** No sessions, no rate limiting, no account lockout. It is not that kind of software.
+
+## Hardware notes and gotchas
+
+Things learned the hard way, encoded in the code and worth knowing before porting:
+
+- **Both radios share one PHY.** `wifi reload` bounces 2.4 GHz and 5 GHz together, and transmit power is coupled across bands. This is why `apwatch` exists and why the Settings page warns about it.
+- **Huawei HiLink dongles hand out `192.168.8.0/24`** — byte-identical to the router's own LAN. `31-tethering-clash` tears down any USB uplink whose subnet collides with a routed network, because you cannot know the subnet until DHCP has already answered.
+- **iPhone tethering + eager reset scripts don't mix.** The stock `40-usbmuxd` hotplug reset the phone in a loop before ipheth could ever confirm pairing. The stub in this repo documents the failure mode; leave it disabled.
+- **DoH breaks captive portals.** Hotel sign-in pages work by hijacking plaintext DNS; if all DNS is DoH, the portal never appears and you are stranded. `15-travel-dns` switches to the uplink's plaintext DNS only while a travel uplink is active, and restores DoH at home.
+- **The tethering netdev name is not predictable** (`ethN` / `usbN` / `wwanN` depending on driver flags); `30-tethering` binds whatever appears instead of hardcoding.
+- **pbr + fail-closed means a dead tunnel silently strands its devices.** That is the correct default. `vpnwatch` only ever does something if you explicitly opt into fail-open via `/etc/dashboard/vpn-failmode`.
+
+## Porting to other routers
+
+The HTML/CSS/JS is portable as-is. The CGIs are where the hardware assumptions live:
+
+- Interface names (`br-lan`, the uplink resolution via the main routing table) are discovered, not hardcoded, but were only ever tested on this topology.
+- The radio settings page derives capabilities from `iw phy` output — it should adapt to other chipsets, but PHY parsing is exactly the kind of thing that varies.
+- Temperature/fan reads in `rate-api` use this board's sysfs paths.
+- Anything mentioning `192.168.8.0/24` assumes the GL.iNet default LAN.
+
+Expect an afternoon of reading and adjusting, not a drop-in install.
+
+## Status
+
+Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. The `legacy/` directory and `theme.css` are the first iteration of the UI, superseded by `os.css`/`os.js`, kept for reference.
+
+## License
+
+[MIT](LICENSE)

@@ -1,0 +1,13 @@
+# DISABLED 2026-08-08 — this handler made iPhone tethering impossible.
+#
+# The stock version (kept at /root/preaudit-fix/40-usbmuxd.orig) waited 5s after
+# ipheth bound and, if carrier was still 0, ran `usbreset iPhone` + restarted
+# usbmuxd.  But carrier CANNOT be up that early: ipheth_carrier_set() refuses to
+# query the phone until dev->confirmed_pairing is set, and that only happens once
+# an RX URB completes.  So the reset always fired, the reset raised a fresh `bind`
+# event, and that re-armed the same 5s timer — an endless reset loop that tore the
+# interface down every ~5.5s and guaranteed the link could never establish.
+#
+# Re-enable only if you find an iPhone that genuinely needs the kick, and then
+# gate it so it fires at most once per attach.
+exit 0
