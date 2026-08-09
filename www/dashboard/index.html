@@ -83,7 +83,7 @@
     <div class="face">
       <section class="panel">
         <div class="panel__h">
-          <span class="panel__t">Traffic today</span>
+          <span class="panel__t" id="trafTitle">Traffic today</span>
           <div class="panel__aside"><span class="row__cap" id="trafTotal"></span></div>
         </div>
         <div class="panel__b" id="traffic"></div>
@@ -908,7 +908,27 @@ function airPct(band, g) {
     return g.active > 0 ? Math.round(g.busy * 100 / g.active) : null;
 }
 
+/* The heading follows nlbwmon's actual accounting period rather than claiming
+   "today" and hoping. nlbwmon's default is monthly — database_interval=1 means
+   "restart on the 1st" — so on a stock install this panel would silently show
+   weeks of traffic under a heading that said today. It also anchors periods to
+   UTC, so even daily accounting rolls over at UTC midnight, not local. Reading
+   the period back is the only way the label can stay true on any router. */
+function trafficHeading(period) {
+    if (!period) return 'Traffic today';
+    var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(period);
+    if (!p) return 'Traffic today';
+    var start = new Date(+p[1], +p[2] - 1, +p[3]);
+    var now = new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var days = Math.round((today - start) / 86400000);
+    if (days <= 0) return 'Traffic today';
+    if (days === 1) return 'Traffic since yesterday';
+    return 'Traffic since ' + start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
 function renderTraffic(d, M) {
+    setTxt($('#trafTitle'), trafficHeading(d.nlbw_period));
     var box = $('#traffic'); clear(box);
     /* Every device the router accounted for today, minus the IoT network —
        plugs and bulbs trading a few hundred KB are noise beside real devices,

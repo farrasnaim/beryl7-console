@@ -491,6 +491,15 @@ EVJ=$(tail -n 12 /tmp/.presence 2>/dev/null | awk -F'|' '
 EVJ="[$EVJ]"
 
 # ---- per-device traffic accounting (nlbwmon; null until it has data) ----
+# The accounting PERIOD is reported alongside the data, because nlbwmon's
+# default is monthly (database_interval=1 → restart on the 1st) and a panel
+# labelled "today" would then be quietly showing weeks of traffic. The client
+# derives its own heading from this rather than assuming. Measured at 0 ms.
+NLPER=$(nlbw -c list 2>/dev/null | tail -1)
+case "$NLPER" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *) NLPER="" ;;
+esac
 NLJ=$(nlbw -c json -g mac 2>/dev/null)
 case "$NLJ" in '{'*'}') ;; *) NLJ='null' ;; esac
 
@@ -550,6 +559,7 @@ fi
 printf '"uplink":{"active":"%s","dev":"%s"},' "$UPACT" "$(esc "$ACTDEV")"
 printf '"air":%s,"sta":%s,"neigh":%s,"oui":%s,"wired":%s,"wanlat":%s,"events":%s,"nlbw":%s,' \
     "$AIRJ" "$STAJ" "$NBJ" "$OUIJ" "$WIREDJ" "$WLJ" "$EVJ" "$NLJ"
+printf '"nlbw_period":%s,' "$( [ -n "$NLPER" ] && printf '"%s"' "$NLPER" || echo null )"
 printf '"classmap":%s,' "$CMJ"
 printf '"vpn":%s,' "$VPNJ"
 printf '"vpn_stale":%s,' "$VPNSTALE"
