@@ -35,7 +35,7 @@ Read [Security model](#security-model) before putting this on a network you don'
 | Page | Path | What it does |
 |---|---|---|
 | **Overview** | `/dashboard/` | Live network topology (uplink → router → tunnels → devices), connected clients with per-device throughput and Wi-Fi signal, radio status, today's traffic, system vitals (load, temperature, fan, memory), and a 1-second throughput + latency chart. Per-device detail view with rates, PHY mode, and block control. |
-| **VPN** | `/vpn/` | WireGuard tunnels: add from a pasted `.conf`, connect/disconnect, and route individual devices through a tunnel via [pbr](https://github.com/stangri/pbr) policies. Fail-closed by default; an optional watchdog can pause routing when a tunnel dies (see `vpnwatch`). Per-device VPN DNS enforcement so routed devices can't leak DNS to the home uplink (see `beryl-vpndns`). |
+| **VPN** | `/vpn/` | WireGuard tunnels: add from a pasted `.conf`, connect/disconnect, and route individual devices through a tunnel via [pbr](https://github.com/stangri/pbr) policies. Fail-closed by default; an optional watchdog can pause routing when a tunnel dies (see `vpnwatch`). Per-device VPN DNS enforcement so routed devices can't leak DNS to the home uplink (see `beryl-vpndns`). If the `tor` package is installed, a panel here starts and stops it and shows the proxy addresses for reaching `.onion` sites — see [Tor](#tor). |
 | **Wi-Fi uplink** | `/repeater/` | Repeater mode: scan, join, and forget upstream networks (hotel/cafe Wi-Fi). Shows the uplink's health and hands over between sources by route metric. |
 | **USB uplink** | `/tethering/` | USB tethering: iPhone (ipheth/usbmuxd), Android RNDIS, HiLink dongles, and NCM/QMI/MBIM modems, with APN/PIN configuration where the device needs it. Detects whatever netdev the device presents instead of assuming `eth2`. |
 | **Settings** | `/settings/` | Radio configuration (band, channel, width, PHY mode, transmit power, country) with the valid channel/width combinations derived live from what the hardware reports — you cannot select a combination the radio can't do. Plus SSID settings, hostname, timezone, LAN lease settings, device blocking, and radio restart. |
@@ -205,6 +205,31 @@ cp /tmp/beryl7/etc/dashboard/classmap.example /etc/dashboard/classmap
 To survive sysupgrades, append the installed paths to `/etc/sysupgrade.conf` — the installer does this for you, and the full list is in [install.sh](install.sh).
 
 </details>
+
+## Tor
+
+Optional. Install the package and a panel appears on the VPN page to start and stop it; without the package the panel is simply absent and nothing else changes.
+
+```sh
+apk add tor        # or: opkg install tor
+```
+
+The panel reports whether Tor is running, its bootstrap progress while it starts, and the two proxy addresses. Point a browser or app at either to open `.onion` sites:
+
+| Protocol | Address | For |
+|---|---|---|
+| SOCKS5 | `<router>:9050` | Tor Browser, Firefox, curl, most apps |
+| HTTP CONNECT | `<router>:9080` | iOS/macOS Wi-Fi proxy settings, which cannot take a SOCKS host |
+
+Configure them in `/etc/tor/torrc` — the console reads the port numbers from that file rather than assuming them.
+
+**Nothing is routed through Tor automatically.** Only traffic you explicitly send to the proxy uses it, so ordinary browsing keeps its normal path and its VPN policy, and no exit node is involved when you are reaching an onion service.
+
+**Why a proxy and not a transparent redirect.** The usual recipe — `server=/onion/127.0.0.1#9053` in dnsmasq plus an nftables redirect of Tor's virtual `10.192.0.0/10` range to a `TransPort` — cannot work on current OpenWrt. dnsmasq 2.93 implements RFC 7686 and answers `.onion` with NXDOMAIN from local config without ever forwarding the query; an identical `server=` line for any other TLD forwards correctly, and pointing `.onion` at a public resolver still returns NXDOMAIN. There is no option to disable it.
+
+The proxy is the better arrangement regardless: with SOCKS5h or HTTP CONNECT the onion hostname is resolved *inside* Tor, so it never reaches the router's resolver and never appears in its DNS cache or query log. The transparent design would have recorded every onion name you visited.
+
+**On anonymity.** This gives network-level anonymity for traffic sent through it. It does not make an ordinary browser anonymous — fingerprinting identifies you regardless of the path. For that, run Tor Browser on the device itself.
 
 ## Backup and restore
 

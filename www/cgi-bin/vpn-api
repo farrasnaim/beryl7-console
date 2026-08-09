@@ -153,6 +153,33 @@ case "$ACTION" in
 esac
 [ "$REQUEST_METHOD" = "POST" ] && guard_post
 
+# ============================ TOR ============================
+# Tor is an optional package. Everything here degrades to "not installed"
+# rather than erroring, so the console behaves normally on a router without it.
+#
+# Deliberately not confirmed and not gated: this is the same class of action as
+# connecting a tunnel — reversible, non-destructive, and something you want to
+# do quickly from a phone.
+if [ "$ACTION" = "torset" ]; then
+    [ -x /etc/init.d/tor ] || { printf '{"ok":false,"error":"Tor is not installed on this router"}'; exit 0; }
+    W=$(qs_get on)
+    case "$W" in 0|1) ;; *) printf '{"ok":false,"error":"bad state"}'; exit 0 ;; esac
+    if [ "$W" = "1" ]; then
+        /etc/init.d/tor enable >/dev/null 2>&1
+        # The SUBSHELL must drop stdout, not merely the command inside it: uhttpd
+        # holds the response open until every inherited descriptor is closed, so
+        # a bare `( ... ) &` would stall the request until Tor finished starting.
+        ( /etc/init.d/tor start ) >/dev/null 2>&1 &
+        logger -t vpn-api "tor enabled via web UI"
+    else
+        /etc/init.d/tor disable >/dev/null 2>&1
+        ( /etc/init.d/tor stop ) >/dev/null 2>&1 &
+        logger -t vpn-api "tor disabled via web UI"
+    fi
+    printf '{"ok":true,"on":%s}' "$( [ "$W" = "1" ] && echo true || echo false )"
+    exit 0
+fi
+
 # ============================ VPN FAIL MODE (travel policy) ============================
 # What should happen to a VPN-routed device when its tunnel is unreachable?
 #   closed (default) — block its traffic. Never leaks, but the device has NO
@@ -563,8 +590,46 @@ done
 
 FM=$(cat "$FAILMODE_FILE" 2>/dev/null); case "$FM" in open|closed) ;; *) FM=closed ;; esac
 AUTOP=$(grep -c . /etc/dashboard/vpn-autopaused 2>/dev/null); case "$AUTOP" in ''|*[!0-9]*) AUTOP=0 ;; esac
-printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"failmode":"%s","autopaused":%s,"tunnels":[%s],"policies":[%s]}' \
+
+# Tor status, or null when the package is absent, so the UI hides the panel
+# entirely rather than offering a control that cannot work. Every probe here
+# measured under a millisecond, which is what makes it safe on a 5s poll.
+if [ -x /etc/init.d/tor ]; then
+    # NOT `pgrep -x tor`: busybox pgrep matches the whole command line, and the
+    # init script launches "/usr/sbin/tor --runasdaemon 0 -f /tmp/torrc", so an
+    # exact-name match silently never fires and the panel reports OFF while Tor
+    # is plainly running. The init script's own check is correct and just as cheap.
+    T_RUN=$(/etc/init.d/tor running >/dev/null 2>&1 && echo true || echo false)
+    T_EN=$(/etc/init.d/tor enabled >/dev/null 2>&1 && echo true || echo false)
+    # Bootstrap percentage, for the "starting up" state. Tor logs it as it climbs
+    # 0 -> 100 over roughly 30s from cold.
+    #
+    # The log CANNOT be the only source: logread is a small ring buffer, so on a
+    # router that has been up a while those lines have long since scrolled away
+    # and the parse returns nothing — which would report a perfectly healthy Tor
+    # as 0%. When that happens, fall back to the question that actually matters:
+    # does Tor hold a network consensus? Without one it cannot build a circuit;
+    # with one it can. That file survives as long as the daemon does.
+    T_BS=$(logread -e Tor 2>/dev/null | sed -n 's/.*Bootstrapped \([0-9][0-9]*\)%.*/\1/p' | tail -1)
+    case "$T_BS" in
+        ''|*[!0-9]*)
+            T_DD=$(sed -n 's/^DataDirectory *//p' /etc/tor/torrc 2>/dev/null | tail -1)
+            [ -n "$T_DD" ] || T_DD=/var/lib/tor
+            [ -s "$T_DD/cached-microdesc-consensus" ] && T_BS=100 || T_BS=0 ;;
+    esac
+    [ "$T_RUN" = "true" ] || T_BS=0
+    T_SOCKS=$(sed -n 's/^SocksPort .*:\([0-9][0-9]*\).*/\1/p' /etc/tor/torrc 2>/dev/null | tail -1)
+    T_HTTP=$(sed -n 's/^HTTPTunnelPort .*:\([0-9][0-9]*\).*/\1/p' /etc/tor/torrc 2>/dev/null | tail -1)
+    TORJ=$(printf '{"running":%s,"enabled":%s,"bootstrap":%s,"socks":%s,"http":%s}' \
+        "$T_RUN" "$T_EN" "$T_BS" \
+        "$( [ -n "$T_SOCKS" ] && echo "$T_SOCKS" || echo null )" \
+        "$( [ -n "$T_HTTP" ] && echo "$T_HTTP" || echo null )")
+else
+    TORJ=null
+fi
+
+printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"failmode":"%s","autopaused":%s,"tor":%s,"tunnels":[%s],"policies":[%s]}' \
     "$(date +%s)" \
     "$( [ "$(uci -q get pbr.config.enabled)" = "1" ] && echo true || echo false )" \
-    "$FM" "$AUTOP" \
+    "$FM" "$AUTOP" "$TORJ" \
     "$TUNS" "$POLS"
