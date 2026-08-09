@@ -21,6 +21,23 @@ STATE=/tmp/.dashwan
 esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 jnum() { case "$1" in ''|*[!0-9-]*) printf '0' ;; *) printf '%s' "$1" ;; esac; }
 
+# Which UCI network an address belongs to, matched against the interfaces this
+# router actually serves rather than a fixed table of subnets. Assumes /24,
+# which is what a router hands out in practice; an unmatched address returns
+# empty and the caller leaves the zone unset rather than guessing.
+zone_of_ip() {
+    [ -n "$1" ] || return 0
+    _zp=$(printf '%s' "$1" | cut -d. -f1-3)
+    for _zn in $(uci -q show network 2>/dev/null | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+        _za=$(uci -q get network.$_zn.ipaddr 2>/dev/null)
+        [ -n "$_za" ] || continue
+        case "$_zn" in loopback) continue ;; esac
+        if [ "$(printf '%s' "${_za%%/*}" | cut -d. -f1-3)" = "$_zp" ]; then
+            printf '%s' "$_zn"; return 0
+        fi
+    done
+}
+
 # ---------- POST guard (CSRF origin check) ----------
 # NOTE: the body is read up-front (below), NOT here. `action` may arrive in the
 # POST body, so it must be available before we dispatch — reading it inside this
@@ -125,12 +142,7 @@ if [ "$ACTION" = "setdev" ]; then
         OLDIP=$(awk -v m="$(printf '%s' "$MAC" | tr 'A-F' 'a-f')" '$2==m {print $3; exit}' /tmp/dhcp.leases 2>/dev/null)
     fi
     if [ -z "$OLDZONE" ]; then
-        case "$OLDIP" in
-            192.168.9.*)  OLDZONE=guest ;;
-            192.168.10.*) OLDZONE=iot ;;
-            192.168.8.*)  OLDZONE=lan ;;
-            *)            OLDZONE="" ;;
-        esac
+        OLDZONE=$(zone_of_ip "$OLDIP")
     fi
 
     # Serialise concurrent saves. NOTE two traps here, both hit for real:
@@ -345,8 +357,24 @@ for sec in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/
     APS="$APS${APS:+,}{\"section\":\"$(esc "$sec")\",\"ifname\":\"$(esc "$ifn")\",\"network\":\"$(esc "$net")\",\"band\":\"$(esc "$band")\",\"macfilter\":\"$(esc "$mfilt")\",\"maclist\":[$mlj],\"info\":$info,\"assoc\":$assoc}"
 done
 
-# ---- air / survey (single phy: one dump returns both in-use bands) ----
-AIRJ=$(iw dev phy0.1-ap0 survey dump 2>/dev/null | awk '
+# ---- wireless interface names ----
+# Never assume a naming scheme. mac80211 lets the driver/config choose: this
+# board presents phy0.<radio>-ap<n>, stock OpenWrt presents wlan0/wlan1, and a
+# renamed ifname in UCI produces something else again. Globbing /sys/class/net
+# for a fixed prefix silently yields nothing on any of those, which would show
+# an empty client list rather than an error. `iw dev` is authoritative.
+WLIFS=$(iw dev 2>/dev/null | awk '/^\tInterface /{print $2}')
+
+# One interface per phy is enough for a survey: the dump covers the whole radio,
+# and on a single-phy dual-band device it returns both bands at once. Picking
+# one per phy keeps the fork count at the number of radios, not interfaces.
+SURVEYIFS=$(for _i in $WLIFS; do
+        _p=$(cat "/sys/class/net/$_i/phy80211/name" 2>/dev/null); [ -n "$_p" ] || _p="$_i"
+        printf '%s %s\n' "$_p" "$_i"
+    done | sort -u -k1,1 | awk '{print $2}')
+
+# ---- air / survey ----
+AIRJ=$(for _i in $SURVEYIFS; do iw dev "$_i" survey dump 2>/dev/null; done | awk '
     /frequency:/ { inuse = ($0 ~ /\[in use\]/); if (inuse) f=$2+0 }
     inuse && /channel active time/ { a[f]=$4+0 }
     inuse && /channel busy time/   { b[f]=$4+0 }
@@ -361,8 +389,8 @@ AIRJ=$(iw dev phy0.1-ap0 survey dump 2>/dev/null | awk '
 # airtime durations, per-antenna RSSI, ack signal, DTIM/beacon, expected throughput.
 # Bracket handling avoids awk char-classes entirely (busybox honours no escapes
 # inside [...]); index()/substr() is the portable way to read "-56, -57".
-STAJ=$(for _i in /sys/class/net/phy0.*; do
-        iw dev "${_i##*/}" station dump 2>/dev/null
+STAJ=$(for _i in $WLIFS; do
+        iw dev "$_i" station dump 2>/dev/null
       done | awk '
         /^Station/ { mac=toupper($2); next }
         mac=="" { next }
@@ -406,14 +434,18 @@ NBJ="{$NBJ}"
 # "Not currently associated" is NOT the same as "wired": a sleeping iPhone keeps
 # its DHCP lease and ARP entry and would be mislabelled Ethernet. The bridge FDB
 # is authoritative — it records which bridge port each MAC was last seen on:
-#   port eth1   -> genuinely wired
-#   port phy0.* -> Wi-Fi
-#   absent      -> idle / aged out (FDB entries expire ~5 min), link unknown
-# So each host is classified honestly rather than guessed at.
-WIFIMACS=$(for _i in /sys/class/net/phy0.*; do
-             iw dev "${_i##*/}" station dump 2>/dev/null | awk '/^Station/{print toupper($2)}'
+#   port eth1        -> genuinely wired
+#   port <wireless>  -> Wi-Fi
+#   absent           -> idle / aged out (FDB entries expire ~5 min), link unknown
+# So each host is classified honestly rather than guessed at. The wireless side
+# is matched against the real interface list (WLIFS) rather than a name prefix,
+# because the prefix differs between builds — see the note at WLIFS.
+WIFIMACS=$(for _i in $WLIFS; do
+             iw dev "$_i" station dump 2>/dev/null | awk '/^Station/{print toupper($2)}'
            done)
-FDBWIRED=$(bridge fdb show 2>/dev/null | awk '$3 !~ /^phy0/ && $3 != "" && !/permanent|self/ {print toupper($1)}' | sort -u)
+FDBWIRED=$(bridge fdb show 2>/dev/null | awk -v wl="$WLIFS" '
+    BEGIN { n=split(wl, a, "\n"); for (i=1; i<=n; i++) if (a[i] != "") WL[a[i]]=1 }
+    $3 != "" && !($3 in WL) && !/permanent|self/ { print toupper($1) }' | sort -u)
 LANPFX=$(uci -q get network.lan.ipaddr 2>/dev/null | cut -d. -f1-3)
 WIREDJ=""
 if [ -n "$LANPFX" ]; then
@@ -471,7 +503,7 @@ printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_t
     "$(esc "$HOST")" "$UP" "$TEMP" "$FAN" "$(esc "$LOAD")" "$(jnum "$MEMT")" "$(jnum "$MEMA")"
 # ---- per-lane byte counters -------------------------------------------------
 # Every lane drawn on the topology is exactly one netdev: each AP has its own
-# phy0.x-apN, and the wired lane is the LAN bridge's non-wireless port(s). One
+# wireless interface, and the wired lane is the LAN bridge's non-wireless port(s). One
 # counter per lane lets the client answer "is this lane carrying traffic" the
 # same way for all of them, instead of the three unrelated guesses it used to
 # make (station idle time for Wi-Fi, a hardcoded false for IoT, and merely
@@ -486,15 +518,17 @@ lb_add() {   # $1 = key, $2 = netdev
     case "$_lt" in ''|*[!0-9]*) _lt=0 ;; esac
     LBJ="$LBJ${LBJ:+,}\"$(esc "$1")\":$((_lr + _lt))"
 }
-for _wd in /sys/class/net/phy*; do
-    [ -d "$_wd" ] || continue
-    _wn=$(basename "$_wd")
+for _wn in $WLIFS; do
+    [ -d "/sys/class/net/$_wn" ] || continue
     lb_add "$_wn" "$_wn"
 done
 _wired=0
-for _bp in /sys/class/net/br-lan/brif/*; do
+LANDEV=$(uci -q get network.lan.device 2>/dev/null); [ -n "$LANDEV" ] || LANDEV=br-lan
+for _bp in /sys/class/net/$LANDEV/brif/*; do
     _bn=$(basename "$_bp" 2>/dev/null)
-    case "$_bn" in phy*|'*') continue ;; esac
+    [ "$_bn" = '*' ] && continue
+    # skip the wireless ports; what remains is the genuinely wired lane
+    case " $(echo $WLIFS) " in *" $_bn "*) continue ;; esac
     _br=$(cat "/sys/class/net/$_bn/statistics/rx_bytes" 2>/dev/null)
     _bt=$(cat "/sys/class/net/$_bn/statistics/tx_bytes" 2>/dev/null)
     case "$_br" in ''|*[!0-9]*) _br=0 ;; esac

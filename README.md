@@ -57,6 +57,7 @@ Points worth knowing:
 ## Repository layout
 
 ```
+install.sh                   first-time install / upgrade, idempotent
 www/
   os.css                     design system: tokens, themes, accents, components
   os.js                      shared runtime: nav, theming, dialogs, topology, polling
@@ -97,7 +98,7 @@ Every script carries a header comment explaining what it does and, more importan
 
 ## Requirements
 
-**Hardware.** Written for and tested on exactly one device: the GL.iNet Beryl 7 (GL-MT3600BE) — MediaTek Filogic, quad-core A53, Wi-Fi 7 (BE3600), one 2.4 GHz + one 5 GHz radio on a single PHY, temperature sensor and fan. Anything else will need porting (below).
+**Hardware.** Developed and used daily on a GL.iNet Beryl 7 (GL-MT3600BE) — MediaTek Filogic, quad-core A53, Wi-Fi 7 (BE3600), one 2.4 GHz + one 5 GHz radio on a single PHY, temperature sensor and fan. Radios, interfaces, and networks are all discovered at runtime rather than hardcoded, so a stock dual-band OpenWrt router should work without edits — but that is reasoning, not testing. See [Porting](#porting-to-other-routers).
 
 **Firmware.** Vanilla OpenWrt 25.12 (developed on GL's OpenWrt-based stock firmware, then migrated). uhttpd with CGI enabled — the stock configuration.
 
@@ -113,79 +114,73 @@ Every script carries a header comment explaining what it does and, more importan
 
 ## Installation
 
-Back up your router first. Then, from this repo's root:
+Back up your router first (LuCI → System → Backup, or `sysupgrade -b`). Then, from this repo's root:
 
 ```sh
-# copy the tree onto the router (tar over ssh — stock dropbear has no scp/sftp server)
-ssh root@192.168.8.1 "mkdir -p /tmp/beryl7"
-tar -cf - www usr etc | ssh root@192.168.8.1 "tar -xf - -C /tmp/beryl7"
+./install.sh 192.168.1.1
+```
 
-ssh root@192.168.8.1
+Pass whatever address your router is on — `192.168.1.1` is the OpenWrt default, GL.iNet ships `192.168.8.1`, and a hostname works too. With no argument it assumes the OpenWrt default. SSH key auth is expected; run `ssh-copy-id root@<router>` first if you haven't.
+
+The script:
+
+- checks it can reach the router, reports the model, and warns about optional packages that are missing rather than failing on them;
+- copies the pages, CGI, helper daemons, and hotplug scripts, then sets the executable bits (`cp` does not preserve them reliably, and a non-executable CGI returns 403 while a non-executable hotplug script is ignored *silently*);
+- seeds `/etc/dashboard/classmap` only if you don't already have one;
+- adds the cron entries and the `/etc/sysupgrade.conf` lines idempotently, so re-running never duplicates them;
+- prompts once for the write password and writes it into the CGIs;
+- fetches every endpoint from the router itself to confirm the install is live.
+
+Re-run it any time to upgrade — it preserves your classmap and your password.
+
+Then open `http://<router>/dashboard/`. LuCI is untouched at `http://<router>/cgi-bin/luci/`.
+
+<details>
+<summary>Installing by hand instead</summary>
+
+```sh
+R=192.168.1.1          # your router
+
+ssh root@$R "mkdir -p /tmp/beryl7"
+# tar over ssh, not scp: stock dropbear has no sftp server
+tar -cf - www usr etc | ssh root@$R "tar -xf - -C /tmp/beryl7"
+
+ssh root@$R
 cp -r /tmp/beryl7/www/* /www/
 cp /tmp/beryl7/usr/sbin/* /usr/sbin/
 cp -r /tmp/beryl7/etc/hotplug.d /tmp/beryl7/etc/init.d /tmp/beryl7/etc/sysctl.d /etc/
 
-# CGI scripts and system scripts must be executable — cp does not guarantee it
 chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
           /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
           /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
           /etc/hotplug.d/iface/* /etc/hotplug.d/net/30-tethering /etc/init.d/cpugovernor
 
-# cron: dashmon is required for the Overview's history panels; the watchdogs are optional
+# dashmon feeds the Overview history panels; the two watchdogs are optional
 crontab -l > /tmp/cron; cat /tmp/beryl7/etc/crontabs/root >> /tmp/cron; crontab /tmp/cron
 
-# device names/classes for the client list (edit to match your devices)
 mkdir -p /etc/dashboard
 cp /tmp/beryl7/etc/dashboard/classmap.example /etc/dashboard/classmap
+
+# set the write password — see Security below
+sed -i 's/"changeme"/"your-password"/' /www/cgi-bin/*-api
 
 # optional: load-based CPU scaling
 /etc/init.d/cpugovernor enable && /etc/init.d/cpugovernor start
 ```
 
-Then **set your own write password** (see Security below) and open `http://192.168.8.1/dashboard/`.
+To survive sysupgrades, append the installed paths to `/etc/sysupgrade.conf` — the installer does this for you, and the full list is in [install.sh](install.sh).
 
-To survive sysupgrades, add the installed paths to `/etc/sysupgrade.conf`:
-
-```
-/www/os.css
-/www/os.js
-/www/dashboard
-/www/vpn
-/www/repeater
-/www/tethering
-/www/settings
-/www/cgi-bin/dashboard-api
-/www/cgi-bin/rate-api
-/www/cgi-bin/vpn-api
-/www/cgi-bin/repeater-api
-/www/cgi-bin/tethering-api
-/www/cgi-bin/settings-api
-/usr/sbin/dashmon
-/usr/sbin/apwatch
-/usr/sbin/vpnwatch
-/usr/sbin/beryl-vpndns
-/etc/dashboard
-/etc/crontabs/root
-/etc/hotplug.d/iface/15-travel-dns
-/etc/hotplug.d/iface/31-tethering-clash
-/etc/hotplug.d/iface/99-repeater-iot
-/etc/hotplug.d/net/30-tethering
-/etc/hotplug.d/usb/40-usbmuxd
-/etc/init.d/cpugovernor
-/etc/sysctl.d/99-local.conf
-```
+</details>
 
 ## Security model — read this before deploying
 
 This console is designed for a **trusted home LAN** and makes deliberate trade-offs you should understand:
 
 - **Reading is unauthenticated.** Anyone on the LAN can see the dashboard. On the original network this is enforced at the firewall: guest and IoT zones have `input REJECT`, WAN is `DROP`, so only trusted-LAN clients can reach the pages at all. Replicate that or accept that everyone on your network can watch it.
-- **Writes are gated by a single shared password**, checked server-side only (it never appears in HTML or JS). It ships as `changeme` in four CGIs — **change it before deploying**:
+- **Writes are gated by a single shared password**, checked server-side only (it never appears in HTML or JS). `install.sh` prompts for it. It ships as `changeme`, so if you installed by hand — **change it before using the console**:
 
   ```sh
-  sed -i 's/PASSWORD="changeme"/PASSWORD="your-password-here"/' \
-      /www/cgi-bin/dashboard-api /www/cgi-bin/vpn-api \
-      /www/cgi-bin/repeater-api /www/cgi-bin/settings-api
+  sed -i 's/PASSWORD="changeme"/PASSWORD="your-password-here"/' /www/cgi-bin/*-api
   ```
 
 - **Some write actions intentionally skip the password** — VPN connect/disconnect and repeater join were judged low-risk-high-friction on a personal router. Grep the CGIs for `pw` handling and tighten to taste.
@@ -205,14 +200,28 @@ Things learned the hard way, encoded in the code and worth knowing before portin
 
 ## Porting to other routers
 
-The HTML/CSS/JS is portable as-is. The CGIs are where the hardware assumptions live:
+Nothing about your addressing, SSID naming, or radio layout is written into the code. What the console needs, it asks the router for:
 
-- Interface names (`br-lan`, the uplink resolution via the main routing table) are discovered, not hardcoded, but were only ever tested on this topology.
-- The radio settings page derives capabilities from `iw phy` output — it should adapt to other chipsets, but PHY parsing is exactly the kind of thing that varies.
-- Temperature/fan reads in `rate-api` use this board's sysfs paths.
-- Anything mentioning `192.168.8.0/24` assumes the GL.iNet default LAN.
+| Thing | How it's found |
+|---|---|
+| Wireless interface names | `iw dev` — never a `wlan*` or `phy0.*` glob, because the naming differs per build |
+| Radios and their bands | enumerated from UCI `wifi-device` sections; band comes from the radio, so `radio0` need not be 2.4 GHz |
+| Each radio's AP section | the `wifi-iface` pointing at that radio — `default_radio0`, `main2g`, or whatever yours is called |
+| A secondary SSID (IoT/guest) | the first AP on a network other than `lan`; the panel disappears when there is none |
+| Which network an address is on | matched against the interfaces UCI actually defines |
+| The LAN bridge | `network.lan.device` |
+| Radio capabilities | `iw phy` at request time, per radio — no hardcoded channel tables |
+| The uplink | whichever device holds the main-table default route |
 
-Expect an afternoon of reading and adjusting, not a drop-in install.
+The one name assumed is `lan` for the primary network, which is the OpenWrt default everywhere.
+
+What genuinely remains board-specific:
+
+- Temperature and fan reads use `thermal_zone0` and hwmon-by-name; both degrade to "unavailable" rather than breaking.
+- PHY capability parsing follows `iw phy` output, which does vary between drivers — the most likely thing to need a tweak.
+- The USB uplink page knows the driver set listed in `30-tethering`; an exotic modem may need adding.
+
+A stock dual-band OpenWrt router should work as-is. Verify against your own hardware before trusting it.
 
 ## Status
 

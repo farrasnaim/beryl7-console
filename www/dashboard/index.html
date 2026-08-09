@@ -99,6 +99,7 @@
 'use strict';
 var API = '/cgi-bin/dashboard-api';
 var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
+var LANNET = OS.LANNET, bandLabel = OS.bandLabel, netLabel = OS.netLabel;
 
 OS.buildShell('/dashboard/');
 
@@ -254,20 +255,25 @@ function renderTopo(d, M) {
 
     var lanes = [];
     M.aps.forEach(function (ap) {
-        if (ap.network !== 'lan') return;
-        var nm = ap.band === '5g' ? '5 GHz' : '2.4 GHz';
+        if (ap.network !== LANNET) return;
         var cnt = ((ap.assoc && ap.assoc.results) || []).length;
-        lanes.push({ name: nm, clients: cnt, active: !!act[ap.ifname] });
+        lanes.push({ name: bandLabel(ap.band), clients: cnt, active: !!act[ap.ifname] });
     });
-    var iot = M.aps.filter(function (a) { return a.network === 'iot'; });
-    if (iot.length) {
-        var icnt = 0, iact = false;
-        iot.forEach(function (a) {
-            icnt += ((a.assoc && a.assoc.results) || []).length;
-            if (act[a.ifname]) iact = true;
-        });
-        lanes.push({ name: 'IoT 2.4 GHz', clients: icnt, active: iact });
-    }
+    /* Any SSID on a network other than the primary one gets its own lane,
+       grouped by that network: an IoT SSID here, a guest SSID on another
+       router, none at all on a plain one. Nothing is named in advance. */
+    var extra = {}, extraOrder = [];
+    M.aps.forEach(function (ap) {
+        if (ap.network === LANNET) return;
+        var k = ap.network || 'other';
+        if (!extra[k]) { extra[k] = { clients: 0, active: false, band: ap.band }; extraOrder.push(k); }
+        extra[k].clients += ((ap.assoc && ap.assoc.results) || []).length;
+        if (act[ap.ifname]) extra[k].active = true;
+    });
+    extraOrder.forEach(function (k) {
+        lanes.push({ name: netLabel(k) + ' ' + bandLabel(extra[k].band),
+                     clients: extra[k].clients, active: extra[k].active });
+    });
     var ethN = M.devices.filter(function (v) { return v.medium === 'eth'; }).length;
     lanes.push({ name: 'Ethernet', clients: ethN, active: !!act.wired });
 
@@ -913,8 +919,8 @@ function renderTraffic(d, M) {
        brand-new IoT gadget is excluded without being known in advance. */
     var all = M.devices.filter(function (v) {
         if (!v.traffic || (v.traffic.dn + v.traffic.up) <= 0) return false;
-        if (v.zone === 'iot') return false;
-        return !v.links.some(function (l) { return l.net === 'iot'; });
+        if (v.zone && v.zone !== LANNET) return false;
+        return !v.links.some(function (l) { return l.net && l.net !== LANNET; });
     });
     var grand = 0;
     all.forEach(function (v) { grand += v.traffic.dn + v.traffic.up; });

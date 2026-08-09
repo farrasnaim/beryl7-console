@@ -1,15 +1,25 @@
-# Beryl 7 device class-map — snapshot from GL.iNet stock, 2026-08-08
-# Pipe-delimited, keyed by MAC (uppercase). Safe to copy onto vanilla OpenWrt
-# (e.g. /etc/dashboard/classmap) and read from a shell/ubus dashboard.
+# Device class-map — copy to /etc/dashboard/classmap and edit for your devices.
 #
-# Fields: MAC | alias | class | last_known_ip | intended_zone
-# Classes mirror gl-client (computer/phone/pad/laptop/television/watch/smartappliances)
-# so the dashboard's existing icon logic maps 1:1 with no edits.
+# It gives each device a readable name and an icon in the client list. Devices
+# missing from this file still appear; they are just labelled by hostname or MAC
+# and get a generic icon. Nothing here affects routing, DHCP, or firewalling.
 #
-# Zones: lan=192.168.8.0/24  guest=192.168.9.0/24  iot=192.168.10.0/24
-# NOTE: last_known_ip is DHCP-assigned and informational; the router will
-# re-lease on vanilla. Keep static leases if you want these IPs preserved.
+# Pipe-delimited, keyed by MAC (uppercase):
 #
-00:11:22:33:44:55|My Laptop|laptop|192.168.8.100|lan
-00:11:22:33:44:66|My Phone|phone|192.168.8.101|lan
-00:11:22:33:44:77|Smart Plug|smartappliances|192.168.10.50|iot
+#   MAC | name | class | last_known_ip | network
+#
+#   class    one of: computer phone pad laptop television watch smartappliances
+#            (the icon set the dashboard draws from)
+#   network  the UCI network the device belongs on — lan, or the name of your
+#            guest/IoT network if you run one. Optional: leave it empty and the
+#            dashboard works it out from the device's address.
+#
+# last_known_ip is informational only — a reminder of where the device usually
+# sits. DHCP may hand out something else; add a static lease if you need it
+# pinned.
+#
+# The addresses below are examples. Use whatever your router actually serves.
+#
+00:11:22:33:44:55|My Laptop|laptop|192.168.1.100|lan
+00:11:22:33:44:66|My Phone|phone|192.168.1.101|lan
+00:11:22:33:44:77|Smart Plug|smartappliances||iot

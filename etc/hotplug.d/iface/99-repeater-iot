@@ -1,22 +1,36 @@
 #!/bin/sh
 # /etc/hotplug.d/iface/99-repeater-iot
 #
-# Travel automation: the IoT SSID ("localhost") only makes sense at home, where
-# the smart plugs/bulbs live. When the router joins an upstream Wi-Fi (repeater
-# mode) you are travelling and none of that hardware is present, so the SSID is
+# Travel automation: a secondary SSID for smart-home gear only makes sense at
+# home, where that hardware lives. When the router joins an upstream Wi-Fi
+# (repeater mode) you are travelling and none of it is present, so the SSID is
 # just an extra broadcast — take it down. Bring it back the moment the uplink
 # goes away.
 #
 # Driven by hotplug rather than the /repeater page so it holds however the
 # uplink changes: the web UI, LuCI, a reboot, or the hotel AP dropping out.
+#
+# The section is found, not named: it is the first AP on a network other than
+# the primary one. Set IOT_SECTION below to pin a specific one if your router
+# has several secondary SSIDs and you only want one of them managed.
 
 [ "$INTERFACE" = "wwan" ] || exit 0
 
-IOT_SECTION="iot2g"
+IOT_SECTION=""
 LOCK=/tmp/.repeater-iot.lock
 LOG="logger -t repeater-iot"
 
-# nothing to do if the IoT SSID isn't configured on this router
+if [ -z "$IOT_SECTION" ]; then
+    for _s in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+        _m=$(uci -q get wireless.$_s.mode 2>/dev/null)
+        [ -z "$_m" ] || [ "$_m" = "ap" ] || continue
+        _n=$(uci -q get wireless.$_s.network 2>/dev/null)
+        [ -n "$_n" ] && [ "$_n" != "lan" ] && { IOT_SECTION="$_s"; break; }
+    done
+fi
+
+# nothing to do if this router has no secondary SSID
+[ -n "$IOT_SECTION" ] || exit 0
 [ "$(uci -q get wireless.$IOT_SECTION)" = "wifi-iface" ] || exit 0
 
 case "$ACTION" in

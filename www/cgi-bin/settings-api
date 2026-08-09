@@ -17,7 +17,64 @@
 
 PASSWORD="changeme"
 POST_MAX=4096
-PHY=phy0
+
+# ---- wireless topology discovery --------------------------------------------
+# Nothing below may assume a vendor's section names or radio ordering. GL.iNet
+# ships main2g/main5g/iot2g; stock OpenWrt generates default_radio0/1; a
+# hand-written config uses whatever the author typed. Likewise radio0 is not
+# necessarily 2.4 GHz — band comes from the radio, never from the index.
+LANNET=lan
+
+wifi_sections() { uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'; }
+RADIOS=$(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-device$/\1/p')
+
+# The AP section a radio's SSID settings belong to: prefer one on the primary
+# network, else the radio's first AP. Empty means the radio has no AP at all.
+ap_section_of() {   # $1 = radioN
+    _first=""
+    for _s in $(wifi_sections); do
+        [ "$(uci -q get wireless.$_s.device 2>/dev/null)" = "$1" ] || continue
+        _m=$(uci -q get wireless.$_s.mode 2>/dev/null)
+        [ -z "$_m" ] || [ "$_m" = "ap" ] || continue
+        [ -n "$_first" ] || _first="$_s"
+        if [ "$(uci -q get wireless.$_s.network 2>/dev/null)" = "$LANNET" ]; then
+            printf '%s' "$_s"; return 0
+        fi
+    done
+    printf '%s' "$_first"
+}
+
+# The first AP that is NOT on the primary network — the "IoT"/secondary SSID.
+# Most routers have none, and the UI hides the panel when this is empty.
+secondary_section() {
+    for _s in $(wifi_sections); do
+        _m=$(uci -q get wireless.$_s.mode 2>/dev/null)
+        [ -z "$_m" ] || [ "$_m" = "ap" ] || continue
+        _n=$(uci -q get wireless.$_s.network 2>/dev/null)
+        [ -n "$_n" ] && [ "$_n" != "$LANNET" ] && { printf '%s' "$_s"; return 0; }
+    done
+}
+
+# The mac80211 phy backing a radio — `iw phy` capability queries are per-phy.
+# Single-phy boards (this one, and most dual-band routers) short-circuit; only
+# genuinely multi-phy hardware pays for the ubus lookup.
+phy_of() {   # $1 = radioN
+    _n=0; _only=""
+    for _p in /sys/class/ieee80211/*; do
+        [ -d "$_p" ] || continue
+        _n=$((_n+1)); _only=${_p##*/}
+    done
+    [ "$_n" = "1" ] && { printf '%s' "$_only"; return 0; }
+    _if=$(ubus call network.wireless status 2>/dev/null | awk -v want="$1" '
+        /^\t"/ { gsub(/[\t":{ ]/,""); dev=$0 }
+        /"ifname":/ { if (dev==want) { gsub(/[",]/,""); print $2; exit } }')
+    if [ -n "$_if" ]; then
+        _pn=$(cat "/sys/class/net/$_if/phy80211/name" 2>/dev/null)
+        [ -n "$_pn" ] && { printf '%s' "$_pn"; return 0; }
+    fi
+    printf 'phy%s' "${1#radio}"
+}
+PHY=$(phy_of "$(printf '%s' "$RADIOS" | head -n1)")
 
 esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 jnum() { case "$1" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$1" ;; esac; }
@@ -142,15 +199,20 @@ gens_of() {     # $1 = iw band number
         printf "]"
     }'
 }
-band_num() { [ "$1" = "2g" ] && echo 1 || echo 2; }
+# iw band numbers: 1 = 2.4 GHz, 2 = 5 GHz, 4 = 6 GHz (3 is 60 GHz).
+band_num() { case "$1" in 2g) echo 1 ;; 6g) echo 4 ;; *) echo 2 ;; esac; }
 
 # ------------------------------------------------------------------- writes --
 if [ "$ACTION" = "setwifi" ]; then
     RADIO=$(qs_get_dec radio)
-    case "$RADIO" in radio0|radio1) ;; *) fail "bad radio" ;; esac
+    _okr=0
+    for _r in $RADIOS; do [ "$_r" = "$RADIO" ] && { _okr=1; break; }; done
+    [ "$_okr" = "1" ] || fail "bad radio"
     BAND=$(uci -q get wireless.$RADIO.band)
     BN=$(band_num "$BAND")
-    IFSEC=$([ "$RADIO" = "radio0" ] && echo main2g || echo main5g)
+    PHY=$(phy_of "$RADIO")
+    IFSEC=$(ap_section_of "$RADIO")
+    [ -n "$IFSEC" ] || fail "this radio has no access point configured"
 
     EN=$(qs_get_dec enabled); case "$EN" in 0|1) ;; *) fail "bad enabled flag" ;; esac
     SSID=$(qs_get_dec ssid | tr -d '\n\r\t')
@@ -201,6 +263,9 @@ if [ "$ACTION" = "setwifi" ]; then
 fi
 
 if [ "$ACTION" = "setiot" ]; then
+    IOTSEC=$(secondary_section)
+    [ -n "$IOTSEC" ] || fail "no secondary network is configured on this router"
+    IOTRADIO=$(uci -q get wireless.$IOTSEC.device)
     EN=$(qs_get_dec enabled); case "$EN" in 0|1) ;; *) fail "bad enabled flag" ;; esac
     SSID=$(qs_get_dec ssid | tr -d '\n\r\t')
     KEY=$(qs_get_dec key | tr -d '\n\r')
@@ -210,12 +275,12 @@ if [ "$ACTION" = "setiot" ]; then
         KLEN=$(printf '%s' "$KEY" | wc -c)
         [ "$KLEN" -ge 8 ] && [ "$KLEN" -le 63 ] || fail "password must be 8-63 characters"
     fi
-    uci set wireless.iot2g.disabled="$([ "$EN" = "1" ] && echo 0 || echo 1)"
-    uci set wireless.iot2g.ssid="$SSID"
-    [ -n "$KEY" ] && uci set wireless.iot2g.key="$KEY"
+    uci set wireless.$IOTSEC.disabled="$([ "$EN" = "1" ] && echo 0 || echo 1)"
+    uci set wireless.$IOTSEC.ssid="$SSID"
+    [ -n "$KEY" ] && uci set wireless.$IOTSEC.key="$KEY"
     uci commit wireless
-    logger -t settings "iot network applied via web UI"
-    ( sleep 1; wifi reload radio0 ) >/dev/null 2>&1 &
+    logger -t settings "secondary network ($IOTSEC) applied via web UI"
+    ( sleep 1; wifi reload ${IOTRADIO:-} ) >/dev/null 2>&1 &
     printf '{"ok":true}'
     exit 0
 fi
@@ -306,7 +371,8 @@ radio_json() {  # $1 = radioN
     R="$1"
     BAND=$(uci -q get wireless.$R.band)
     BN=$(band_num "$BAND")
-    IFSEC=$([ "$R" = "radio0" ] && echo main2g || echo main5g)
+    PHY=$(phy_of "$R")
+    IFSEC=$(ap_section_of "$R")
     DIS=$(uci -q get wireless.$R.disabled); [ "$DIS" = "1" ] || DIS=0
     CH=$(uci -q get wireless.$R.channel)
     HT=$(uci -q get wireless.$R.htmode)
@@ -341,12 +407,26 @@ radio_json() {  # $1 = radioN
         "$(esc "$SSID")" "$(esc "$ENC")" "$([ "$IDIS" = "1" ] && echo true || echo false)"
 }
 
-IOT_SSID=$(uci -q get wireless.iot2g.ssid)
-IOT_DIS=$(uci -q get wireless.iot2g.disabled); [ "$IOT_DIS" = "1" ] || IOT_DIS=0
-
 printf '{"ok":true,"ts":%s,' "$NOW"
-printf '"wireless":{"radios":[%s,%s],' "$(radio_json radio0)" "$(radio_json radio1)"
-printf '"iot":{"ssid":"%s","disabled":%s}},' "$(esc "$IOT_SSID")" "$([ "$IOT_DIS" = "1" ] && echo true || echo false)"
+
+RJ=""
+for _r in $RADIOS; do RJ="$RJ${RJ:+,}$(radio_json "$_r")"; done
+printf '"wireless":{"radios":[%s],' "$RJ"
+
+# The secondary network is optional: emit null (not an empty object) so the UI
+# can drop the panel entirely rather than render a form with nothing behind it.
+IOTSEC=$(secondary_section)
+if [ -n "$IOTSEC" ]; then
+    IOT_SSID=$(uci -q get wireless.$IOTSEC.ssid)
+    IOT_DIS=$(uci -q get wireless.$IOTSEC.disabled); [ "$IOT_DIS" = "1" ] || IOT_DIS=0
+    IOT_DEV=$(uci -q get wireless.$IOTSEC.device)
+    IOT_BAND=$(uci -q get wireless.$IOT_DEV.band)
+    printf '"iot":{"ssid":"%s","disabled":%s,"band":"%s","network":"%s"}},' \
+        "$(esc "$IOT_SSID")" "$([ "$IOT_DIS" = "1" ] && echo true || echo false)" \
+        "$(esc "$IOT_BAND")" "$(esc "$(uci -q get wireless.$IOTSEC.network)")"
+else
+    printf '"iot":null},'
+fi
 printf '"lan":{"ipaddr":"%s","netmask":"%s","dhcp":{"start":%s,"limit":%s,"leasetime":"%s"}},' \
     "$(esc "$(uci -q get network.lan.ipaddr)")" "$(esc "$(uci -q get network.lan.netmask)")" \
     "$(jnum "$(uci -q get dhcp.lan.start)")" "$(jnum "$(uci -q get dhcp.lan.limit)")" \

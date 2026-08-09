@@ -36,9 +36,14 @@ if [ -d "$LED" ]; then
 fi
 
 # ---- presence: join/leave events (band moves are deliberately NOT events) ----
-cur=$(for i in /sys/class/net/phy0.*; do
-        ifc=${i##*/}
-        case "$ifc" in phy0.0-*) b=2.4 ;; phy0.1-*) b=5 ;; *) b=- ;; esac
+# Interfaces come from `iw dev`, and each one's band from the frequency it is
+# actually on — never from its name. Interface naming is a build detail
+# (phy0.<radio>-ap<n> here, wlan0/wlan1 on stock OpenWrt), so a name pattern
+# would quietly record nothing on another router.
+cur=$(iw dev 2>/dev/null | awk '
+        /^\tInterface /  { ifc=$2 }
+        /^\t\tchannel /  { f=$3; sub(/\(/,"",f); if (ifc != "") print ifc, (f+0 < 3000 ? "2.4" : (f+0 < 5955 ? "5" : "6")) }
+      ' | while read -r ifc b; do
         iw dev "$ifc" station dump 2>/dev/null | awk -v b="$b" '/^Station/{print $2, b}'
       done | sort -u)
 if [ -f "$SNAP" ]; then

@@ -83,6 +83,21 @@ function signalWord(dbm) {
     var b = bars(dbm);
     return ['no signal', 'poor', 'weak', 'good', 'excellent'][b];
 }
+/* The UCI name of the router's primary network. OpenWrt calls it "lan" out of
+   the box and every guide, LuCI screen and netifd default agrees, so it is the
+   one name worth assuming — everything else (extra SSIDs, their networks, their
+   bands) is read back from the router instead of being written down here. */
+var LANNET = 'lan';
+function bandLabel(b) {
+    return b === '2g' ? '2.4 GHz' : b === '5g' ? '5 GHz' : b === '6g' ? '6 GHz' : (b || 'Radio');
+}
+/* "iot" -> "IoT", "guest" -> "Guest": a network's own name, presented. */
+function netLabel(n) {
+    if (!n) return 'Secondary';
+    if (n.toLowerCase() === 'iot') return 'IoT';
+    return n.charAt(0).toUpperCase() + n.slice(1);
+}
+
 var GEN = { 0: 'Wi-Fi 4', 4: 'Wi-Fi 4', 5: 'Wi-Fi 5', 6: 'Wi-Fi 6', 7: 'Wi-Fi 7' };
 function genOf(st) {
     var r = (st && (st.tx || st.rx)) || {};
@@ -1148,6 +1163,7 @@ global.OS = {
     I: I, CLASS_ICON: CLASS_ICON,
     bytes: bytes, rate: rate, brate: brate, dur: dur, ago: ago, clock: clock,
     bars: bars, signalWord: signalWord, genOf: genOf, GEN: GEN,
+    LANNET: LANNET, bandLabel: bandLabel, netLabel: netLabel,
     meter: meter, readout: readout, chip: chip, emptyState: emptyState, note: note,
     spark: spark, ribbon: ribbon,
     sourcesList: sourcesList, failoverControl: failoverControl,

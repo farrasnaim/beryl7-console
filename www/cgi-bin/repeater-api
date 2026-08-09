@@ -160,13 +160,15 @@ ensure_wwan() {
 # Verified side by side: iw saw 11 genuine 5 GHz APs on the same interface where
 # iwinfo saw none. Most hotel APs are 5 GHz, so this matters.
 if [ "$ACTION" = "scan" ]; then
-    # one AP interface per radio, so both bands get scanned
-    IF24=$(ubus call network.wireless status 2>/dev/null | awk '
-        /"section":/ { gsub(/[",]/,""); s=$2 }
-        /"ifname":/  { gsub(/[",]/,""); if (s=="main2g") { print $2; exit } }')
-    IF5=$(ubus call network.wireless status 2>/dev/null | awk '
-        /"section":/ { gsub(/[",]/,""); s=$2 }
-        /"ifname":/  { gsub(/[",]/,""); if (s=="main5g") { print $2; exit } }')
+    # One AP interface per band, so both bands get scanned. Found by the
+    # frequency each interface is running on rather than by section name —
+    # main2g/main5g are this vendor's labels, not OpenWrt's.
+    IF24=$(iw dev 2>/dev/null | awk '
+        /^\tInterface / { ifc=$2 }
+        /^\t\tchannel / { f=$3; sub(/\(/,"",f); if (f+0 < 3000) { print ifc; exit } }')
+    IF5=$(iw dev 2>/dev/null | awk '
+        /^\tInterface / { ifc=$2 }
+        /^\t\tchannel / { f=$3; sub(/\(/,"",f); if (f+0 >= 3000) { print ifc; exit } }')
 
     # ONE active sweep, not one per radio. Both radios sit on the same PHY, so a
     # single scan already covers every channel in both bands — issuing a second
@@ -424,11 +426,23 @@ LASTERR=""
 [ -f "$FAILMARK" ] && LASTERR=$(cat "$FAILMARK" 2>/dev/null)
 printf '"connecting":%s,"connect_timeout":%s,"last_error":"%s",' \
     "$CONNECTING" "$CONNECT_TIMEOUT" "$(esc "$LASTERR")"
-# is the IoT SSID currently on? (auto-managed with the uplink — see the
-# /etc/hotplug.d/iface/99-repeater-iot script)
-IOTDIS=$(uci -q get wireless.iot2g.disabled); [ -n "$IOTDIS" ] || IOTDIS=0
-printf '"iot_ssid":{"name":"%s","enabled":%s},' \
-    "$(esc "$(uci -q get wireless.iot2g.ssid)")" \
-    "$( [ "$IOTDIS" = "1" ] && echo false || echo true )"
+# The secondary SSID, if this router has one: the first AP that is not on the
+# primary network. Auto-managed with the uplink — see the hotplug script at
+# /etc/hotplug.d/iface/99-repeater-iot. Emits null where there is none.
+IOTSEC=""
+for _s in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+    _m=$(uci -q get wireless.$_s.mode 2>/dev/null)
+    [ -z "$_m" ] || [ "$_m" = "ap" ] || continue
+    _n=$(uci -q get wireless.$_s.network 2>/dev/null)
+    [ -n "$_n" ] && [ "$_n" != "lan" ] && { IOTSEC="$_s"; break; }
+done
+if [ -n "$IOTSEC" ]; then
+    IOTDIS=$(uci -q get wireless.$IOTSEC.disabled); [ -n "$IOTDIS" ] || IOTDIS=0
+    printf '"iot_ssid":{"name":"%s","enabled":%s},' \
+        "$(esc "$(uci -q get wireless.$IOTSEC.ssid)")" \
+        "$( [ "$IOTDIS" = "1" ] && echo false || echo true )"
+else
+    printf '"iot_ssid":null,'
+fi
 printf '"scan_note":"Scans both bands via iw (iwinfo cannot scope a scan to the 5 GHz radio on this multi-radio PHY)."'
 printf '}'

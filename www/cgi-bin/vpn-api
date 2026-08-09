@@ -376,7 +376,15 @@ if [ "$ACTION" = "add" ]; then
         uci set firewall.$ZONE.forward='REJECT'
         uci set firewall.$ZONE.masq='1'
         uci set firewall.$ZONE.mtu_fix='1'
-        for src in lan iot guest; do
+        # Whichever zones are already allowed out to the internet are the ones
+        # that should be allowed into a tunnel — derived, so a router with only
+        # 'lan' gets one rule and one with guest/iot networks gets theirs too,
+        # without this file knowing any of their names.
+        SRCZONES=$(uci -q show firewall 2>/dev/null |
+            sed -n "s/^firewall\.\([^.]*\)\.dest='wan'$/\1/p" |
+            while read -r _f; do uci -q get firewall.$_f.src 2>/dev/null; done | sort -u)
+        [ -n "$SRCZONES" ] || SRCZONES=lan
+        for src in $SRCZONES; do
             f=$(uci add firewall forwarding)
             uci set firewall.$f.src="$src"
             uci set firewall.$f.dest='wg'

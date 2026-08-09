@@ -26,22 +26,19 @@
       <span class="sect__m" id="wifiMeta"></span>
     </div>
     <div class="face">
-      <div class="grid g2">
-        <section class="panel" id="p-radio0">
-          <div class="panel__h"><span class="panel__t">2.4 GHz</span>
-            <div class="panel__aside" id="st-radio0"></div></div>
-          <div class="panel__b" id="b-radio0"><div class="sk" style="width:60%"></div>
-            <div class="sk" style="width:45%;margin-top:10px"></div></div>
-        </section>
-        <section class="panel" id="p-radio1">
-          <div class="panel__h"><span class="panel__t">5 GHz</span>
-            <div class="panel__aside" id="st-radio1"></div></div>
-          <div class="panel__b" id="b-radio1"><div class="sk" style="width:60%"></div>
+      <!-- Panels are built from the radios the router actually reports: two on
+           this board, but one on a single-band device and three where 6 GHz
+           exists. Titles come from each radio's band, never its index. -->
+      <div class="grid g2" id="radioGrid">
+        <section class="panel">
+          <div class="panel__b"><div class="sk" style="width:60%"></div>
             <div class="sk" style="width:45%;margin-top:10px"></div></div>
         </section>
       </div>
-      <section class="panel" style="border-top:1px solid var(--line)">
-        <div class="panel__h"><span class="panel__t">IoT network</span>
+      <!-- Hidden until the router turns out to have a network beside the main
+           one; most do not. -->
+      <section class="panel" id="p-iot" hidden style="border-top:1px solid var(--line)">
+        <div class="panel__h"><span class="panel__t" id="iotTitle">Secondary network</span>
           <div class="panel__aside" id="st-iot"></div></div>
         <div class="panel__b" id="b-iot"></div>
       </section>
@@ -85,6 +82,8 @@ var API = '/cgi-bin/settings-api';
 var DASH = '/cgi-bin/dashboard-api';   /* owns radio restart + the MAC filter */
 var TETH = '/cgi-bin/tethering-api';   /* owns the uplink metrics */
 var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
+var bandLabel = OS.bandLabel;
+function netLabel(n) { return OS.netLabel(n) + ' network'; }
 
 OS.buildShell('/settings/');
 
@@ -283,7 +282,7 @@ function renderRadio(r) {
 
     var ar = applyRow();
     /* recovery, not configuration: kick the band without touching the form */
-    var band = r.band === '2g' ? '2.4 GHz' : '5 GHz';
+    var band = bandLabel(r.band);
     var rst = el('button', 'btn btn--ghost btn--sm', 'Restart radio');
     rst.type = 'button';
     rst.style.marginLeft = 'auto';
@@ -316,12 +315,12 @@ function renderRadio(r) {
         if (!modeSel.value) return;
         var turningOff = !en.input.checked && !r.disabled;
         var body = turningOff
-            ? 'This turns the ' + (r.band === '2g' ? '2.4 GHz' : '5 GHz') + ' radio off. Every device on it ' +
+            ? 'This turns the ' + bandLabel(r.band) + ' radio off. Every device on it ' +
               'loses Wi-Fi until the radio is enabled again.'
-            : 'Applying reloads the ' + (r.band === '2g' ? '2.4 GHz' : '5 GHz') + ' radio: devices on it drop ' +
+            : 'Applying reloads the ' + bandLabel(r.band) + ' radio: devices on it drop ' +
               'for 10–15 seconds and rejoin on their own. If this device is one of them, the page loses ' +
               'contact briefly and recovers.';
-        OS.askPassword('Apply ' + (r.band === '2g' ? '2.4 GHz' : '5 GHz') + ' settings', body,
+        OS.askPassword('Apply ' + bandLabel(r.band) + ' settings', body,
                        'Apply', turningOff).then(function (pw) {
             if (pw == null) return;
             OS.act(ar.apply, API, {
@@ -335,14 +334,42 @@ function renderRadio(r) {
     });
 }
 
+/* Build one panel per reported radio, once. Rebuilding on every poll would
+   throw away in-progress edits and the unsaved chip that guards them. */
+function ensureRadioPanels(radios) {
+    var grid = $('#radioGrid');
+    if (grid.getAttribute('data-n') === String(radios.length)) return;
+    clear(grid);
+    grid.setAttribute('data-n', String(radios.length));
+    var seen = {};
+    radios.forEach(function (r) { seen[r.band] = (seen[r.band] || 0) + 1; });
+    radios.forEach(function (r) {
+        var sec = el('section', 'panel'); sec.id = 'p-' + r.id;
+        var h = el('div', 'panel__h');
+        /* two radios on the same band would otherwise get identical titles */
+        h.appendChild(el('span', 'panel__t',
+            bandLabel(r.band) + (seen[r.band] > 1 ? ' (' + r.id + ')' : '')));
+        var aside = el('div', 'panel__aside'); aside.id = 'st-' + r.id;
+        h.appendChild(aside);
+        sec.appendChild(h);
+        var b = el('div', 'panel__b'); b.id = 'b-' + r.id;
+        sec.appendChild(b);
+        grid.appendChild(sec);
+    });
+}
+
 function renderIot(d) {
     var iot = d.wireless.iot;
+    var panel = $('#p-iot');
+    if (!iot) { panel.hidden = true; return; }
+    panel.hidden = false;
+    setTxt($('#iotTitle'), netLabel(iot.network));
     var st = $('#st-iot'); clear(st);
     st.appendChild(iot.disabled ? OS.stateWord('OFF', 'idle') : OS.stateWord('UP', 'ok'));
     if (dirty.iot) { markDirty('iot', true); return; }
     var box = $('#b-iot'); clear(box);
 
-    box.appendChild(nowLine(['2.4 GHz', 'isolated — its devices cannot reach the main network']));
+    box.appendChild(nowLine([bandLabel(iot.band), 'isolated — its devices cannot reach the main network']));
 
     var form = el('div');
     var g = el('div', 'fgrid');
@@ -362,7 +389,7 @@ function renderIot(d) {
     ar.reset.addEventListener('click', function () { markDirty('iot', false); renderIot(d); });
     ar.apply.addEventListener('click', function () {
         OS.askPassword('Apply IoT network settings',
-            'Applying reloads the 2.4 GHz radio briefly — smart-home devices drop and rejoin on their own.',
+            'Applying reloads the ' + bandLabel(iot.band) + ' radio briefly — devices on it drop and rejoin on their own.',
             'Apply', !en.input.checked && !iot.disabled).then(function (pw) {
             if (pw == null) return;
             OS.act(ar.apply, API, {
@@ -379,7 +406,7 @@ function renderIot(d) {
    this panel reads it from there — fetched once and after each change, not on
    the poll: the block list changes only when someone changes it. */
 var acl = null;          /* { devices:[{mac,name}], aps:[{section,ssid,band}], blocked:[...] } */
-var BANDNAME = { '2g': '2.4 GHz', '5g': '5 GHz' };
+var BANDNAME = { '2g': '2.4 GHz', '5g': '5 GHz', '6g': '6 GHz' };
 
 function loadAcl() {
     return fetch(DASH, { cache: 'no-store' }).then(function (r) { return r.json(); })
@@ -725,6 +752,7 @@ function render(d) {
     if (!d || !d.ok) return;
     last = d;
     var radios = d.wireless.radios;
+    ensureRadioPanels(radios);
     radios.forEach(renderRadio);
     renderIot(d);
     renderLan(d);
