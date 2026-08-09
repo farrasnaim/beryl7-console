@@ -237,7 +237,7 @@ That is a deliberate choice, not an oversight. This was built for a personal tra
 
 **The boundary is the firewall, not the UI.** That is where the decision has to hold:
 
-- WAN input `DROP`, so nothing from the internet ever reaches port 80.
+- WAN input `DROP` or `REJECT` (the reference router runs `REJECT`, OpenWrt's default), so nothing from the internet ever reaches port 80.
 - Guest and IoT zones `input REJECT`, so devices you don't trust — a friend's laptop, a smart plug — cannot reach the console either.
 - Only the trusted LAN can load it, and everyone on the trusted LAN is assumed to be allowed to run the router.
 - No port forwards to the router's own web server. Ever.
