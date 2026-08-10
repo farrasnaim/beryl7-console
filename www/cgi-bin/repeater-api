@@ -383,6 +383,14 @@ if [ -n "$STAIF" ]; then
     QUAL=$(printf '%s' "$INFO" | awk -F'[:,]' '/"quality":/{gsub(/ /,"",$2); print $2; exit}')
     case "$SIG" in ''|*[!0-9-]*) SIG=0 ;; esac
     case "$QUAL" in ''|*[!0-9-]*) QUAL=0 ;; esac
+    # iwinfo's "bssid" is this interface's OWN MAC on this mt76 build — the
+    # router's STA address, not the access point it joined. Reporting that puts
+    # the router's own identity in the UI exactly where the uplink's belongs,
+    # which is worse than showing nothing: it looks like a real answer. `iw dev
+    # <sta> link` names the AP correctly, so prefer it and keep iwinfo only for
+    # drivers where iw carries no link line.
+    _lb=$(iw dev "$STAIF" link 2>/dev/null | awk '/^Connected to /{print toupper($3); exit}')
+    [ -n "$_lb" ] && BSSID="$_lb"
     [ -n "$UPSSID" ] && [ "$BSSID" != "00:00:00:00:00:00" ] && CONN=true
 fi
 
