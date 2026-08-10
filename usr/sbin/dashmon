@@ -94,15 +94,16 @@ _active=$(printf '%s\n' "$_raw" | awk -v th="$THRESH" 'NF>=3 && $2>=th')
 if [ -n "$_active" ]; then
     _ue=$(printf '%s\n' "$_active" | awk 'NR==1{print $3+0}')
     # signature check, only once the loop is emitting ubus errors: an odhcp6c
-    # whose parent is not netifd survived a netifd restart, and is holding the
-    # ubus name every replacement is dying on.
+    # that survived a netifd restart is still holding the ubus name every
+    # replacement dies on. PPid 1 is the tell — a healthy client is parented by
+    # netifd, and the short-lived child odhcp6c forks to run its state script is
+    # parented by odhcp6c, so only a genuine orphan has reparented to procd.
     SIG=-
     if [ "$_ue" -gt 0 ]; then
         for _p in /proc/[0-9]*; do
             [ "$(cat "$_p/comm" 2>/dev/null)" = "odhcp6c" ] || continue
-            _pp=$(awk '/^PPid:/{print $2}' "$_p/status" 2>/dev/null)
-            [ "$(cat "/proc/$_pp/comm" 2>/dev/null)" = "netifd" ] \
-                || { SIG=orphan-odhcp6c; break; }
+            [ "$(awk '/^PPid:/{print $2}' "$_p/status" 2>/dev/null)" = "1" ] \
+                && { SIG=orphan-odhcp6c; break; }
         done
     fi
     _new=0; [ -f "$FLAP" ] || _new=1

@@ -539,6 +539,10 @@ FLJ=$(awk '
 FLLAST=$(tail -n 1 /tmp/.flaplog 2>/dev/null \
     | awk 'NF>=3 {printf "{\"ts\":%d,\"iface\":\"%s\",\"per_min\":%d}", $1, $2, $3}')
 [ -n "$FLLAST" ] || FLLAST=null
+# what apwatch did about it, so recovery is never silent: "<ts> <iface> <try>"
+FLFIX=$(awk 'NF>=3 {printf "{\"ts\":%d,\"iface\":\"%s\",\"tries\":%d,\"max\":2}", $1, $2, $3}' \
+    /tmp/.flapfix 2>/dev/null)
+[ -n "$FLFIX" ] || FLFIX=null
 
 # ---- join/leave events (dashmon), names joined from the classmap ----
 EVJ=$(tail -n 12 /tmp/.presence 2>/dev/null | awk -F'|' '
@@ -652,7 +656,7 @@ case "$NLJ" in '{'*'}') ;; *) NLJ='null' ;; esac
 printf '{"ok":true,"ts":%s,' "$NOW"
 printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_total":%s,"mem_avail":%s},' \
     "$(esc "$HOST")" "$UP" "$TEMP" "$FAN" "$(esc "$LOAD")" "$(jnum "$MEMT")" "$(jnum "$MEMA")"
-printf '"flap":%s,"flap_last":%s,' "$FLJ" "$FLLAST"
+printf '"flap":%s,"flap_last":%s,"flap_fix":%s,' "$FLJ" "$FLLAST" "$FLFIX"
 # ---- per-lane byte counters -------------------------------------------------
 # Every lane drawn on the topology is exactly one netdev: each AP has its own
 # wireless interface, and the wired lane is the LAN bridge's non-wireless port(s). One
