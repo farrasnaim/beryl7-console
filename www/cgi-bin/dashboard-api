@@ -490,17 +490,100 @@ EVJ=$(tail -n 12 /tmp/.presence 2>/dev/null | awk -F'|' '
     }' "$CLASSMAP" -)
 EVJ="[$EVJ]"
 
-# ---- per-device traffic accounting (nlbwmon; null until it has data) ----
-# The accounting PERIOD is reported alongside the data, because nlbwmon's
-# default is monthly (database_interval=1 → restart on the 1st) and a panel
-# labelled "today" would then be quietly showing weeks of traffic. The client
-# derives its own heading from this rather than assuming. Measured at 0 ms.
-NLPER=$(nlbw -c list 2>/dev/null | tail -1)
+# ---- per-device traffic accounting (nlbwmon) --------------------------------
+# Two problems with using nlbwmon's numbers as "today", both solved here.
+#
+# 1. Its accounting period is not a day. The default (database_interval=1) means
+#    "restart on the 1st of the month", so a panel labelled today would quietly
+#    show weeks. The period is therefore reported alongside the data and the
+#    client titles the panel from it rather than assuming.
+#
+# 2. Even set to a daily period, nlbwmon anchors periods to UTC, so its counters
+#    reset at 07:00 in this timezone rather than at local midnight.
+#
+# So dashmon records a baseline at the first minute of each LOCAL day, and the
+# real figure is derived from it below. When anything about that baseline is
+# missing or inconsistent, this falls back to nlbwmon's raw period totals and
+# says so via nlbw_daily — reporting an honest wider window beats inventing a
+# number.
+#
+# `-c list` is newest-first, so the current period is the FIRST line. Read once
+# and split locally — this endpoint is polled every 5s, so a second fork here
+# would be paid forever for a value already in hand.
+NLLIST=$(nlbw -c list 2>/dev/null)
+NLPER=$(printf '%s\n' "$NLLIST" | head -1)
+NLPREV=$(printf '%s\n' "$NLLIST" | sed -n '2p')
 case "$NLPER" in
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
     *) NLPER="" ;;
 esac
-NLJ=$(nlbw -c json -g mac 2>/dev/null)
+
+DAILYF=/etc/dashboard/nlbw-daily
+NLDAILY=false
+SNAPDAY=$(sed -n 's/^day=//p' "$DAILYF" 2>/dev/null | head -1)
+SNAPPER=$(sed -n 's/^period=//p' "$DAILYF" 2>/dev/null | head -1)
+CLOSED=""
+
+if [ -n "$NLPER" ] && [ -n "$SNAPPER" ] && [ "$SNAPDAY" = "$(date +%Y-%m-%d)" ]; then
+    if [ "$NLPER" = "$SNAPPER" ]; then
+        NLDAILY=true                       # no rollover yet today
+    elif [ "$NLPREV" = "$SNAPPER" ]; then
+        # Rolled over once since local midnight, which is the normal case for a
+        # daily period: the baseline's own period is now closed, so the part of
+        # it that belongs to today is its final total minus the baseline.
+        CLOSED=$(nlbw -c csv -g mac -t "$SNAPPER" 2>/dev/null | awk -F'\t' 'NR>1{
+            gsub(/"/,"",$1); gsub(/"/,"",$3); gsub(/"/,"",$5)
+            if ($1 != "") print $1, $3, $5 }')
+        [ -n "$CLOSED" ] && NLDAILY=true
+    fi
+    # More than one rollover since midnight means the period is shorter than a
+    # day and this arithmetic no longer holds — fall through to raw totals.
+fi
+
+if [ "$NLDAILY" = "true" ]; then
+    NLJ=$( {
+        awk '!/=/ && NF>=3 {print "B", $1, $2, $3}' "$DAILYF" 2>/dev/null
+        [ -n "$CLOSED" ] && printf '%s\n' "$CLOSED" | awk '{print "C", $1, $2, $3}'
+        nlbw -c csv -g mac 2>/dev/null | awk -F'\t' 'NR>1{
+            for (i=1; i<=6; i++) gsub(/"/,"",$i)
+            if ($1 != "") print "X", $1, $2, $3, $4, $5, $6 }'
+      } | awk '
+        $1=="B" { brx[$2]=$3+0; btx[$2]=$4+0; next }
+        $1=="C" { crx[$2]=$3+0; ctx[$2]=$4+0; seenC[$2]=1; next }
+        $1=="X" {
+            m=$2; conns[m]=$3+0; rxp[m]=$5+0; txp[m]=$7+0
+            rx[m]=$4+0; tx[m]=$6+0; seenX[m]=1
+            next
+        }
+        function today(v, closed, base,   d) {
+            # closed remainder (0 when no rollover) plus the current period
+            d = (closed - base) + v
+            return (d > 0) ? d : 0
+        }
+        END {
+            printf "{\"columns\":[\"mac\",\"conns\",\"rx_bytes\",\"rx_pkts\",\"tx_bytes\",\"tx_pkts\"],\"data\":["
+            n = 0
+            for (m in seenX) {
+                r = today(rx[m], crx[m], brx[m]); t = today(tx[m], ctx[m], btx[m])
+                if (r == 0 && t == 0) continue
+                printf "%s[\"%s\",%d,%d,%d,%d,%d]", (n++ ? "," : ""), m, conns[m], r, rxp[m], t, txp[m]
+            }
+            # A device that was busy before the rollover and silent since has no
+            # row in the current period at all; without this it would vanish
+            # from the day rather than show what it actually used.
+            for (m in seenC) {
+                if (m in seenX) continue
+                r = crx[m] - brx[m]; t = ctx[m] - btx[m]
+                if (r < 0) r = 0; if (t < 0) t = 0
+                if (r == 0 && t == 0) continue
+                printf "%s[\"%s\",0,%d,0,%d,0]", (n++ ? "," : ""), m, r, t
+            }
+            printf "]}"
+        }')
+    [ -n "$NLJ" ] || { NLJ=$(nlbw -c json -g mac 2>/dev/null); NLDAILY=false; }
+else
+    NLJ=$(nlbw -c json -g mac 2>/dev/null)
+fi
 case "$NLJ" in '{'*'}') ;; *) NLJ='null' ;; esac
 
 printf '{"ok":true,"ts":%s,' "$NOW"
@@ -559,7 +642,8 @@ fi
 printf '"uplink":{"active":"%s","dev":"%s"},' "$UPACT" "$(esc "$ACTDEV")"
 printf '"air":%s,"sta":%s,"neigh":%s,"oui":%s,"wired":%s,"wanlat":%s,"events":%s,"nlbw":%s,' \
     "$AIRJ" "$STAJ" "$NBJ" "$OUIJ" "$WIREDJ" "$WLJ" "$EVJ" "$NLJ"
-printf '"nlbw_period":%s,' "$( [ -n "$NLPER" ] && printf '"%s"' "$NLPER" || echo null )"
+printf '"nlbw_period":%s,"nlbw_daily":%s,' \
+    "$( [ -n "$NLPER" ] && printf '"%s"' "$NLPER" || echo null )" "$NLDAILY"
 printf '"classmap":%s,' "$CMJ"
 printf '"vpn":%s,' "$VPNJ"
 printf '"vpn_stale":%s,' "$VPNSTALE"

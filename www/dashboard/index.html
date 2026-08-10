@@ -914,7 +914,10 @@ function airPct(band, g) {
    weeks of traffic under a heading that said today. It also anchors periods to
    UTC, so even daily accounting rolls over at UTC midnight, not local. Reading
    the period back is the only way the label can stay true on any router. */
-function trafficHeading(period) {
+function trafficHeading(period, daily) {
+    /* daily === true means the figures were rebased to local midnight, so the
+       heading is literally true regardless of what nlbwmon's own period is. */
+    if (daily) return 'Traffic today';
     if (!period) return 'Traffic today';
     var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(period);
     if (!p) return 'Traffic today';
@@ -928,7 +931,7 @@ function trafficHeading(period) {
 }
 
 function renderTraffic(d, M) {
-    setTxt($('#trafTitle'), trafficHeading(d.nlbw_period));
+    setTxt($('#trafTitle'), trafficHeading(d.nlbw_period, d.nlbw_daily));
     var box = $('#traffic'); clear(box);
     /* Every device the router accounted for today, minus the IoT network —
        plugs and bulbs trading a few hundred KB are noise beside real devices,
