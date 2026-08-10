@@ -186,7 +186,23 @@ if [ "$ACTION" = "logs" ]; then
     # `tail` would return almost nothing, since warnings are sparse by design.
     tail -n 900 "$LT" | awk -v want="$LVL" -v lim="$N" '
         function jesc(s) {
-            gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s)
+            # Both of these use the "\\&" form — emit a literal backslash, then
+            # re-emit the matched character — because it is the only spelling
+            # POSIX actually defines and both awks implement.
+            #
+            # The obvious spellings are each broken here:
+            #   gsub(/"/,  "\\\"", s)  busybox drops the backslash entirely (a
+            #                          backslash before a non-special char is
+            #                          undefined), so quotes came through raw
+            #                          and any log line containing one produced
+            #                          invalid JSON. gawk kept it, and gawk was
+            #                          on this router until banip took it away.
+            #   gsub(/\\/, "\\\\", s)  emits ONE backslash, not two — a no-op
+            #                          that never escaped anything, on any awk.
+            #
+            # Order matters: backslashes first, or the ones added by the quote
+            # pass would be escaped a second time.
+            gsub(/\\/, "\\\\&", s); gsub(/"/, "\\\\&", s)
             # [[:cntrl:]], not [\000-\037]: busybox awk cannot parse an octal
             # escape inside a bracket expression and dies with "bad regex '['",
             # taking the whole array with it and emitting "lines":, — invalid
