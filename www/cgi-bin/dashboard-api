@@ -281,10 +281,14 @@ if [ -f "$CLASSMAP" ]; then
 fi
 
 # ---- leases -> json (incl. expiry epoch for lease-remaining calc) ----
+# NOTE: the expiry variable must NOT be called `exp` — that is awk's built-in
+# exponential function, and assigning to it is a syntax error. awk then produced
+# nothing at all, so this map silently came back empty and the client list lost
+# every DHCP hostname and lease expiry while still looking plausible.
 LJ=$(awk '{
-        exp=$1; mac=toupper($2); ip=$3; nm=$4
+        lexp=$1; mac=toupper($2); ip=$3; nm=$4
         gsub(/\\/,"\\\\",nm); gsub(/"/,"\\\"",nm)
-        printf "%s\"%s\":{\"ip\":\"%s\",\"name\":\"%s\",\"exp\":%s}", (c++?",":""), mac, ip, nm, (exp~/^[0-9]+$/?exp:0)
+        printf "%s\"%s\":{\"ip\":\"%s\",\"name\":\"%s\",\"exp\":%s}", (c++?",":""), mac, ip, nm, (lexp~/^[0-9]+$/?lexp:0)
     }' /tmp/dhcp.leases 2>/dev/null)
 LJ="{$LJ}"
 
