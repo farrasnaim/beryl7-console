@@ -15,11 +15,19 @@
 # after an audit found no case where it had ever been needed, while it remained
 # the most destructive automation on the box.
 #
-# THIS SCRIPT IS THE ONLY WRITER FOR WIRELESS. Nothing else may call `wifi` or
-# `ifup` on a wireless-attached interface. A second writer is what turned a
-# DHCP-client fault into a Wi-Fi outage on 2026-08-10: an `ifup` elsewhere
-# reconfigured the stack, this check sampled it mid-flight, called it missing,
-# and stacked a `wifi up` on top — tearing down phy0 and dropping every client.
+# THIS IS NOT THE ONLY WRITER FOR WIRELESS, and assuming otherwise is unsafe.
+# As of 2026-08-11 five paths can reload the radios: this script (on a timer),
+# /etc/hotplug.d/iface/99-repeater-iot (on an interface event, backgrounded),
+# and repeater-api / dashboard-api / settings-api (user-initiated).
+#
+# That matters because of how the 2026-08-10 outage escalated: an `ifup`
+# elsewhere reconfigured the wireless stack, this check sampled it mid-flight,
+# called the APs missing, and stacked a `wifi up` on top — tearing down phy0
+# and dropping every client. The `.repeater-trying` guard below covers only
+# the repeater-api path; the hotplug and tethering paths do not set it, so a
+# collision remains possible. Known and accepted, not solved — see F2 in the
+# 2026-08-11 sign-off. Do not "fix" it by adding another guard or lock without
+# a deliberate decision: that is how the last one got built.
 
 STATE=/tmp/.apwatch.strikes
 LOG="logger -t apwatch"

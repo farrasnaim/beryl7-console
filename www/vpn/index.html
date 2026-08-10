@@ -473,7 +473,7 @@ function renderDevices(d) {
 
     if (!routable.length) {
         box.appendChild(OS.emptyState('No devices to route',
-            'Connected devices on the main and guest networks appear here. Offline devices are ' +
+            'Connected devices on the main network appear here. Offline devices are ' +
             'left out, and smart-home devices are excluded entirely — they never route through ' +
             'a tunnel.', 'dev'));
         return;
