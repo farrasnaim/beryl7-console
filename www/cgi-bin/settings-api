@@ -80,6 +80,35 @@ esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 jnum() { case "$1" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$1" ;; esac; }
 fail() { printf '{"ok":false,"error":"%s"}' "$(esc "$1")"; exit 0; }
 
+# ------------------------------------------------------------------ backup --
+# Handled before the JSON headers because this response is a file, not JSON.
+# A GET, like `logs`: it reads configuration and changes nothing. The archive
+# does hold secrets — Wi-Fi keys, tunnel keys — but every page of this console
+# already does, it is unauthenticated on the trusted LAN by design, and a
+# foreign origin can cause the request without ever being handed the bytes.
+# This is the same archive `sysupgrade -b` writes and LuCI hands you, so the
+# restore path is the ordinary one and nothing here invents a format.
+case "&$QUERY_STRING&" in
+    *"&action=backup&"*)
+        BK="/tmp/beryl-backup-$$.tar.gz"
+        if sysupgrade -b "$BK" >/dev/null 2>&1 && [ -s "$BK" ]; then
+            printf 'Content-Type: application/x-gzip\r\n'
+            printf 'Content-Disposition: attachment; filename="%s-backup-%s.tar.gz"\r\n' \
+                "$(uci -q get system.@system[0].hostname 2>/dev/null || echo openwrt)" \
+                "$(date +%Y%m%d-%H%M%S)"
+            printf 'Content-Length: %s\r\n' "$(wc -c < "$BK")"
+            printf 'Cache-Control: no-store\r\n\r\n'
+            cat "$BK"
+        else
+            printf 'Content-Type: application/json\r\n'
+            printf 'Cache-Control: no-store\r\n\r\n'
+            printf '{"ok":false,"error":"could not create the archive"}'
+        fi
+        rm -f "$BK"
+        exit 0
+        ;;
+esac
+
 printf 'Content-Type: application/json\r\n'
 printf 'Cache-Control: no-store\r\n\r\n'
 
@@ -147,9 +176,15 @@ if [ "$ACTION" = "logs" ]; then
     [ "$N" -gt 300 ] && N=300
     case "$LVL" in err|warn) ;; *) LVL=all ;; esac
     printf '{"ok":true,"level":"%s","lines":' "$LVL"
+    # One `logread`, not two. This endpoint is polled every few seconds, and
+    # dumping the whole ring buffer a second time just to count its lines was
+    # most of the cost. Snapshot to tmpfs, then count and filter from that.
+    LT="/tmp/.logsnap.$$"
+    logread > "$LT" 2>/dev/null
+    LTOT=$(wc -l < "$LT" 2>/dev/null); case "$LTOT" in ''|*[!0-9]*) LTOT=0 ;; esac
     # Read a wide window and filter inside awk: a severity filter applied after
     # `tail` would return almost nothing, since warnings are sparse by design.
-    logread 2>/dev/null | tail -n 900 | awk -v want="$LVL" -v lim="$N" '
+    tail -n 900 "$LT" | awk -v want="$LVL" -v lim="$N" '
         function jesc(s) {
             gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s)
             gsub(/\t/, " ", s); gsub(/[\000-\037]/, "", s)
@@ -173,7 +208,8 @@ if [ "$ACTION" = "logs" ]; then
             for (i = n; i > 0 && c < lim; i--) { printf "%s%s", (c++ ? "," : ""), buf[i] }
             printf "]"
         }'
-    printf ',"total":%s}' "$(logread 2>/dev/null | wc -l)"
+    rm -f "$LT"
+    printf ',"total":%s}' "$LTOT"
     exit 0
 fi
 
@@ -211,7 +247,14 @@ if [ "$ACTION" = "updcheck" ]; then
         /^Build-at/     { $1 = ""; sub(/^ +/, ""); built = $0 }
         /^Image-file/   { img   = $2 }
         /packages are out-of-date/ { ood = $1 + 0 }
-        /^It is safe to proceed/   { safe = 1 }
+        # Keep owut'"'"'s own closing sentence rather than reducing it to a guess.
+        # The first version matched only "It is safe to proceed", so the better
+        # outcome — "There are no changes, upgrade not necessary" — was read as
+        # unsafe. Only an explicit "not safe" is treated as one.
+        /safe to proceed|upgrade not necessary|not safe/ {
+            verdict = $0
+            safe = ($0 ~ /not safe/) ? 0 : 1
+        }
         # "name  installed  available"
         sec == "ver" && /^[ \t]+[A-Za-z0-9]/ && NF == 3 {
             pk = pk (pc++ ? "," : "") "{\"name\":\"" jesc($1) "\",\"from\":\"" jesc($2) "\",\"to\":\"" jesc($3) "\"}"
@@ -224,14 +267,42 @@ if [ "$ACTION" = "updcheck" ]; then
         END {
             printf "{\"checked\":%s,\"from\":\"%s\",\"to\":\"%s\",\"target\":\"%s\",\"profile\":\"%s\",", \
                 ts, jesc(from), jesc(to), jesc(tgt), jesc(prof)
-            printf "\"built\":\"%s\",\"image\":\"%s\",\"safe\":%s,\"outdated\":%d,", \
-                jesc(built), jesc(img), (safe ? "true" : "false"), ood
+            printf "\"built\":\"%s\",\"image\":\"%s\",\"safe\":%s,\"verdict\":\"%s\",\"outdated\":%d,", \
+                jesc(built), jesc(img), (safe ? "true" : "false"), jesc(verdict), ood
             printf "\"packages\":[%s],\"substituted\":[%s]}", pk, sb
         }')
     case "$UJ" in
         '{'*) printf '%s' "$UJ" > "$UPDCACHE"; printf '{"ok":true,"update":%s}' "$UJ" ;;
         *)    printf '{"ok":false,"error":"could not read owut output"}' ;;
     esac
+    exit 0
+fi
+
+# -------------------------------------------------------- package upgrade --
+# Named packages only, never a blanket upgrade. The check above already says
+# exactly which ones are behind, and upgrading only those keeps the blast radius
+# equal to what the panel showed — a bare `apk upgrade` would be a different,
+# larger action than the one the button offered.
+if [ "$ACTION" = "pkgupgrade" ]; then
+    command -v apk >/dev/null 2>&1 || fail "apk is not available on this build"
+    NAMES=$(qs_get_dec names)
+    [ -n "$NAMES" ] || fail "nothing to upgrade"
+    # Package names, spaces between. Anything else is refused rather than
+    # escaped: this string reaches a command line.
+    printf '%s' "$NAMES" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+ -]*$' || fail "bad package list"
+    apk update >/dev/null 2>&1 || fail "could not refresh the package index — is the router online?"
+    OUT=$(apk upgrade $NAMES 2>&1)
+    RC=$?
+    # The cached reading is now wrong whatever happened; drop it rather than
+    # let the panel keep showing a version that may have just changed.
+    rm -f "$UPDCACHE"
+    if [ "$RC" = "0" ]; then
+        printf '{"ok":true,"action":"pkgupgrade","detail":"%s"}' \
+            "$(esc "$(printf '%s' "$OUT" | grep -iE '^\([0-9]+/[0-9]+\)|^OK:' | tr '\n' ' ')")"
+    else
+        printf '{"ok":false,"error":"%s"}' \
+            "$(esc "$(printf '%s' "$OUT" | grep -iE 'error|ERROR' | head -1)")"
+    fi
     exit 0
 fi
 

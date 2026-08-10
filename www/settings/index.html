@@ -844,13 +844,52 @@ function renderSoft(d) {
         }
     }
 
-    var row = el('div', 'inline'); row.style.marginTop = '16px';
-    var btn = el('button', 'btn btn--sm', c ? 'Check again' : 'Check for updates');
+    /* Backup first, and it is the only primary action here. It is the one thing
+       you always want before touching anything else, it is the same archive
+       LuCI hands you, and it is the only action on this panel that cannot go
+       wrong. */
+    var row = el('div', 'inline');
+    row.style.cssText = 'margin-top:18px;flex-wrap:wrap;gap:8px';
+    var bk = el('a', 'btn btn--sm btn--primary', 'Download backup');
+    bk.href = API + '?action=backup';
+    bk.setAttribute('download', '');
+    row.appendChild(bk);
+
+    if (c && c.packages && c.packages.length) {
+        var n = c.packages.length;
+        var up = el('button', 'btn btn--sm',
+            'Update ' + n + ' package' + (n === 1 ? '' : 's'));
+        up.type = 'button';
+        row.appendChild(up);
+        up.addEventListener('click', function () {
+            var names = c.packages.map(function (p) { return p.name; });
+            OS.askConfirm('Update ' + n + ' package' + (n === 1 ? '' : 's'),
+                names.join(', ') + ' — nothing else is touched. Each moves to the version ' +
+                'in the release feed for the firmware already running, so this is not a ' +
+                'firmware change and the router does not restart.',
+                'Update').then(function (go) {
+                if (!go) return;
+                OS.act(up, API, { action: 'pkgupgrade', names: names.join(' ') },
+                    { ok: 'Updated.', delay: 900, failPrefix: 'Update failed' })
+                    .then(function (j) {
+                        /* The upgrade invalidates the cached reading, so re-take
+                           it rather than leave the panel saying "not checked"
+                           immediately after an action the panel itself offered. */
+                        if (j && j.ok) {
+                            OS.post(API, { action: 'updcheck' })
+                                .then(function () { if (OS.tp) OS.tp.refresh(200); });
+                        }
+                    });
+            });
+        });
+    }
+
+    var btn = el('button', 'btn btn--ghost btn--sm', c ? 'Check again' : 'Check for updates');
     btn.type = 'button';
     row.appendChild(btn);
     if (c && c.checked) {
         var cap = el('span', 'row__cap', 'checked ' + OS.ago(c.checked));
-        cap.style.marginLeft = '2px';
+        cap.style.alignSelf = 'center';
         row.appendChild(cap);
     }
     box.appendChild(row);
@@ -858,6 +897,16 @@ function renderSoft(d) {
         OS.act(btn, API, { action: 'updcheck' },
             { ok: 'Checked.', delay: 400, failPrefix: 'Could not check' });
     });
+
+    /* Say what this panel deliberately will not do, so its absence reads as a
+       decision rather than a missing feature. Reflashing from a phone, over
+       Wi-Fi the new firmware is about to take down, is how routers get bricked. */
+    var h2 = el('div', 'hint');
+    h2.style.marginTop = '12px';
+    h2.textContent = 'Firmware is not flashed from here. Take the backup above, then run the ' +
+        'upgrade from a machine with a cable — a reflash interrupted over Wi-Fi is how a ' +
+        'router stops being one.';
+    box.appendChild(h2);
 }
 
 /* -------------------------------------------------------------------- log -- */
@@ -892,11 +941,40 @@ function renderLog() {
     }
 }
 
-function loadLog() {
+/* A log that does not move is a screenshot, so it follows the tail on its own.
+   The one thing it must never do is move the line you are reading: scrolling
+   down means you are looking at something specific, so the refresh holds until
+   you come back to the top. */
+var LOG_EVERY = 4000;
+var logTimer = null, logPaused = false;
+
+function startLogPolling() {
+    if (logTimer) return;
+    logTimer = setInterval(function () {
+        if (document.hidden) return;
+        var list = $('#b-log .log');
+        if (list && list.scrollTop > 8) {
+            if (!logPaused) { logPaused = true; markLogState(); }
+            return;
+        }
+        if (logPaused) { logPaused = false; markLogState(); }
+        loadLog(true);
+    }, LOG_EVERY);
+}
+
+function markLogState() {
+    var f = $('#logFoot');
+    if (f) f.textContent = logPaused ? 'paused while you read — scroll to the top to follow again'
+                                     : 'following, every ' + (LOG_EVERY / 1000) + 's';
+}
+
+function loadLog(quiet) {
     var box = $('#b-log');
-    clear(box);
-    var sk = el('div', 'sk'); sk.style.width = '55%';
-    box.appendChild(sk);
+    if (!quiet) {
+        clear(box);
+        var sk = el('div', 'sk'); sk.style.width = '55%';
+        box.appendChild(sk);
+    }
     fetch(API + '?action=logs&level=' + logLevel + '&n=150', { cache: 'no-store' })
         .then(function (r) { return r.json(); })
         .then(paintLog, function () { paintLog(null); });
@@ -932,13 +1010,17 @@ function paintLog(j) {
     });
     box.appendChild(list);
 
-    var foot = el('div', 'inline'); foot.style.marginTop = '12px';
-    var rb = el('button', 'btn btn--ghost btn--sm', 'Refresh'); rb.type = 'button';
-    rb.addEventListener('click', loadLog);
-    foot.appendChild(rb);
+    var foot = el('div', 'inline');
+    foot.style.cssText = 'margin-top:10px;flex-wrap:wrap;gap:8px';
     foot.appendChild(el('span', 'row__cap',
-        'showing ' + j.lines.length + ' of ' + j.total + ' lines, newest first'));
+        j.lines.length + ' of ' + j.total + ' lines, newest first'));
+    var live = el('span', 'row__cap', '');
+    live.id = 'logFoot';
+    live.style.color = 'var(--sig-fg)';
+    foot.appendChild(live);
     box.appendChild(foot);
+    markLogState();
+    startLogPolling();
 }
 
 /* -------------------------------------------------------------------- boot -- */

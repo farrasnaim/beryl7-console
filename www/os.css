@@ -286,7 +286,9 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 
 /* legacy .panel names retained; restyled from card to register */
 .panel{background:none;border:0;border-radius:0;margin:0}
-.panel__h{display:flex;align-items:baseline;gap:var(--s3);
+/* Wraps rather than squeezes: a header whose aside is a control, not a word,
+   needs to drop it to its own line on a phone instead of crushing both. */
+.panel__h{display:flex;align-items:baseline;gap:var(--s3);flex-wrap:wrap;row-gap:var(--s2);
     padding:var(--s4) var(--s5) var(--s3);border-top:1px solid var(--rule)}
 .face>.panel:first-child>.panel__h,.face>.panel:first-child>.strip{border-top:0}
 .panel__t{font-size:14.5px;font-weight:600;letter-spacing:-.015em;color:var(--ink);
@@ -580,7 +582,10 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 
 /* ---- segmented control --------------------------------------------------- */
 .seg{display:flex;border:1px solid var(--rule-2);border-radius:var(--r);overflow:hidden}
-.seg .btn{border:0;border-radius:0;background:transparent}
+/* A segmented control is read as one object, so each segment needs room to be
+   its own label. The small-button padding that suits a lone action reads as one
+   run-on word once three sit shoulder to shoulder. */
+.seg .btn{border:0;border-radius:0;background:transparent;padding:5px 14px;min-height:28px}
 .seg .btn+.btn{border-left:1px solid var(--rule-2)}
 .seg .btn[aria-pressed="true"]{background:var(--sig-dim);color:var(--sig-fg);font-weight:600}
 
