@@ -16,6 +16,9 @@ CLASSMAP=/etc/dashboard/classmap
 WANIF=$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
 [ -n "$WANIF" ] || WANIF=$(uci -q get network.wan.device 2>/dev/null)
 [ -n "$WANIF" ] || WANIF=eth0
+# The LAN bridge, named once. Both the neighbour lookup and the bridge-port scan
+# need it, and they used to disagree — one derived it, the other said br-lan.
+LANDEV=$(uci -q get network.lan.device 2>/dev/null); [ -n "$LANDEV" ] || LANDEV=br-lan
 STATE=/tmp/.dashwan
 
 esc() { printf '%s' "$1" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -184,11 +187,48 @@ if [ "$ACTION" = "setdev" ]; then
     exit 0
 fi
 
-# radio restart (fix24g -> radio0, fix5g -> radio1)
-if [ "$ACTION" = "fix24g" ] || [ "$ACTION" = "fix5g" ]; then
-    [ "$ACTION" = "fix24g" ] && R=radio0 || R=radio1
+# Which radio serves a band. This board enumerates radio0=2.4 GHz and
+# radio1=5 GHz, but that ordering is a board convention, not a rule — plenty of
+# hardware enumerates 5 GHz first, and there the name-based guess restarts the
+# other radio: you ask for a 5 GHz reset and 2.4 GHz drops instead. Ask each
+# radio what band it declares. Falling back to the first radio keeps a
+# single-band board working rather than refusing outright.
+#
+# Kept byte-identical to the copy in repeater-api: two copies that drift are a
+# new bug, so change both or neither.
+radio_for_band() {   # $1 = 2g | 5g | 6g
+    _first=""; _any=""
+    for _r in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-device$/\1/p'); do
+        [ -n "$_first" ] || _first="$_r"
+        _b=$(uci -q get wireless.$_r.band 2>/dev/null)
+        [ -n "$_b" ] && _any=1
+        [ "$_b" = "$1" ] && { printf '%s' "$_r"; return 0; }
+    done
+    # No match. Where the radios declare bands, the honest answer is "there is
+    # no such radio" — returning an unrelated one turns "restart 6 GHz" into
+    # "restart 2.4 GHz". Only a config that names no bands at all (the old
+    # hwmode style) falls back to the first radio.
+    [ -n "$_any" ] || printf '%s' "$_first"
+}
+
+# Radio restart. The caller names the radio and it is checked against the
+# router's own list, so no band has to be inferred at all.
+if [ "$ACTION" = "fixradio" ] || [ "$ACTION" = "fix24g" ] || [ "$ACTION" = "fix5g" ]; then
+    case "$ACTION" in
+        fixradio) R=$(qs_get radio) ;;
+        # Kept so a browser still holding the older settings page, and the
+        # archived console under /legacy/, keep working. They resolve by band
+        # rather than assuming radio0 is the 2.4 GHz one.
+        fix24g)   R=$(radio_for_band 2g) ;;
+        *)        R=$(radio_for_band 5g) ;;
+    esac
+    _okr=0
+    for _r in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-device$/\1/p'); do
+        [ "$_r" = "$R" ] && { _okr=1; break; }
+    done
+    [ "$_okr" = "1" ] || { printf '{"ok":false,"error":"unknown radio"}'; exit 0; }
     ( wifi down "$R" >/dev/null 2>&1; sleep 2; wifi up "$R" >/dev/null 2>&1 ) >/dev/null 2>&1 &
-    printf '{"ok":true,"action":"%s"}' "$ACTION"
+    printf '{"ok":true,"action":"%s","radio":"%s"}' "$ACTION" "$(esc "$R")"
     exit 0
 fi
 
@@ -450,7 +490,7 @@ LANPFX=$(uci -q get network.lan.ipaddr 2>/dev/null | cut -d. -f1-3)
 WIREDJ=""
 if [ -n "$LANPFX" ]; then
 WIREDJ=$( {
-    ip -4 neigh show dev br-lan 2>/dev/null | awk '/lladdr/{print toupper($3), $1}'
+    ip -4 neigh show dev "$LANDEV" 2>/dev/null | awk '/lladdr/{print toupper($3), $1}'
     awk '{print toupper($2), $3}' /tmp/dhcp.leases 2>/dev/null
   } | awk -v wifi="$WIFIMACS" -v wired="$FDBWIRED" -v pfx="$LANPFX." '
       BEGIN {
@@ -617,7 +657,6 @@ for _wn in $WLIFS; do
     lb_add "$_wn" "$_wn"
 done
 _wired=0
-LANDEV=$(uci -q get network.lan.device 2>/dev/null); [ -n "$LANDEV" ] || LANDEV=br-lan
 for _bp in /sys/class/net/$LANDEV/brif/*; do
     _bn=$(basename "$_bp" 2>/dev/null)
     [ "$_bn" = '*' ] && continue

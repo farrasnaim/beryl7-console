@@ -115,7 +115,10 @@ function renderUplink(d) {
     nm.textContent = u.assoc_ssid || u.ssid || '(unnamed network)';
     idb.appendChild(nm);
     var sub = [];
-    if (u.radio) sub.push(u.radio === 'radio1' ? '5 GHz' : '2.4 GHz');
+    /* The band comes from the radio's own `band` setting, not from its name:
+       radio1 is 5 GHz here but 2.4 GHz on plenty of other boards. If the router
+       does not report one, say nothing rather than guess. */
+    if (u.band) sub.push(OS.bandLabel(u.band));
     if (u.bssid) sub.push(u.bssid.toUpperCase());
     if (u.encryption) sub.push(u.encryption === 'none' ? 'open' : u.encryption.toUpperCase());
     idb.appendChild(el('div', 'row__sub', sub.join('   ·   ')));

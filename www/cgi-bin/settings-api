@@ -199,6 +199,27 @@ gens_of() {     # $1 = iw band number
 # iw band numbers: 1 = 2.4 GHz, 2 = 5 GHz, 4 = 6 GHz (3 is 60 GHz).
 band_num() { case "$1" in 2g) echo 1 ;; 6g) echo 4 ;; *) echo 2 ;; esac; }
 
+# --------------------------------------------------------- subnet arithmetic --
+ip2int() {   # dotted quad -> 32-bit integer
+    _o1=${1%%.*}; _r=${1#*.}; _o2=${_r%%.*}; _r=${_r#*.}; _o3=${_r%%.*}; _o4=${_r##*.}
+    printf '%s' $(( (_o1 << 24) + (_o2 << 16) + (_o3 << 8) + _o4 ))
+}
+mask2pfx() {   # dotted netmask -> prefix length; a contiguous mask's length is
+               # just its population count. Unparseable falls back to /24, the
+               # only netmask this endpoint ever writes.
+    case "$1" in ''|*[!0-9.]*) printf 24; return ;; esac
+    _m=$(ip2int "$1"); _p=0; _i=0
+    while [ "$_i" -lt 32 ]; do _p=$(( _p + ((_m >> _i) & 1) )); _i=$((_i + 1)); done
+    printf '%s' "$_p"
+}
+# Do a.b.c.d/24 and $2/$3 share any address?
+overlaps24() {   # $1 = new LAN address  $2 = other address  $3 = other prefix
+    [ "$3" -ge 8 ] 2>/dev/null || return 1
+    _p=$3; [ "$_p" -gt 24 ] && _p=24
+    _k=$(( (4294967295 << (32 - _p)) & 4294967295 ))
+    [ $(( $(ip2int "$1") & _k )) -eq $(( $(ip2int "$2") & _k )) ]
+}
+
 # ------------------------------------------------------------------- writes --
 if [ "$ACTION" = "setwifi" ]; then
     RADIO=$(qs_get_dec radio)
@@ -300,6 +321,43 @@ if [ "$ACTION" = "setlan" ]; then
     case "$DLEASE" in 30m|1h|6h|12h|24h|72h) ;; *) fail "bad lease time" ;; esac
 
     OLDIP=$(uci -q get network.lan.ipaddr)
+
+    # The new subnet must not overlap anything else this router routes. Nothing
+    # here used to check, and there are two distinct ways it bites:
+    #
+    #   live addresses  — the WAN, a tethered modem, a joined hotel uplink. This
+    #                     is the quiet one: the console still answers on the new
+    #                     address while the default route stops leaving the
+    #                     house, and nothing on screen says why. 192.168.1.1 is
+    #                     the obvious thing to type and the likeliest upstream.
+    #   configured ones — guest and iot hold addresses in UCI with no interface
+    #                     up. Taking one of their subnets is a trap that springs
+    #                     months later, the first time that network is enabled.
+    #
+    # Deliberately stricter than 31-tethering-clash, which weighs live routes
+    # only: there, refusing an uplink over a dormant network would strand a
+    # traveller, whereas here refusing an address costs one retype.
+    if [ "$IP" != "$OLDIP" ]; then
+        LANDEV=$(uci -q get network.$LANNET.device 2>/dev/null); [ -n "$LANDEV" ] || LANDEV=br-lan
+        CONFLICT=$( {
+            ip -4 -o addr show 2>/dev/null | awk -v skip="$LANDEV" '
+                $2 != skip && $2 != "lo" { split($4, a, "/"); print a[1], a[2], $2 }'
+            for _s in $(uci -q show network 2>/dev/null | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+                [ "$_s" = "$LANNET" ] && continue
+                _a=$(uci -q get network.$_s.ipaddr 2>/dev/null)
+                case "$_a" in
+                    ''|127.*) continue ;;
+                    */*)      _pf=${_a#*/}; _a=${_a%%/*} ;;
+                    *)        _pf=$(mask2pfx "$(uci -q get network.$_s.netmask 2>/dev/null)") ;;
+                esac
+                printf '%s %s %s\n' "$_a" "$_pf" "$_s"
+            done
+        } | while read -r _oa _op _on; do
+            overlaps24 "$IP" "$_oa" "$_op" && { printf '%s (%s/%s)' "$_on" "$_oa" "$_op"; break; }
+        done )
+        [ -n "$CONFLICT" ] && fail "that subnet is already in use by $CONFLICT"
+    fi
+
     uci set dhcp.lan.start="$DSTART"
     uci set dhcp.lan.limit="$DLIMIT"
     uci set dhcp.lan.leasetime="$DLEASE"

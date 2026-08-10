@@ -283,6 +283,7 @@ Things learned the hard way, encoded in the code and worth knowing before portin
 
 - **Both radios share one PHY.** `wifi reload` bounces 2.4 GHz and 5 GHz together, and transmit power is coupled across bands. This is why `apwatch` exists and why the Settings page warns about it.
 - **Huawei HiLink dongles hand out `192.168.8.0/24`** — byte-identical to the router's own LAN. `31-tethering-clash` tears down any USB uplink whose subnet collides with a routed network, because you cannot know the subnet until DHCP has already answered.
+- **Changing the router's own address is the one setting that can lock you out**, so Settings refuses a subnet that collides with anything else the router routes: a live interface (the WAN, a tethered modem, a joined hotel uplink) or a network that merely exists in UCI with its interface down, such as a guest network you have not enabled yet. `192.168.1.1` is the address people reach for first and is also the likeliest upstream subnet; taking it leaves the console reachable while nothing can get out, with no symptom that points at the cause. Note this is deliberately stricter than `31-tethering-clash`, which weighs live routes only — refusing an uplink over a dormant network would strand a traveller, whereas refusing an address costs one retype.
 - **iPhone tethering + eager reset scripts don't mix.** The stock `40-usbmuxd` hotplug reset the phone in a loop before ipheth could ever confirm pairing. The stub in this repo documents the failure mode; leave it disabled.
 - **DoH breaks captive portals.** Hotel sign-in pages work by hijacking plaintext DNS; if all DNS is DoH, the portal never appears and you are stranded. `15-travel-dns` switches to the uplink's plaintext DNS only while a travel uplink is active, and restores DoH at home.
 - **The tethering netdev name is not predictable** (`ethN` / `usbN` / `wwanN` depending on driver flags); `30-tethering` binds whatever appears instead of hardcoding.
@@ -297,6 +298,8 @@ Nothing about your addressing, SSID naming, or radio layout is written into the 
 | Wireless interface names | `iw dev` — never a `wlan*` or `phy0.*` glob, because the naming differs per build |
 | Radios and their bands | enumerated from UCI `wifi-device` sections; band comes from the radio, so `radio0` need not be 2.4 GHz |
 | Each radio's AP section | the `wifi-iface` pointing at that radio — `default_radio0`, `main2g`, or whatever yours is called |
+| Restarting a radio | the page names the radio; the API checks that name against the router's own list rather than mapping a band onto `radio0`/`radio1` |
+| A Wi-Fi uplink's band | read from that radio's `band` and sent to the page, so the label is never inferred from the radio's name |
 | A secondary SSID (IoT/guest) | the first AP on a network other than `lan`; the panel disappears when there is none |
 | Which network an address is on | matched against the interfaces UCI actually defines |
 | The LAN bridge | `network.lan.device` |

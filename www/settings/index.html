@@ -291,7 +291,9 @@ function renderRadio(r) {
             'Every device on ' + band + ' disconnects and reconnects by itself, typically within ' +
             '15 seconds. Devices on the other band are not affected.', 'Restart').then(function (go) {
             if (!go) return;
-            OS.act(rst, DASH, { action: r.band === '2g' ? 'fix24g' : 'fix5g' },
+            /* Name the radio outright. Deriving an action from the band meant a
+               6 GHz radio fell through to 'fix5g' and bounced the wrong one. */
+            OS.act(rst, DASH, { action: 'fixradio', radio: r.id },
                 { ok: band + ' radio is restarting.', delay: 4000 });
         });
     });

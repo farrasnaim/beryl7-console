@@ -252,6 +252,29 @@ if [ "$ACTION" = "scan" ]; then
     exit 0
 fi
 
+# Which radio serves a band. This board enumerates radio0=2.4 GHz and
+# radio1=5 GHz, but that ordering is a board convention, not a rule — plenty of
+# hardware enumerates 5 GHz first, and there the name-based guess silently
+# builds the STA on the wrong radio: the join just fails, with nothing in the UI
+# to say why. Ask each radio what band it declares instead. Falling back to the
+# first radio keeps a single-band board working rather than refusing outright.
+# Kept byte-identical to the copy in dashboard-api: two copies that drift are a
+# new bug, so change both or neither.
+radio_for_band() {   # $1 = 2g | 5g | 6g
+    _first=""; _any=""
+    for _r in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-device$/\1/p'); do
+        [ -n "$_first" ] || _first="$_r"
+        _b=$(uci -q get wireless.$_r.band 2>/dev/null)
+        [ -n "$_b" ] && _any=1
+        [ "$_b" = "$1" ] && { printf '%s' "$_r"; return 0; }
+    done
+    # No match. Where the radios declare bands, the honest answer is "there is
+    # no such radio" — returning an unrelated one turns "restart 6 GHz" into
+    # "restart 2.4 GHz". Only a config that names no bands at all (the old
+    # hwmode style) falls back to the first radio.
+    [ -n "$_any" ] || printf '%s' "$_first"
+}
+
 # ============================ ADD UPLINK ============================
 if [ "$ACTION" = "add" ]; then
     # No router password anywhere in this console, by explicit user choice:
@@ -263,7 +286,8 @@ if [ "$ACTION" = "add" ]; then
     ENC=$(qs_get enc)
     BAND=$(qs_get band)
     [ -n "$SSID" ] || { printf '{"ok":false,"error":"ssid required"}'; exit 0; }
-    case "$BAND" in 5) RADIO=radio1 ;; *) RADIO=radio0 ;; esac
+    case "$BAND" in 5) RADIO=$(radio_for_band 5g) ;; 6) RADIO=$(radio_for_band 6g) ;; *) RADIO=$(radio_for_band 2g) ;; esac
+    [ -n "$RADIO" ] || { printf '{"ok":false,"error":"no radio available"}'; exit 0; }
     case "$ENC" in
         none) ENCV='none' ;;
         psk)  ENCV='psk2' ;;
@@ -338,6 +362,10 @@ fi
 # ============================ STATUS (read) ============================
 U_SSID=$(uci -q get wireless.uplink.ssid)
 U_RADIO=$(uci -q get wireless.uplink.device)
+# Send the band itself, not just the radio name. The UI used to infer "5 GHz"
+# from the name radio1, which is the same wrong assumption radio_for_band()
+# exists to remove.
+U_BAND=$([ -n "$U_RADIO" ] && uci -q get wireless.$U_RADIO.band 2>/dev/null)
 U_ENC=$(uci -q get wireless.uplink.encryption)
 U_DIS=$(uci -q get wireless.uplink.disabled); [ -n "$U_DIS" ] || U_DIS=0
 
@@ -366,9 +394,9 @@ WUP=$(ubus call network.interface.wwan status 2>/dev/null | grep -c '"up": true'
 DEFDEV=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
 
 printf '{"ok":true,"ts":%s,' "$(date +%s)"
-printf '"uplink":{"configured":%s,"ssid":"%s","radio":"%s","encryption":"%s","enabled":%s,' \
+printf '"uplink":{"configured":%s,"ssid":"%s","radio":"%s","band":"%s","encryption":"%s","enabled":%s,' \
     "$( [ -n "$U_SSID" ] && echo true || echo false )" \
-    "$(esc "$U_SSID")" "$(esc "$U_RADIO")" "$(esc "$U_ENC")" \
+    "$(esc "$U_SSID")" "$(esc "$U_RADIO")" "$(esc "$U_BAND")" "$(esc "$U_ENC")" \
     "$( [ "$U_DIS" = "1" ] && echo false || echo true )"
 printf '"connected":%s,"assoc_ssid":"%s","bssid":"%s","signal":%s,"quality":%s},' \
     "$CONN" "$(esc "$UPSSID")" "$(esc "$BSSID")" "${SIG:-0}" "${QUAL:-0}"
