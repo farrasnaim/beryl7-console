@@ -124,9 +124,116 @@ guard_post() {
 ACTION=$(qs_get action)
 case "$ACTION" in
     "") ;;
+    # `logs` reads the ring buffer and changes nothing, so it stays a GET like
+    # repeater `scan` does. The POST rule exists to stop a foreign page issuing
+    # a write through your browser; a read cannot be turned into one, and the
+    # browser will not hand the response to another origin anyway.
+    logs) ;;
     *) [ "$REQUEST_METHOD" = "POST" ] || fail "POST required" ;;
 esac
 [ "$REQUEST_METHOD" = "POST" ] && guard_post
+
+UPDCACHE=/tmp/.updcheck
+
+# ------------------------------------------------------------------- logs --
+# Away from home the honest answer to "why is there no internet" lives in the
+# ring buffer, and reaching it used to mean SSH — i.e. a laptop. Newest first,
+# because the reason you are looking is almost always the last thing that
+# happened. Filtering is by severity rather than by text: on a quiet router the
+# interesting lines are rare and you do not know the word to search for yet.
+if [ "$ACTION" = "logs" ]; then
+    LVL=$(qs_get level); N=$(qs_get n)
+    case "$N" in ''|*[!0-9]*) N=200 ;; esac
+    [ "$N" -gt 300 ] && N=300
+    case "$LVL" in err|warn) ;; *) LVL=all ;; esac
+    printf '{"ok":true,"level":"%s","lines":' "$LVL"
+    # Read a wide window and filter inside awk: a severity filter applied after
+    # `tail` would return almost nothing, since warnings are sparse by design.
+    logread 2>/dev/null | tail -n 900 | awk -v want="$LVL" -v lim="$N" '
+        function jesc(s) {
+            gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s)
+            gsub(/\t/, " ", s); gsub(/[\000-\037]/, "", s)
+            return s
+        }
+        NF > 7 {
+            lvl = $6; sub(/^[^.]*\./, "", lvl)
+            keep = (want == "all")
+            if (!keep && lvl ~ /^(emerg|alert|crit|err)/) keep = 1
+            if (!keep && want == "warn" && lvl ~ /^warn/) keep = 1
+            if (!keep) next
+            src = $7; sub(/:$/, "", src)
+            msg = ""
+            for (i = 8; i <= NF; i++) msg = msg (i > 8 ? " " : "") $i
+            buf[++n] = "{\"t\":\"" $4 "\",\"d\":\"" $2 " " $3 "\",\"lvl\":\"" jesc(lvl) \
+                       "\",\"src\":\"" jesc(src) "\",\"msg\":\"" jesc(msg) "\"}"
+        }
+        END {
+            printf "["
+            c = 0
+            for (i = n; i > 0 && c < lim; i--) { printf "%s%s", (c++ ? "," : ""), buf[i] }
+            printf "]"
+        }'
+    printf ',"total":%s}' "$(logread 2>/dev/null | wc -l)"
+    exit 0
+fi
+
+# ---------------------------------------------------------- update check --
+# owut talks to the ASU build server, so this is seconds, not milliseconds — far
+# too slow for the 5s poll. It runs only when asked and caches the reading; the
+# status payload serves that cache for free, and the panel says when it was
+# taken. An instrument that cannot say how old its reading is invites you to
+# trust a stale one.
+if [ "$ACTION" = "updcheck" ]; then
+    if ! command -v owut >/dev/null 2>&1; then
+        printf '{"ok":false,"error":"owut is not installed — add attendedsysupgrade-common"}'
+        exit 0
+    fi
+    if command -v timeout >/dev/null 2>&1; then
+        OUT=$(timeout 60 owut check --verbose 2>&1)
+    else
+        OUT=$(owut check --verbose 2>&1)
+    fi
+    # owut's verbose output is sectioned, and the same facts are worded
+    # differently with and without --verbose. Parse by section rather than by
+    # sentence: a header opens one, any unindented line closes it, and the
+    # indented rows between are the data. Guessing from a summary sentence is
+    # how "1 modified default package" got read as something it was not.
+    UJ=$(printf '%s\n' "$OUT" | awk -v ts="$(date +%s)" '
+        function jesc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+        /^Package version changes:/  { sec = "ver"; next }
+        /^Default package analysis:/ { sec = "def"; next }
+        /^There are currently package build failures/ { sec = ""; next }
+        /^[^ \t]/ { sec = "" }
+        /^Version-from/ { $1 = ""; sub(/^ +/, ""); from  = $0 }
+        /^Version-to/   { $1 = ""; sub(/^ +/, ""); to    = $0 }
+        /^Target/       { tgt   = $2 }
+        /^Profile/      { prof  = $2 }
+        /^Build-at/     { $1 = ""; sub(/^ +/, ""); built = $0 }
+        /^Image-file/   { img   = $2 }
+        /packages are out-of-date/ { ood = $1 + 0 }
+        /^It is safe to proceed/   { safe = 1 }
+        # "name  installed  available"
+        sec == "ver" && /^[ \t]+[A-Za-z0-9]/ && NF == 3 {
+            pk = pk (pc++ ? "," : "") "{\"name\":\"" jesc($1) "\",\"from\":\"" jesc($2) "\",\"to\":\"" jesc($3) "\"}"
+        }
+        # "default-package  provided-by" — a stock package satisfied by a
+        # different one. Its own column header is skipped by name.
+        sec == "def" && /^[ \t]+[A-Za-z0-9]/ && NF == 2 && $1 != "Default" {
+            sb = sb (sc++ ? "," : "") "{\"name\":\"" jesc($1) "\",\"by\":\"" jesc($2) "\"}"
+        }
+        END {
+            printf "{\"checked\":%s,\"from\":\"%s\",\"to\":\"%s\",\"target\":\"%s\",\"profile\":\"%s\",", \
+                ts, jesc(from), jesc(to), jesc(tgt), jesc(prof)
+            printf "\"built\":\"%s\",\"image\":\"%s\",\"safe\":%s,\"outdated\":%d,", \
+                jesc(built), jesc(img), (safe ? "true" : "false"), ood
+            printf "\"packages\":[%s],\"substituted\":[%s]}", pk, sb
+        }')
+    case "$UJ" in
+        '{'*) printf '%s' "$UJ" > "$UPDCACHE"; printf '{"ok":true,"update":%s}' "$UJ" ;;
+        *)    printf '{"ok":false,"error":"could not read owut output"}' ;;
+    esac
+    exit 0
+fi
 
 # ---------------------------------------------------------------- capability --
 # Channel list with a computed per-channel MAXIMUM width. A width is valid only
@@ -486,8 +593,18 @@ printf '"lan":{"ipaddr":"%s","netmask":"%s","dhcp":{"start":%s,"limit":%s,"lease
     "$(esc "$(uci -q get network.lan.ipaddr)")" "$(esc "$(uci -q get network.lan.netmask)")" \
     "$(jnum "$(uci -q get dhcp.lan.start)")" "$(jnum "$(uci -q get dhcp.lan.limit)")" \
     "$(esc "$(uci -q get dhcp.lan.leasetime)")"
-printf '"system":{"hostname":"%s","zonename":"%s","uptime":%s,"ntp":%s}}' \
+printf '"system":{"hostname":"%s","zonename":"%s","uptime":%s,"ntp":%s},' \
     "$(esc "$(uci -q get system.@system[0].hostname)")" \
     "$(esc "$(uci -q get system.@system[0].zonename)")" \
     "$(jnum "$UP")" \
     "$([ "$(uci -q get system.ntp.enabled)" = "1" ] && echo true || echo false)"
+
+# Whatever the last check found, plus the running firmware read locally so the
+# panel can state that much even if nothing has ever been checked. `null` means
+# never checked — distinct from "checked and up to date", which the UI must not
+# blur into the same sentence.
+. /etc/openwrt_release 2>/dev/null
+printf '"software":{"running":"%s","revision":"%s","target":"%s","owut":%s,"check":%s}}' \
+    "$(esc "$DISTRIB_RELEASE")" "$(esc "$DISTRIB_REVISION")" "$(esc "$DISTRIB_TARGET")" \
+    "$(command -v owut >/dev/null 2>&1 && echo true || echo false)" \
+    "$(cat "$UPDCACHE" 2>/dev/null || echo null)"

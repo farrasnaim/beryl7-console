@@ -69,6 +69,19 @@
       <section class="panel">
         <div class="panel__b" id="b-sys" style="padding-top:16px"></div>
       </section>
+      <!-- Neither of these is a stage on the packet's path, so neither earns a
+           place in the topology rail. They belong to the router as a machine,
+           which is what this section already collects. -->
+      <section class="panel" style="border-top:1px solid var(--line)">
+        <div class="panel__h"><span class="panel__t">Software</span>
+          <div class="panel__aside" id="st-soft"></div></div>
+        <div class="panel__b" id="b-soft"></div>
+      </section>
+      <section class="panel" style="border-top:1px solid var(--line)">
+        <div class="panel__h"><span class="panel__t">System log</span>
+          <div class="panel__aside" id="st-log"></div></div>
+        <div class="panel__b" id="b-log"></div>
+      </section>
     </div>
   </main>
 </div>
@@ -749,6 +762,185 @@ function rebootOverlay() {
     }, 25000);
 }
 
+/* ---------------------------------------------------------------- software -- */
+/* The running version is read from the router and is always true. Everything
+   else comes from a check against the build server, which costs seconds — so it
+   is cached, shown with its age, and refreshed only when asked. A reading with
+   no timestamp invites you to trust a stale one. */
+function renderSoft(d) {
+    var box = $('#b-soft'); clear(box);
+    var aside = $('#st-soft'); clear(aside);
+    var s = d.software || {}, c = s.check;
+
+    var dl = el('dl', 'kv');
+    function kv(k, v) { dl.appendChild(el('dt', null, k)); dl.appendChild(el('dd', null, v)); }
+    kv('Running', [s.running, s.revision].filter(Boolean).join('   ') || 'unknown');
+    if (s.target) kv('Target', s.target);
+    if (c && c.to && c.from && c.to !== c.from) kv('Available', c.to);
+    box.appendChild(dl);
+
+    if (!s.owut) {
+        aside.appendChild(OS.stateWord('no checker', 'idle'));
+        var n0 = OS.note('Checking for updates needs the attendedsysupgrade-common package. ' +
+            'The version above is still accurate — it is read from the router itself — but ' +
+            'nothing here can say whether a newer one exists.', 'warn');
+        n0.style.marginTop = '14px';
+        box.appendChild(n0);
+        return;
+    }
+
+    if (!c) {
+        aside.appendChild(OS.stateWord('not checked', 'idle'));
+    } else {
+        var hasUpd = !!(c.to && c.from && c.to !== c.from);
+        aside.appendChild(OS.stateWord(hasUpd ? 'update available' : 'up to date',
+                                       hasUpd ? 'warn' : 'ok'));
+
+        /* What an upgrade cannot tell you, said plainly. owut compares package
+           versions, so a stock package whose files were edited in place looks
+           untouched to it — a hand-patched kernel module included. The upgrade
+           replaces it and nothing announces the loss. Say so once, next to the
+           button, rather than leaving it to be rediscovered afterwards. */
+        if (hasUpd) {
+            var nw = OS.note('An upgrade reinstalls the stock versions of everything. ' +
+                'This check compares package versions, so any file you edited in place ' +
+                'inside an otherwise-current package — a patched driver, most often — ' +
+                'looks unchanged here and is replaced without a word.', 'warn');
+            nw.style.marginTop = '14px';
+            box.appendChild(nw);
+        }
+
+        /* Not a warning: a stock package satisfied by a different one is a
+           normal build choice, and calling it "modified" would be alarming and
+           wrong. It is worth showing only because it explains a count that
+           otherwise looks like damage. */
+        if (c.substituted && c.substituted.length) {
+            var hs = el('div', 'label', 'Provided by a different package');
+            hs.style.cssText = 'margin-top:16px;margin-bottom:8px';
+            box.appendChild(hs);
+            var sl = el('dl', 'kv');
+            c.substituted.forEach(function (p) {
+                sl.appendChild(el('dt', null, p.name));
+                sl.appendChild(el('dd', null, p.by));
+            });
+            box.appendChild(sl);
+        }
+
+        if (c.packages && c.packages.length) {
+            var h = el('div', 'label', c.packages.length + ' package' +
+                (c.packages.length === 1 ? '' : 's') + ' out of date');
+            h.style.cssText = 'margin-top:16px;margin-bottom:8px';
+            box.appendChild(h);
+            var pl = el('dl', 'kv');
+            c.packages.forEach(function (p) {
+                pl.appendChild(el('dt', null, p.name));
+                pl.appendChild(el('dd', null, p.from + '  →  ' + p.to));
+            });
+            box.appendChild(pl);
+        } else if (!hasUpd) {
+            var ok = el('div', 'hint', 'Every package matches the build it shipped with.');
+            ok.style.marginTop = '12px';
+            box.appendChild(ok);
+        }
+    }
+
+    var row = el('div', 'inline'); row.style.marginTop = '16px';
+    var btn = el('button', 'btn btn--sm', c ? 'Check again' : 'Check for updates');
+    btn.type = 'button';
+    row.appendChild(btn);
+    if (c && c.checked) {
+        var cap = el('span', 'row__cap', 'checked ' + OS.ago(c.checked));
+        cap.style.marginLeft = '2px';
+        row.appendChild(cap);
+    }
+    box.appendChild(row);
+    btn.addEventListener('click', function () {
+        OS.act(btn, API, { action: 'updcheck' },
+            { ok: 'Checked.', delay: 400, failPrefix: 'Could not check' });
+    });
+}
+
+/* -------------------------------------------------------------------- log -- */
+/* Deliberately outside the 15s poll: the log is read when something is wrong,
+   not continuously, and re-reading it under the cursor would move the line you
+   were in the middle of. */
+var logLevel = 'all';
+var LOG_LEVELS = [['all', 'All'], ['warn', 'Warnings'], ['err', 'Errors']];
+
+function renderLog() {
+    var aside = $('#st-log');
+    if (!aside.firstChild) {
+        var seg = el('div', 'seg');
+        LOG_LEVELS.forEach(function (o) {
+            var b = el('button', 'btn btn--sm', o[1]);
+            b.type = 'button';
+            b.setAttribute('aria-pressed', o[0] === logLevel ? 'true' : 'false');
+            b.addEventListener('click', function () {
+                if (logLevel === o[0]) return;
+                logLevel = o[0];
+                var all = seg.querySelectorAll('.btn');
+                for (var i = 0; i < all.length; i++) {
+                    all[i].setAttribute('aria-pressed',
+                        LOG_LEVELS[i][0] === logLevel ? 'true' : 'false');
+                }
+                loadLog();
+            });
+            seg.appendChild(b);
+        });
+        aside.appendChild(seg);
+        loadLog();
+    }
+}
+
+function loadLog() {
+    var box = $('#b-log');
+    clear(box);
+    var sk = el('div', 'sk'); sk.style.width = '55%';
+    box.appendChild(sk);
+    fetch(API + '?action=logs&level=' + logLevel + '&n=150', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(paintLog, function () { paintLog(null); });
+}
+
+function paintLog(j) {
+    var box = $('#b-log'); clear(box);
+    if (!j || !j.ok) {
+        box.appendChild(OS.emptyState('The log could not be read',
+            'The router answered, but not with a log.', 'alert'));
+        return;
+    }
+    if (!j.lines.length) {
+        box.appendChild(OS.emptyState(
+            logLevel === 'all' ? 'The log is empty' : 'Nothing at this level',
+            logLevel === 'all' ? 'Nothing has been written since the last boot.'
+                               : 'Which is the answer you want — the router has logged no ' +
+                                 (logLevel === 'err' ? 'errors' : 'warnings') + '.',
+            logLevel === 'all' ? 'empty' : 'check'));
+        return;
+    }
+    var list = el('div', 'log');
+    j.lines.forEach(function (L) {
+        var tone = /^(emerg|alert|crit|err)/.test(L.lvl) ? ' log__l--err'
+                 : /^warn/.test(L.lvl) ? ' log__l--warn' : '';
+        var row = el('div', 'log__l' + tone);
+        var head = el('div', 'log__h');
+        head.appendChild(el('span', 'log__t', L.t));
+        head.appendChild(el('span', 'log__s', L.src));
+        row.appendChild(head);
+        row.appendChild(el('div', 'log__m', L.msg));
+        list.appendChild(row);
+    });
+    box.appendChild(list);
+
+    var foot = el('div', 'inline'); foot.style.marginTop = '12px';
+    var rb = el('button', 'btn btn--ghost btn--sm', 'Refresh'); rb.type = 'button';
+    rb.addEventListener('click', loadLog);
+    foot.appendChild(rb);
+    foot.appendChild(el('span', 'row__cap',
+        'showing ' + j.lines.length + ' of ' + j.total + ' lines, newest first'));
+    box.appendChild(foot);
+}
+
 /* -------------------------------------------------------------------- boot -- */
 function render(d) {
     if (!d || !d.ok) return;
@@ -759,6 +951,8 @@ function render(d) {
     renderIot(d);
     renderLan(d);
     renderSys(d);
+    renderSoft(d);
+    renderLog();
     var up = radios.filter(function (r) { return r.current; }).length;
     setTxt($('#wifiMeta'), up + ' of ' + radios.length + ' radios up');
 }
