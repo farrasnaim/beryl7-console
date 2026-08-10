@@ -531,6 +531,13 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .sk::after{content:"";position:absolute;inset:0;
     background:linear-gradient(90deg,transparent,var(--rule),transparent);animation:sweep 1.5s infinite}
 @keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+/* Reserved space for a panel's divergence note, so side-by-side panels keep
+   their forms on the same line whether or not the note is present. flow-root,
+   not a bare div: the note inside carries a bottom margin, and without a block
+   formatting context that margin collapses straight through the slot and
+   pushes only that panel's form down — the slots measure equal and the forms
+   still sit 14px apart. Height is set in JS; see equaliseNoteSlots(). */
+.noteslot{display:flow-root}
 .note{display:flex;gap:10px;padding:11px var(--s3);border-radius:var(--r);
     border:1px solid var(--rule-2);background:var(--face-2);font-size:12.5px;line-height:1.5;
     align-items:flex-start}

@@ -236,7 +236,15 @@ function renderRadio(r) {
                                  'region ' + r.country]));
     }
 
-    /* configured-vs-running divergence, stated only when true */
+    /* configured-vs-running divergence, stated only when true.
+       The slot is always present so the two radio panels stay row-aligned side
+       by side: whichever radio has no divergence gets the matching empty space
+       instead of pulling its form up past the other one. Height is equalised in
+       JS, not by a min-height — the note wraps to 2, 3 or 4 lines depending on
+       column width (measured: 61px / 80px / 99px), so any constant would be
+       correct at exactly one window size. */
+    var slot = el('div', 'noteslot');
+    box.appendChild(slot);
     var cfgW = parseInt(String(r.htmode).replace(/^[A-Z]+/, ''), 10) || 20;
     if (live && !r.disabled) {
         if (String(live.channel) !== String(r.channel) || live.width !== cfgW) {
@@ -256,7 +264,7 @@ function renderRadio(r) {
                     : ' The radio negotiated this itself; the configured value is still what it aims for.');
             body.appendChild(why);
             n.style.marginBottom = '14px';
-            box.appendChild(n);
+            slot.appendChild(n);
         }
     }
 
@@ -355,6 +363,35 @@ function renderRadio(r) {
 
 /* Build one panel per reported radio, once. Rebuilding on every poll would
    throw away in-progress edits and the unsaved chip that guards them. */
+/* Make every radio panel reserve the same height for its divergence note, so
+   the forms below them line up. Only above 900px — that is where .g2 becomes
+   two columns AND where the note's second sentence is shown, so it is the only
+   width at which alignment is a question. Below it the panels stack and an
+   empty reserved block would just be a hole in the page. */
+function equaliseNoteSlots() {
+    var slots = OS.$$('#radioGrid .noteslot');
+    if (!slots.length) return;
+    slots.forEach(function (s) { s.style.height = ''; });
+    if (MQF.matches) return;                       /* stacked: nothing to align */
+
+    /* Pad each slot so its BOTTOM edge sits the same distance below its panel's
+       top — not so the slots are merely the same height. The form starts right
+       after the slot, so this is what actually lines the forms up, and it also
+       absorbs the "now ch …" summary line above, which wraps to a different
+       number of lines per band at narrow desktop widths. Equalising only the
+       slot heights left a 17px offset in exactly that case (measured). */
+    var offs = slots.map(function (s) {
+        var panel = s.closest ? s.closest('.panel') : null;
+        if (!panel) return 0;
+        return s.getBoundingClientRect().bottom - panel.getBoundingClientRect().top;
+    });
+    var target = Math.max.apply(null, offs);
+    slots.forEach(function (s, i) {
+        var pad = target - offs[i];
+        if (pad > 0) s.style.height = (s.offsetHeight + pad) + 'px';
+    });
+}
+
 function ensureRadioPanels(radios) {
     var grid = $('#radioGrid');
     if (grid.getAttribute('data-n') === String(radios.length)) return;
@@ -571,6 +608,12 @@ function loadFailover() {
         }).catch(function () { /* the rest of the page is unaffected */ });
 }
 if (MQF.addEventListener) MQF.addEventListener('change', loadFailover);
+/* Column width changes how the divergence note wraps, which changes the height
+   the other panel has to match. Registered here, not next to the function:
+   MQF is assigned further down this file, so an earlier listener would read it
+   as undefined at parse time. */
+if (MQF.addEventListener) MQF.addEventListener('change', equaliseNoteSlots);
+addEventListener('resize', equaliseNoteSlots);
 
 /* -------------------------------------------------------------------- lan -- */
 function ipOk(ip) {
@@ -1034,6 +1077,7 @@ function render(d) {
     var radios = d.wireless.radios;
     ensureRadioPanels(radios);
     radios.forEach(renderRadio);
+    equaliseNoteSlots();
     renderIot(d);
     renderLan(d);
     renderSys(d);
