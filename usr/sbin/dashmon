@@ -60,6 +60,68 @@ if [ -f "$SNAP" ]; then
 fi
 printf '%s\n' "$cur" > "$SNAP"
 
+# ---- interface flap detection -----------------------------------------------
+# 2026-08-10: a netifd restart orphaned wan6's odhcp6c; every replacement then
+# died in ~100ms on a ubus name collision and netifd respawned it with no
+# backoff. Four cores pinned for an hour, the log ring wrapped in 42 seconds —
+# and this collector kept reporting values (load, temp) while missing the rate
+# that explained them. So: count netifd down-events per interface over the last
+# WINDOW seconds, straight from logread. A storm that wraps the buffer only
+# makes the count larger, so the alarm survives its own evidence being erased.
+FLAP=/tmp/.dashflap
+FLOG=/tmp/.flaplog
+WINDOW=90
+THRESH=6   # per window; normal churn (repeater join, WAN bounce) stays under 4
+
+_day=$(date +%d)
+_sod=$(date +%H:%M:%S | awk -F: '{print $1*3600+$2*60+$3}')
+_raw=$(logread 2>/dev/null | awk -v sod="$_sod" -v day="$_day" -v win="$WINDOW" -v q="'" '
+    # lines look like: Mon Aug 10 22:48:11 2026 daemon.notice netifd: ...
+    # in-window = same day-of-month and 0..win seconds old. day compare is
+    # numeric so syslog " 8" matches date(1) "08". events straddling local
+    # midnight are missed for one minute, which an alarm can afford.
+    function age(  t, T) { split($4, T, ":"); t = T[1]*3600 + T[2]*60 + T[3]
+                           return ($3+0 == day+0) ? sod - t : -1 }
+    $0 ~ ("netifd: Interface " q) && / is now down$/ {
+        a = age(); if (a >= 0 && a <= win) { i = $9; gsub(q, "", i); down[i]++ }
+    }
+    /netifd: .*ubus error/ {
+        a = age(); if (a >= 0 && a <= win) ue++
+    }
+    END { for (i in down) print i, down[i], ue+0 }
+')
+_active=$(printf '%s\n' "$_raw" | awk -v th="$THRESH" 'NF>=3 && $2>=th')
+if [ -n "$_active" ]; then
+    _ue=$(printf '%s\n' "$_active" | awk 'NR==1{print $3+0}')
+    # signature check, only once the loop is emitting ubus errors: an odhcp6c
+    # whose parent is not netifd survived a netifd restart, and is holding the
+    # ubus name every replacement is dying on.
+    SIG=-
+    if [ "$_ue" -gt 0 ]; then
+        for _p in /proc/[0-9]*; do
+            [ "$(cat "$_p/comm" 2>/dev/null)" = "odhcp6c" ] || continue
+            _pp=$(awk '/^PPid:/{print $2}' "$_p/status" 2>/dev/null)
+            [ "$(cat "/proc/$_pp/comm" 2>/dev/null)" = "netifd" ] \
+                || { SIG=orphan-odhcp6c; break; }
+        done
+    fi
+    _new=0; [ -f "$FLAP" ] || _new=1
+    {
+        echo "$now $_ue $SIG"
+        printf '%s\n' "$_active" | awk '{print $1, $2}'
+    } > "$FLAP.n" && mv "$FLAP.n" "$FLAP"
+    printf '%s\n' "$_active" | awk -v t="$now" -v s="$SIG" '{print t, $1, $2, s}' >> "$FLOG"
+    tail -n 50 "$FLOG" > "$FLOG.n" && mv "$FLOG.n" "$FLOG"
+    if [ "$_new" = 1 ]; then
+        _sum=$(printf '%s\n' "$_active" | awk '{printf "%s%s %d/min", (c++?", ":""), $1, $2}')
+        [ "$SIG" != "-" ] && _sum="$_sum (sig: $SIG)"
+        logger -t dashmon "interface flap: $_sum"
+    fi
+elif [ -f "$FLAP" ]; then
+    rm -f "$FLAP"
+    logger -t dashmon "interface flap cleared"
+fi
+
 # ---- daily traffic baseline (LOCAL midnight) --------------------------------
 # nlbwmon anchors its accounting periods to UTC, so its per-device counters roll
 # over at UTC midnight — 07:00 here, not at local midnight. Without a baseline
