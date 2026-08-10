@@ -748,6 +748,12 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
      just a wall of text between you and the controls */
   .note--deskonly{display:none}
   .btn{min-height:40px} .btn--sm{min-height:38px;padding:8px 12px}
+  /* `.seg .btn` and `.panel__aside .btn` are both two-class selectors, so they
+     outrank `.btn--sm` no matter where it sits and a segmented control in a
+     panel header would keep the 30px meant for a secondary header action. A
+     segmented filter is not secondary — it is how you drive the panel — so it
+     is restated here, after both, to win on order at equal specificity. */
+  .seg .btn{min-height:38px;padding:8px 14px}
   .kv{grid-template-columns:minmax(0,1fr);gap:1px var(--s3)} .kv dd{margin-bottom:8px}
 }
 @media (max-width:900px){
