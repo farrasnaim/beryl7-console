@@ -240,17 +240,21 @@ function renderRadio(r) {
     var cfgW = parseInt(String(r.htmode).replace(/^[A-Z]+/, ''), 10) || 20;
     if (live && !r.disabled) {
         if (String(live.channel) !== String(r.channel) || live.width !== cfgW) {
-            var msg = 'Configured ' + r.htmode + ' on channel ' + r.channel +
-                      '; running ' + live.width + ' MHz on channel ' + live.channel + '.';
-            if (r.band === '2g' && live.width < cfgW) {
-                msg += ' On 2.4 GHz, coexistence with neighbouring networks can force the width down.';
-            } else {
-                msg += ' The radio negotiated this itself; the configured value is still what it aims for.';
-            }
-            /* desktop only: on a phone this is a paragraph of explanation
-               standing between you and the controls */
-            var n = OS.note(msg, null);
-            n.className += ' note--deskonly';
+            /* The fact must always be visible. Hiding the whole note on a phone
+               left the contradiction on screen with nothing to explain it — the
+               form reads channel 36 while the line above reads channel 40 — and
+               a phone is exactly where this page gets used while travelling.
+               So the statement stays and only the reasoning is desktop-only. */
+            var n = OS.note('', null);
+            var body = n.lastChild;
+            body.appendChild(document.createTextNode(
+                'Configured ' + r.htmode + ' on channel ' + r.channel +
+                '; running ' + live.width + ' MHz on channel ' + live.channel + '.'));
+            var why = el('span', 'desk-only',
+                r.band === '2g' && live.width < cfgW
+                    ? ' On 2.4 GHz, coexistence with neighbouring networks can force the width down.'
+                    : ' The radio negotiated this itself; the configured value is still what it aims for.');
+            body.appendChild(why);
             n.style.marginBottom = '14px';
             box.appendChild(n);
         }
