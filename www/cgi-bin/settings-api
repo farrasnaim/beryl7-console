@@ -187,7 +187,14 @@ if [ "$ACTION" = "logs" ]; then
     tail -n 900 "$LT" | awk -v want="$LVL" -v lim="$N" '
         function jesc(s) {
             gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s)
-            gsub(/\t/, " ", s); gsub(/[\000-\037]/, "", s)
+            # [[:cntrl:]], not [\000-\037]: busybox awk cannot parse an octal
+            # escape inside a bracket expression and dies with "bad regex '['",
+            # taking the whole array with it and emitting "lines":, — invalid
+            # JSON, so the panel reports the log as unreadable. gawk accepted
+            # it, and gawk was on this router until it was pulled in as an
+            # orphaned dependency of banip on 2026-08-11. POSIX class works on
+            # both.
+            gsub(/\t/, " ", s); gsub(/[[:cntrl:]]/, "", s)
             return s
         }
         NF > 7 {
