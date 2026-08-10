@@ -508,9 +508,16 @@ if [ "$ACTION" = "route" ]; then
     for r in $(uci -q show pbr | grep -i "src_addr='$MAC'" | sed -n 's/^pbr\.\(@policy\[[0-9]*\]\)\..*$/\1/p' | sort -ru); do
         uci -q delete pbr.$r
     done
-    # ---- tear down any previous IPv6 block for this MAC ----
-    # (per-device DNS is regenerated wholesale by rebuild_vpn_dns at the end)
-    for r in $(uci -q show firewall | sed -n "s/^firewall\.\(@rule\[[0-9]*\]\)\.name='vpn6_$MAC'\$/\1/p" | sort -r); do
+    # ---- retire the old standing IPv6 blocks ----
+    # These used to be persistent uci rules, one per routed MAC. They only ever
+    # got deleted here, on the next route action for that same MAC — so when
+    # vpnwatch paused a dead tunnel it released the device back onto IPv4 (the
+    # whole point of pausing) while the device's IPv6 stayed rejected, forever
+    # and invisibly. beryl-vpndns now emits the v6 block alongside the DNS
+    # rules, regenerated from the live policy state, so it follows pause and
+    # resume for free. Sweep every leftover, not just this MAC's: they are all
+    # obsolete, and one left behind is a device that silently has no IPv6.
+    for r in $(uci -q show firewall | sed -n "s/^firewall\.\(@rule\[[0-9]*\]\)\.name='vpn6_.*'\$/\1/p" | sort -r); do
         uci -q delete firewall.$r
     done
 
@@ -531,20 +538,12 @@ if [ "$ACTION" = "route" ]; then
 
         VDNS=$(uci -q get network.$IFACE.dns | awk '{print $1}')
 
-        # ---- close the IPv6 bypass ----
-        # pbr only marks IPv4 (ipv6_enabled=0) and these Proton tunnels carry no
-        # IPv6 address, so any v6 traffic would exit via the ISP in clear. Today
-        # the LAN is ULA-only so nothing can actually get out, but the moment a
-        # real prefix appears that becomes a silent full-traffic leak. Reject v6
-        # egress for VPN'd devices; they fall back to IPv4, i.e. the tunnel.
-        fr=$(uci add firewall rule)
-        uci set firewall.$fr.name="vpn6_$MAC"
-        uci set firewall.$fr.src='lan'
-        uci set firewall.$fr.dest='wan'
-        uci set firewall.$fr.family='ipv6'
-        uci set firewall.$fr.src_mac="$MAC"
-        uci set firewall.$fr.target='REJECT'
-        uci commit firewall
+        # The IPv6 bypass is closed by beryl-vpndns, called through
+        # rebuild_vpn_dns below. pbr only marks IPv4 (ipv6_enabled=0) and these
+        # tunnels carry no IPv6, so a routed device's v6 would leave via the ISP
+        # in clear — the tunnel intact, the location given away. Keeping that
+        # block in the same generated file as the DNS rules is what makes it
+        # track the policy instead of outliving it.
     fi
     uci commit pbr; uci commit firewall
     # sync_pbr first (it settles the enabled flags rebuild_vpn_dns reads from)
