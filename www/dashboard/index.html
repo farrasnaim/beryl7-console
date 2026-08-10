@@ -287,7 +287,12 @@ function renderTopo(d, M) {
     box.appendChild(OS.topology({
         online: online && loss < 100,
         flowing: flowing,
-        latency: lat && lat[1] > 0 ? Math.round(lat[1]) + ' ms round-trip' : 'not responding',
+        /* Only when it is bad news. The round-trip figure lives in the
+           Throughput panel, which states the current value, the trend and the
+           range — so repeating the number here was the same fact twice. What is
+           NOT in that panel is the case where nothing comes back at all, and
+           that belongs at the top where the eye lands first. */
+        latency: lat && lat[1] > 0 ? '' : 'not responding',
         uplink: UPNAME[up] || up,
         uplinkSub: (d.wan && d.wan.ip) || 'no address',
         router: sy.host || 'Beryl 7',
