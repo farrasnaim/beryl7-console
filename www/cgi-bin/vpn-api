@@ -462,6 +462,19 @@ if [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ]; then
     # tunnel state and pbr must be resequenced together: bring the link up (or
     # down) FIRST, wait for it to settle, then re-apply pbr. Without this, setting
     # a device route before connecting left pbr dead and all traffic on plain WAN.
+    #
+    # rebuild_vpn_dns MUST follow sync_pbr in both directions. sync_pbr is what
+    # enables or parks the policies, and the per-device DNS redirects are derived
+    # from exactly that state — so leaving them behind breaks both ways:
+    #
+    #   disconnecting  the redirect still points at the resolver INSIDE the dead
+    #                  tunnel, so that device silently loses DNS entirely. Nothing
+    #                  heals it either: vpnwatch only acts on policies it paused
+    #                  itself, and sync_pbr has already parked this one.
+    #   reconnecting   the policy is re-enabled but no redirect is recreated, so
+    #                  the device is routed through the tunnel while resolving via
+    #                  the ISP — the DNS leak this mechanism exists to prevent.
+    #
     if [ "$ACTION" = "up" ]; then
         uci set network.$IFACE.disabled='0'; uci set network.$IFACE.auto='1'
         uci commit network
@@ -472,11 +485,12 @@ if [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ]; then
               i=$((i+1)); sleep 1
           done
           sleep 1
-          sync_pbr ) >/dev/null 2>&1 &
+          sync_pbr
+          rebuild_vpn_dns ) >/dev/null 2>&1 &
     else
         uci set network.$IFACE.disabled='1'; uci set network.$IFACE.auto='0'
         uci commit network
-        ( ifdown "$IFACE" >/dev/null 2>&1; sleep 2; sync_pbr ) >/dev/null 2>&1 &
+        ( ifdown "$IFACE" >/dev/null 2>&1; sleep 2; sync_pbr; rebuild_vpn_dns ) >/dev/null 2>&1 &
     fi
     printf '{"ok":true,"action":"%s","name":"%s"}' "$ACTION" "$(esc "$NAME")"
     exit 0
