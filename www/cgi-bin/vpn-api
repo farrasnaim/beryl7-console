@@ -153,33 +153,6 @@ case "$ACTION" in
 esac
 [ "$REQUEST_METHOD" = "POST" ] && guard_post
 
-# ============================ TOR ============================
-# Tor is an optional package. Everything here degrades to "not installed"
-# rather than erroring, so the console behaves normally on a router without it.
-#
-# Deliberately not confirmed and not gated: this is the same class of action as
-# connecting a tunnel — reversible, non-destructive, and something you want to
-# do quickly from a phone.
-if [ "$ACTION" = "torset" ]; then
-    [ -x /etc/init.d/tor ] || { printf '{"ok":false,"error":"Tor is not installed on this router"}'; exit 0; }
-    W=$(qs_get on)
-    case "$W" in 0|1) ;; *) printf '{"ok":false,"error":"bad state"}'; exit 0 ;; esac
-    if [ "$W" = "1" ]; then
-        /etc/init.d/tor enable >/dev/null 2>&1
-        # The SUBSHELL must drop stdout, not merely the command inside it: uhttpd
-        # holds the response open until every inherited descriptor is closed, so
-        # a bare `( ... ) &` would stall the request until Tor finished starting.
-        ( /etc/init.d/tor start ) >/dev/null 2>&1 &
-        logger -t vpn-api "tor enabled via web UI"
-    else
-        /etc/init.d/tor disable >/dev/null 2>&1
-        ( /etc/init.d/tor stop ) >/dev/null 2>&1 &
-        logger -t vpn-api "tor disabled via web UI"
-    fi
-    printf '{"ok":true,"on":%s}' "$( [ "$W" = "1" ] && echo true || echo false )"
-    exit 0
-fi
-
 # ============================ VPN FAIL MODE (travel policy) ============================
 # What should happen to a VPN-routed device when its tunnel is unreachable?
 #   closed (default) — block its traffic. Never leaks, but the device has NO
@@ -604,72 +577,8 @@ done
 FM=$(cat "$FAILMODE_FILE" 2>/dev/null); case "$FM" in open|closed) ;; *) FM=closed ;; esac
 AUTOP=$(grep -c . /etc/dashboard/vpn-autopaused 2>/dev/null); case "$AUTOP" in ''|*[!0-9]*) AUTOP=0 ;; esac
 
-# Tor status, or null when the package is absent, so the UI hides the panel
-# entirely rather than offering a control that cannot work.
-#
-# Cost matters here: this runs on every 5s poll of the VPN page. Measured on
-# this router with `time` over 50 iterations — busybox `date` has no %N, so
-# timestamp subtraction silently reports 0 and cannot be used to measure this.
-#   /etc/init.d/tor running   40.4 ms   (a full shell script + rc.common)
-#   logread -e Tor            14.4 ms
-#   grep /proc/net/tcp         2.2 ms
-#   test -s <consensus>        0    ms
-# Hence the two cheap probes below instead of the obvious expensive ones.
-if [ -x /etc/init.d/tor ]; then
-    T_SOCKS=$(sed -n 's/^SocksPort .*:\([0-9][0-9]*\).*/\1/p' /etc/tor/torrc 2>/dev/null | tail -1)
-    T_HTTP=$(sed -n 's/^HTTPTunnelPort .*:\([0-9][0-9]*\).*/\1/p' /etc/tor/torrc 2>/dev/null | tail -1)
-
-    # "Running" = its SOCKS port is listening. Tor opens listeners immediately,
-    # before bootstrapping finishes, which is exactly the STARTING state the UI
-    # wants to show. /proc/net/tcp holds the port in upper-case hex.
-    #
-    # NOT `pgrep -x tor`: busybox pgrep matches the whole command line, and the
-    # init script launches "/usr/sbin/tor --runasdaemon 0 -f /tmp/torrc", so an
-    # exact-name match silently never fires and the panel reports OFF while Tor
-    # is plainly running. `pgrep -f` matches the checking shell itself.
-    T_RUN=false
-    if [ -n "$T_SOCKS" ]; then
-        T_HEX=$(printf '%04X' "$T_SOCKS" 2>/dev/null)
-        grep -q ":$T_HEX 00000000:0000 0A" /proc/net/tcp 2>/dev/null && T_RUN=true
-    else
-        # No SocksPort configured at all — fall back to the authoritative check
-        # rather than reporting a running daemon as stopped.
-        T_RUN=$(/etc/init.d/tor running >/dev/null 2>&1 && echo true || echo false)
-    fi
-    T_EN=$([ -n "$(ls /etc/rc.d/S*tor 2>/dev/null)" ] && echo true || echo false)
-
-    # Bootstrap percentage, for the "starting up" state.
-    #
-    # Ask the cheap question first: does Tor hold a network consensus? Without
-    # one it cannot build a circuit; with one it can, and it is therefore done.
-    # That is a stat() and covers the steady state, which is nearly always the
-    # case — so the 14 ms logread is only paid during the ~30s it is actually
-    # starting, when the climbing percentage is worth showing.
-    #
-    # The log could not be the only source anyway: logread is a small ring
-    # buffer, so on a router that has been up a while those lines have scrolled
-    # away and the parse would report a perfectly healthy Tor as 0%.
-    T_BS=0
-    if [ "$T_RUN" = "true" ]; then
-        T_DD=$(sed -n 's/^DataDirectory *//p' /etc/tor/torrc 2>/dev/null | tail -1)
-        [ -n "$T_DD" ] || T_DD=/var/lib/tor
-        if [ -s "$T_DD/cached-microdesc-consensus" ]; then
-            T_BS=100
-        else
-            T_BS=$(logread -e Tor 2>/dev/null | sed -n 's/.*Bootstrapped \([0-9][0-9]*\)%.*/\1/p' | tail -1)
-            case "$T_BS" in ''|*[!0-9]*) T_BS=0 ;; esac
-        fi
-    fi
-    TORJ=$(printf '{"running":%s,"enabled":%s,"bootstrap":%s,"socks":%s,"http":%s}' \
-        "$T_RUN" "$T_EN" "$T_BS" \
-        "$( [ -n "$T_SOCKS" ] && echo "$T_SOCKS" || echo null )" \
-        "$( [ -n "$T_HTTP" ] && echo "$T_HTTP" || echo null )")
-else
-    TORJ=null
-fi
-
-printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"failmode":"%s","autopaused":%s,"tor":%s,"tunnels":[%s],"policies":[%s]}' \
+printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"failmode":"%s","autopaused":%s,"tunnels":[%s],"policies":[%s]}' \
     "$(date +%s)" \
     "$( [ "$(uci -q get pbr.config.enabled)" = "1" ] && echo true || echo false )" \
-    "$FM" "$AUTOP" "$TORJ" \
+    "$FM" "$AUTOP" \
     "$TUNS" "$POLS"

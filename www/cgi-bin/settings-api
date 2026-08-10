@@ -543,10 +543,22 @@ if [ "$ACTION" = "setlan" ]; then
     if [ "$IP" != "$OLDIP" ]; then
         uci set network.lan.ipaddr="$IP"
         uci commit network
+        # uhttpd binds the LAN address literally (2026-08-11, so it is not
+        # exposed on WAN or a public IPv6). That address is about to change, so
+        # it must move with it — otherwise the console keeps listening on an
+        # address that no longer exists and this action locks the user out of
+        # the very page they used to trigger it.
+        if uci -q get uhttpd.main.listen_http | grep -q "$OLDIP"; then
+            for _proto in http https; do
+                _cur=$(uci -q get uhttpd.main.listen_$_proto)
+                uci set uhttpd.main.listen_$_proto="$(printf '%s' "$_cur" | sed "s/$OLDIP/$IP/g")"
+            done
+            uci commit uhttpd
+        fi
         logger -t settings "LAN address change $OLDIP -> $IP via web UI"
         # Answer first, move the network afterwards — the response must escape
         # on the old address before it stops existing.
-        ( sleep 2; /etc/init.d/network reload; sleep 2; /etc/init.d/dnsmasq restart ) >/dev/null 2>&1 &
+        ( sleep 2; /etc/init.d/network reload; sleep 2; /etc/init.d/uhttpd reload; /etc/init.d/dnsmasq restart ) >/dev/null 2>&1 &
         printf '{"ok":true,"moved":"%s"}' "$(esc "$IP")"
     else
         logger -t settings "DHCP settings applied via web UI"

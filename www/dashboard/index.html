@@ -487,13 +487,8 @@ function renderCharts(d) {
 /* System is fed by whichever source is currently fresher: the 1s sampler while
    the session is live, the 5s poll otherwise. rate-api reports these in the
    same units as dashboard-api so they merge without conversion. */
-var lastSys = null, lastFlap = null, lastFlapLast = null, lastFlapFix = null;
+var lastSys = null;
 function renderSys(d) {
-    /* flap state only rides the 5s poll (rate-api doesn't carry it) — fine,
-       since dashmon only refreshes it once a minute anyway. */
-    lastFlap = d.flap || null;
-    lastFlapLast = d.flap_last || null;
-    lastFlapFix = d.flap_fix || null;
     lastSys = d.sys || {};
     paintSys(lastSys);
 }
@@ -517,38 +512,6 @@ function paintSys(sys) {
         if (meta) { var m = el('div', 'ro__m', meta); m.style.marginTop = '5px'; r.appendChild(m); }
         box.appendChild(r);
     }
-    /* Interface flap alarm — an event-state, not a metric, so it renders as a
-       note above the bars rather than another meter. Only exists while dashmon
-       sees a storm, which is what makes it visible: an extra red row appearing
-       in a panel that normally has four fixed ones. */
-    var flap = lastFlap && lastFlap.ifaces && lastFlap.ifaces.length ? lastFlap : null;
-    if (flap) {
-        var head = flap.ifaces.map(function (f) {
-            return f.iface + ' · ' + f.per_min + ' restarts/min';
-        }).join(', ');
-        /* Three different things to say, and the difference matters: apwatch is
-           working on it, apwatch has given up, or nobody is coming. Telling
-           someone to go fix it by hand while a watchdog is mid-attempt would be
-           wrong, and so would staying quiet once the watchdog has stood down. */
-        var fix = lastFlapFix, spent = fix && fix.tries >= (fix.max || 2);
-        var fn = OS.note('', 'bad');
-        var fb = fn.lastChild;
-        fb.appendChild(el('b', null, 'Interface flap — ' + head + '.'));
-        fb.appendChild(document.createTextNode(
-            flap.sig !== 'orphan-odhcp6c'
-                ? ' netifd is restarting the interface faster than it can settle — ' +
-                  'check the system log before the ring buffer wraps.'
-            : spent
-                ? ' An orphaned odhcp6c is holding the ubus name its replacements need. ' +
-                  'Automatic recovery stopped after ' + fix.tries + ' attempts because it ' +
-                  'kept coming back — this one needs you.'
-                : ' An orphaned odhcp6c is holding the ubus name its replacements need. ' +
-                  'Recovering automatically' +
-                  (fix && fix.tries ? ' — attempt ' + fix.tries + ' of ' + (fix.max || 2) : '') + '.'));
-        fn.style.marginBottom = '14px';
-        box.appendChild(fn);
-    }
-
     bar('Load average', load.toFixed(2), Math.min(1, load / cores),
         load > cores ? 'bad' : load > cores * 0.7 ? 'warn' : null,
         (load / cores * 100).toFixed(0) + '% of ' + cores + ' cores, 1 min average');
@@ -569,21 +532,20 @@ function paintSys(sys) {
     /* After a storm clears, keep one quiet line pointing at what happened —
        the 2026-08-10 loop wrapped the log ring in 42s, so by the time anyone
        looked, this was the only trace left. */
-    if (!flap && lastFlapLast && lastFlapLast.ts) {
-        /* Credit the watchdog when it was the one that ended it — otherwise a
-           storm that fixed itself and one that was fixed for you look identical
-           in hindsight, and only one of those is true. */
-        var ff = lastFlapFix,
-            healed = ff && ff.iface === lastFlapLast.iface && ff.ts >= lastFlapLast.ts - 300;
-        var fm = el('div', 'ro__m', 'last flap: ' + lastFlapLast.iface + ' · ' +
-            lastFlapLast.per_min + '/min · ' + OS.ago(lastFlapLast.ts) +
-            (healed ? ' · auto-recovered' : ''));
-        fm.style.marginTop = '10px';
-        box.appendChild(fm);
+    /* IPv6 reachability. Separate from the latency graph because v4 and v6 fail
+       independently: on 2026-08-10 v6 was down for an hour while v4 was perfect
+       and nothing on this page said so. -1 = not sampled yet. */
+    var v6 = sys.v6_loss;
+    if (v6 != null && v6 >= 0) {
+        var v6row = el('div');
+        v6row.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-top:10px';
+        v6row.appendChild(el('span', 'ro__k', 'IPv6'));
+        v6row.appendChild(OS.stateWord(v6 >= 100 ? 'UNREACHABLE' : 'REACHABLE', v6 >= 100 ? 'bad' : 'ok'));
+        box.appendChild(v6row);
     }
 
     var chipBox = $('#sysChip'); clear(chipBox);
-    var worst = (flap || t > 85 || memPct > 0.9 || load > cores) ? ['DEGRADED', 'bad']
+    var worst = (t > 85 || memPct > 0.9 || load > cores || v6 >= 100) ? ['DEGRADED', 'bad']
               : (t > 75 || memPct > 0.75 || load > cores * 0.7) ? ['WARM', 'warn']
               : ['NOMINAL', 'ok'];
     chipBox.appendChild(OS.stateWord(worst[0], worst[1]));

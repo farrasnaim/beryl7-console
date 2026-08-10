@@ -523,27 +523,6 @@ OUIJ="{$OUIJ}"
 WLJ=$(awk 'NF>=3 && $1~/^[0-9]+$/ {printf "%s[%d,%s,%d]", (c++?",":""), $1, $2, $3+0}' /tmp/.wanlat 2>/dev/null)
 WLJ="[$WLJ]"
 
-# ---- interface flap state (written by dashmon while a storm is active) -----
-# file: "<epoch> <ubus_err_count> <sig|->" then "<iface> <down_events>" lines.
-FLJ=$(awk '
-    NR==1 { ts=$1; ue=$2; sig=$3; next }
-    NF>=2 { itm = itm sprintf("%s{\"iface\":\"%s\",\"per_min\":%d}", (n++?",":""), $1, $2) }
-    END {
-        if (ts == "") exit
-        printf "{\"ts\":%d,\"ubus_errors\":%d,\"sig\":%s,\"ifaces\":[%s]}",
-               ts, ue, (sig=="-" ? "null" : "\"" sig "\""), itm
-    }' /tmp/.dashflap 2>/dev/null)
-[ -n "$FLJ" ] || FLJ=null
-# most recent detection, retained after the storm clears — the 2026-08-10 loop
-# shredded the whole log ring in 42s, so this line can be the only trace left.
-FLLAST=$(tail -n 1 /tmp/.flaplog 2>/dev/null \
-    | awk 'NF>=3 {printf "{\"ts\":%d,\"iface\":\"%s\",\"per_min\":%d}", $1, $2, $3}')
-[ -n "$FLLAST" ] || FLLAST=null
-# what apwatch did about it, so recovery is never silent: "<ts> <iface> <try>"
-FLFIX=$(awk 'NF>=3 {printf "{\"ts\":%d,\"iface\":\"%s\",\"tries\":%d,\"max\":2}", $1, $2, $3}' \
-    /tmp/.flapfix 2>/dev/null)
-[ -n "$FLFIX" ] || FLFIX=null
-
 # ---- join/leave events (dashmon), names joined from the classmap ----
 EVJ=$(tail -n 12 /tmp/.presence 2>/dev/null | awk -F'|' '
     NR==FNR { if ($0 !~ /^#/ && NF>=2) n[toupper($1)]=$2; next }
@@ -654,9 +633,12 @@ fi
 case "$NLJ" in '{'*'}') ;; *) NLJ='null' ;; esac
 
 printf '{"ok":true,"ts":%s,' "$NOW"
-printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_total":%s,"mem_avail":%s},' \
-    "$(esc "$HOST")" "$UP" "$TEMP" "$FAN" "$(esc "$LOAD")" "$(jnum "$MEMT")" "$(jnum "$MEMA")"
-printf '"flap":%s,"flap_last":%s,"flap_fix":%s,' "$FLJ" "$FLLAST" "$FLFIX"
+# IPv6 reachability, written by dashmon. Reported separately from the v4 probe
+# because they fail independently — the 2026-08-10 outage took v6 down while v4
+# stayed perfect. -1 means dashmon has not sampled yet.
+V6LOSS=$(awk 'NF>=2 {print $2+0; exit}' /tmp/.wanlat6 2>/dev/null); [ -n "$V6LOSS" ] || V6LOSS=-1
+printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_total":%s,"mem_avail":%s,"v6_loss":%s},' \
+    "$(esc "$HOST")" "$UP" "$TEMP" "$FAN" "$(esc "$LOAD")" "$(jnum "$MEMT")" "$(jnum "$MEMA")" "$V6LOSS"
 # ---- per-lane byte counters -------------------------------------------------
 # Every lane drawn on the topology is exactly one netdev: each AP has its own
 # wireless interface, and the wired lane is the LAN bridge's non-wireless port(s). One

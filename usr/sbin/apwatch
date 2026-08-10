@@ -1,5 +1,5 @@
 #!/bin/sh
-# /usr/sbin/apwatch — recover the two failures that strand a user with no PC.
+# /usr/sbin/apwatch — bring a missing AP back, and nothing else.
 #
 # WHY THIS EXISTS: every repeater action runs `wifi reload`, which bounces BOTH
 # radios (single PHY). If a reload ever fails to bring an AP back — a wedged
@@ -7,117 +7,30 @@
 # with only a phone has no way in: no AP, no dashboard, no SSH. This watchdog
 # closes that hole by noticing and recovering on its own.
 #
-# It guards two independent things, in this order:
+# ESCALATION, gentlest first, stopping as soon as the AP is back:
+#   strike 1  ->  `wifi up`        (re-apply wireless config)
+#   strike 2+ ->  `wifi reload`    (fuller restart of the wireless stack)
 #
-#   1. INTERFACE FLAP  — a netifd restart orphans an interface's odhcp6c; the
-#      orphan keeps the ubus name, so every replacement netifd spawns dies on
-#      the collision and is respawned with no backoff, forever. Killing the
-#      orphan and bringing the interface up ends it. (2026-08-10: this pinned
-#      all four cores for an hour and took IPv6 down.)
+# It stops there. It used to reboot on strike 3; that was removed 2026-08-11
+# after an audit found no case where it had ever been needed, while it remained
+# the most destructive automation on the box.
 #
-#   2. MISSING AP      — escalation, gentlest first, stopping as soon as it is back:
-#        strike 1  ->  `wifi up`        (re-apply wireless config)
-#        strike 2  ->  `wifi reload`    (fuller restart of the wireless stack)
-#        strike 3+ ->  reboot           (last resort, heavily rate-limited)
-#
-# Check 1 runs first and independently, because the AP check exits early when
-# the Wi-Fi is healthy — which is exactly the state a wan6 flap leaves it in.
-#
-# Both are bounded on purpose. Recovery that silently papers over a fault that
-# keeps returning is worse than none at all: it hides the thing that needs a
-# human. So the flap fix gives up after FLAP_MAX_TRIES and leaves the alarm
-# standing, and the reboot never fires more than once an hour or within 10 min
-# of boot, so it can't turn a bad config into a boot loop.
+# THIS SCRIPT IS THE ONLY WRITER FOR WIRELESS. Nothing else may call `wifi` or
+# `ifup` on a wireless-attached interface. A second writer is what turned a
+# DHCP-client fault into a Wi-Fi outage on 2026-08-10: an `ifup` elsewhere
+# reconfigured the stack, this check sampled it mid-flight, called it missing,
+# and stacked a `wifi up` on top — tearing down phy0 and dropping every client.
 
 STATE=/tmp/.apwatch.strikes
-RBMARK=/etc/apwatch.lastreboot          # persistent: must survive the reboot
 LOG="logger -t apwatch"
 
 MIN_UPTIME=600          # don't act during the first 10 min (boot still settling)
-REBOOT_COOLDOWN=3600    # at most one self-reboot per hour
 
 uptime_s=$(cut -d. -f1 /proc/uptime 2>/dev/null); : "${uptime_s:=0}"
 [ "$uptime_s" -lt "$MIN_UPTIME" ] && exit 0
 
 # A repeater connect legitimately tears radios down for a few seconds.
 [ -f /tmp/.repeater-trying ] && exit 0
-
-# ======================= 1. interface flap remediation =======================
-# Acts only on the one signature with a known mechanical fix. Everything else
-# dashmon detects is left for a human — an alarm that is understood is worth
-# more than an action that is guessed.
-FLAPSTATE=/tmp/.dashflap        # written by dashmon: "<ts> <ubus_errs> <sig>"
-FLAPFIX=/tmp/.flapfix           # written here:       "<ts> <iface> <attempt>"
-FLAP_MAX_AGE=180                # ignore a reading dashmon has stopped refreshing
-FLAP_COOLDOWN=300               # at most one attempt per 5 min
-FLAP_MAX_TRIES=2                # then stand down and let the alarm speak
-FLAP_INCIDENT_GAP=3600          # quiet for this long => a new incident, reset
-
-if [ -f "$FLAPSTATE" ]; then
-    _fts=$(awk 'NR==1{print $1+0}' "$FLAPSTATE" 2>/dev/null)
-    _fsig=$(awk 'NR==1{print $3}' "$FLAPSTATE" 2>/dev/null)
-    _now=$(date +%s)
-    case "$_fts" in ''|*[!0-9]*) _fts=0 ;; esac
-
-    # dashmon rewrites this every minute a storm is live. Anything older means
-    # dashmon itself stopped, and acting on a stale reading is guessing.
-    if [ "$_fsig" = "orphan-odhcp6c" ] && [ $((_now - _fts)) -le "$FLAP_MAX_AGE" ]; then
-        _fif=$(awk 'NR>1{print $1; exit}' "$FLAPSTATE" 2>/dev/null)
-        # This name was parsed out of a log line and is about to become a
-        # command argument, so it is untrusted until UCI confirms it names a
-        # real interface.
-        case "$_fif" in
-            ''|*[!a-z0-9_]*) _fif="" ;;
-            *) [ -n "$(uci -q get network.$_fif)" ] || _fif="" ;;
-        esac
-
-        _flast=0; _ftry=0
-        [ -f "$FLAPFIX" ] && read -r _flast _fifp _ftry < "$FLAPFIX" 2>/dev/null
-        case "$_flast" in ''|*[!0-9]*) _flast=0 ;; esac
-        case "$_ftry"  in ''|*[!0-9]*) _ftry=0  ;; esac
-        [ $((_now - _flast)) -gt "$FLAP_INCIDENT_GAP" ] && _ftry=0
-
-        if [ -z "$_fif" ]; then
-            :                                   # nothing safe to act on
-        elif [ "$_ftry" -ge "$FLAP_MAX_TRIES" ]; then
-            # Deliberately silent after the first complaint: the dashboard is
-            # already showing the alarm, and repeating this every minute would
-            # bury the log the same way the flap itself does.
-            if [ $((_now - _flast)) -gt "$FLAP_INCIDENT_GAP" ]; then
-                $LOG "flap on $_fif persists after $_ftry attempts — standing down, needs a look"
-            fi
-        elif [ $((_now - _flast)) -lt "$FLAP_COOLDOWN" ]; then
-            :                                   # give the last attempt time to settle
-        else
-            # Re-derive the orphan at the moment of acting instead of trusting
-            # dashmon's reading: this kills a process, and that reading can be
-            # a minute old.
-            #
-            # The test is PPid == 1, not "parent isn't netifd". odhcp6c forks a
-            # short-lived child of its own to run the state script, and that
-            # child's parent is odhcp6c — so the looser test can match a healthy
-            # client mid-fork and kill half of it. Only a process orphaned by
-            # netifd's death reparents to procd, so PPid 1 is the exact tell.
-            _victim=""
-            for _p in /proc/[0-9]*; do
-                [ "$(cat "$_p/comm" 2>/dev/null)" = "odhcp6c" ] || continue
-                [ "$(awk '/^PPid:/{print $2}' "$_p/status" 2>/dev/null)" = "1" ] || continue
-                _victim="${_p#/proc/}"; break
-            done
-            if [ -n "$_victim" ]; then
-                _ftry=$((_ftry + 1))
-                $LOG "flap on $_fif: killing orphaned odhcp6c $_victim, then ifup (attempt $_ftry/$FLAP_MAX_TRIES)"
-                echo "$_now $_fif $_ftry" > "$FLAPFIX"
-                kill "$_victim" 2>/dev/null
-                sleep 1
-                kill -0 "$_victim" 2>/dev/null && kill -9 "$_victim" 2>/dev/null
-                ifup "$_fif" >/dev/null 2>&1
-            fi
-        fi
-    fi
-fi
-
-# ============================ 2. AP availability ============================
 
 # Which AP sections are *supposed* to be running right now?
 want=0; have=0; missing=""
@@ -159,19 +72,6 @@ $LOG "AP(s) missing:$missing ($have/$want up) — strike $strikes"
 
 case "$strikes" in
     1) $LOG "recovery: wifi up";     wifi up     >/dev/null 2>&1 ;;
-    2) $LOG "recovery: wifi reload"; wifi reload >/dev/null 2>&1 ;;
-    *)
-        now=$(date +%s)
-        last=$(cat "$RBMARK" 2>/dev/null); case "$last" in ''|*[!0-9]*) last=0 ;; esac
-        if [ $((now - last)) -lt "$REBOOT_COOLDOWN" ]; then
-            $LOG "would reboot, but last self-reboot was $((now-last))s ago — holding off"
-            exit 0
-        fi
-        $LOG "AP still down after 3 attempts — rebooting to recover"
-        echo "$now" > "$RBMARK"; sync
-        rm -f "$STATE"
-        # setsid: a plain background reboot dies with the cron child
-        setsid sh -c 'sleep 2; reboot' >/dev/null 2>&1 &
-        ;;
+    *) $LOG "recovery: wifi reload"; wifi reload >/dev/null 2>&1 ;;
 esac
 exit 0

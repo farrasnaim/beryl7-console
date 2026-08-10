@@ -65,15 +65,6 @@
       </section>
     </div>
 
-    <!-- Hidden unless the Tor package is actually installed; the API reports
-         null otherwise and this whole face stays out of the page. -->
-    <div class="face" id="torFace" hidden>
-      <section class="panel">
-        <div class="panel__h"><span class="panel__t">Tor</span>
-          <div class="panel__aside" id="st-tor"></div></div>
-        <div class="panel__b" id="torBody" style="padding-top:4px"></div>
-      </section>
-    </div>
   </main>
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
@@ -743,80 +734,6 @@ $('#rescanDev').addEventListener('click', function () {
 });
 
 /* ----------------------------------------------------------------- boot -- */
-/* Tor is a proxy here, not a tunnel: it cannot be assigned to a device the way
-   WireGuard can, so it gets its own panel rather than a row in the tunnel list.
-   The panel's job is the toggle plus the two addresses — without those the
-   feature is unusable, because nothing routes through Tor automatically. */
-function renderTor(d) {
-    var t = d.tor;
-    var face = $('#torFace');
-    if (!t) { face.hidden = true; return; }
-    face.hidden = false;
-
-    var st = $('#st-tor'); clear(st);
-    var booting = t.running && t.bootstrap < 100;
-    st.appendChild(booting ? OS.stateWord('STARTING', 'warn')
-                 : t.running ? OS.stateWord('UP', 'ok')
-                             : OS.stateWord('OFF', 'idle'));
-
-    var box = $('#torBody'); clear(box);
-
-    var row = el('div', 'inline');
-    row.style.cssText = 'align-items:center;gap:12px;flex-wrap:wrap';
-    var btn = el('button', 'btn btn--sm' + (t.running ? '' : ' btn--primary'),
-                 t.running ? 'Turn off' : 'Turn on');
-    btn.type = 'button';
-    row.appendChild(btn);
-
-    var cap = el('div');
-    cap.style.cssText = 'font-size:11.5px;color:var(--ink-2);flex:1;min-width:180px';
-    cap.textContent = booting
-        ? 'Building a circuit — ' + t.bootstrap + '%. Usually ready in under a minute.'
-        : t.running
-            ? 'Ready. Point a browser at one of the addresses below to open .onion sites.'
-            : (t.enabled ? 'Stopped. It will start again on the next reboot.'
-                         : 'Off, and will stay off after a reboot.');
-    row.appendChild(cap);
-    box.appendChild(row);
-
-    if (t.running && !booting) {
-        var host = location.hostname;
-        var grid = el('div');
-        grid.style.cssText = 'margin-top:14px;display:flex;flex-direction:column;gap:8px';
-        [['SOCKS5', t.socks, 'Tor Browser, Firefox, most apps'],
-         ['HTTP', t.http, 'iOS and macOS Wi-Fi proxy settings, which cannot take a SOCKS host']
-        ].forEach(function (p) {
-            if (!p[1]) return;
-            var r = el('div');
-            r.style.cssText = 'display:flex;gap:10px;align-items:baseline;flex-wrap:wrap';
-            var k = el('span', 'row__cap', p[0]);
-            k.style.cssText = 'min-width:56px';
-            var v = el('code', null, host + ':' + p[1]);
-            v.style.cssText = 'font-size:12.5px;color:var(--ink)';
-            var h = el('span', 'hint', p[2]);
-            h.style.cssText = 'margin:0;flex:1;min-width:150px';
-            r.appendChild(k); r.appendChild(v); r.appendChild(h);
-            grid.appendChild(r);
-        });
-        box.appendChild(grid);
-    }
-
-    /* Two things people get wrong about this, both worth stating once. */
-    var n = el('div', 'hint');
-    n.style.cssText = 'margin-top:14px';
-    n.textContent = 'Nothing is routed through Tor automatically — only apps you point at the ' +
-        'proxy. Ordinary browsing is unaffected. This hides your network location, not your ' +
-        'browser: for real anonymity use Tor Browser on the device itself.';
-    box.appendChild(n);
-
-    btn.addEventListener('click', function () {
-        OS.act(btn, API, { action: 'torset', on: t.running ? 0 : 1 },
-            { ok: t.running ? 'Tor is stopping.' : 'Tor is starting — give it a moment to build a circuit.',
-              delay: t.running ? 1500 : 4000,
-              failPrefix: t.running ? 'Could not stop it' : 'Could not start it' });
-    });
-}
-
 function render(d) {
     if (!d || !d.ok) return;
     last = d;
@@ -860,7 +777,6 @@ function render(d) {
     renderTunnels(d);
     renderDevices(d);
     renderFailmode(d);
-    renderTor(d);
 }
 
 loadDevices().then(function () { if (last) { renderDevices(last); renderMap(last); } });
