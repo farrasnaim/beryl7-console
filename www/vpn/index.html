@@ -693,10 +693,16 @@ function renderFailmode(d) {
         ['closed', 'Block the device',
          'Nothing leaks. A device pinned to a dead tunnel simply has no internet until the tunnel ' +
          'recovers. This is the safe default.'],
+        /* "restores it automatically" reads as "restores it promptly", and the
+           owner of this router read it that way: he watched a device sit on the
+           normal uplink for a minute after the uplink was already working, and
+           re-enabled it by hand assuming something had broken. He had chosen
+           this mode knowingly — what was missing was the timing. Say it. */
         ['open', 'Keep it online without the tunnel',
          'If the tunnel stops answering for three minutes, the router temporarily sends the device ' +
-         'back to the normal uplink so it keeps working, then restores the tunnel route ' +
-         'automatically. Traffic is not private during that window.']
+         'back to the normal uplink so it keeps working, then puts it back on the tunnel within ' +
+         'a few seconds of the tunnel answering again. Traffic is not private in between — that ' +
+         'is the whole trade, and it lasts as long as the tunnel is actually down.']
     ];
     opts.forEach(function (o) {
         var lab = el('label');

@@ -1,0 +1,58 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/34-vpn-resume
+#
+# Put an auto-paused device back on its tunnel promptly, instead of whenever the
+# once-a-minute check next happens to run.
+#
+# THE GAP THIS CLOSES. In "keep it online" fail mode, vpnwatch drops a device to
+# the normal uplink when its tunnel stops answering, and restores it when the
+# tunnel returns. Restoring is correct but slow: vpnwatch is driven by cron at
+# `* * * * *`, and one minute is cron's floor, so the device can sit unprotected
+# for up to a further ~60 seconds after everything else is already working.
+#
+# Measured during a travel rehearsal. Boot with no uplink at all, so the tunnel
+# was genuinely unreachable and the iPad was released as designed:
+#
+#     02:54:00  vpnwatch: tunnel unreachable -> paused so the device stays online
+#     02:54:05  wwan up
+#     02:54:06  pbr repointed, radio width adapted        <- everything is ready
+#     02:55:15  policy finally back on the tunnel
+#
+# The owner watched the VPN page, saw the device still on the normal uplink long
+# after the repeater said "connected", and re-enabled it by hand. He knew the
+# trade-off he had chosen; what he did not expect was for it to persist a minute
+# past the point where the uplink was up. The panel says the route is restored
+# "automatically", which reads as "promptly".
+#
+# Joining an uplink is exactly the moment a paused tunnel is about to recover,
+# so poll from here rather than waiting on the clock. Worst case drops from ~60s
+# to about 5.
+
+case "$ACTION" in ifup) ;; *) exit 0 ;; esac
+case "$INTERFACE" in wan|wwan|tethering) ;; *) exit 0 ;; esac
+
+MARK=/etc/dashboard/vpn-autopaused
+
+# Nothing paused, nothing to do. This is the overwhelmingly common case and it
+# must cost nothing: no subshell, no polling, no vpnwatch run.
+[ -s "$MARK" ] || exit 0
+[ -x /usr/sbin/vpnwatch ] || exit 0
+
+# Detached, because a handler that waits must never be one that blocks: netifd
+# runs these in sequence and a slow one stalls everything numbered after it.
+(
+    # The parent has no EXIT trap to inherit today, but clearing it keeps that
+    # true if one is ever added above.
+    trap - EXIT INT TERM
+    i=0
+    while [ "$i" -lt 18 ]; do          # ~90s ceiling
+        # A tunnel needs a handshake before vpnwatch will call it healthy, and
+        # that cannot happen until the new uplink carries traffic. Waiting first
+        # avoids a pointless run against a tunnel that has not had a chance yet.
+        sleep 5
+        [ -s "$MARK" ] || exit 0       # someone resumed it; we are done
+        /usr/sbin/vpnwatch >/dev/null 2>&1
+        [ -s "$MARK" ] || exit 0
+        i=$((i + 1))
+    done
+) >/dev/null 2>&1 &
