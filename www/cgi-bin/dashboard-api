@@ -691,8 +691,57 @@ printf '{"ok":true,"ts":%s,' "$NOW"
 # because they fail independently — the 2026-08-10 outage took v6 down while v4
 # stayed perfect. -1 means dashmon has not sampled yet.
 V6LOSS=$(awk 'NF>=2 {print $2+0; exit}' /tmp/.wanlat6 2>/dev/null); [ -n "$V6LOSS" ] || V6LOSS=-1
-printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_total":%s,"mem_avail":%s,"v6_loss":%s},' \
+
+# ---- which uplink owns the default route, and how long it has owned it ------
+# Sits here rather than beside the "uplink" key below because sys.wan_uptime
+# needs it: how long the LINK has been up is a different fact from how long the
+# ROUTER has, and the gap between them is the only thing on this page that says
+# the connection dropped while nobody was watching. Same ubus call either way.
+ACTDEV=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+UPACT="none"; UPSECS=-1
+if [ -n "$ACTDEV" ]; then
+    for _n in wan wwan tethering; do
+        _st=$(ubus call network.interface.$_n status 2>/dev/null)
+        _l=$(printf '%s' "$_st" | awk -F'"' '/"l3_device"/{print $4; exit}')
+        if [ "$_l" = "$ACTDEV" ]; then
+            UPACT="$_n"
+            UPSECS=$(printf '%s' "$_st" | awk -F: '/"uptime"/{gsub(/[^0-9]/,"",$2); print $2+0; exit}')
+            case "$UPSECS" in ''|*[!0-9]*) UPSECS=-1 ;; esac
+            break
+        fi
+    done
+fi
+
+# Overlay usage. This is the writable half of the flash — everything uci
+# commits and every installed package lands here, and when it fills, config
+# writes start failing in ways that look like unrelated bugs. Nothing else on
+# the console would say so. RAM and flash are different enough problems to be
+# worth separate rows; MemAvailable above says nothing about this.
+OVL=$(df /overlay 2>/dev/null | awk 'NR==2 {printf "%d %d", $2+0, $3+0}')
+OVLT=${OVL%% *}; OVLU=${OVL##* }
+case "$OVLT" in ''|*[!0-9]*) OVLT=0 ;; esac
+case "$OVLU" in ''|*[!0-9]*) OVLU=0 ;; esac
+
+# Tracked connections. A router's real capacity limit, and invisible everywhere
+# else: nothing about load average or free memory hints at it, and running out
+# looks like random connection failures rather than like a full table.
+#
+# awk and not the shell's own `read`, which is what rate-api uses on
+# /proc/loadavg. /proc/sys entries are not seq_files and do not survive being
+# read a byte at a time: `read -r X < …nf_conntrack_count` returns "1" for 162
+# and "3" for 31232 — the FIRST CHARACTER, with no error and no empty string,
+# so every guard below still passes and the panel just shows a wrong number.
+CONN=$(awk '{printf "%d ", $1}' /proc/sys/net/netfilter/nf_conntrack_count \
+                                /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
+set -- $CONN
+CTC=${1:-0}; CTM=${2:-0}
+case "$CTC" in ''|*[!0-9]*) CTC=0 ;; esac
+case "$CTM" in ''|*[!0-9]*) CTM=0 ;; esac
+
+printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_total":%s,"mem_avail":%s,"v6_loss":%s,' \
     "$(esc "$HOST")" "$UP" "$TEMP" "$FAN" "$(esc "$LOAD")" "$(jnum "$MEMT")" "$(jnum "$MEMA")" "$V6LOSS"
+printf '"ovl_total":%s,"ovl_used":%s,"conn":%s,"conn_max":%s,"wan_uptime":%s},' \
+    "$OVLT" "$OVLU" "$CTC" "$CTM" "${UPSECS:--1}"
 # ---- per-lane byte counters -------------------------------------------------
 # Every lane drawn on the topology is exactly one netdev: each AP has its own
 # wireless interface, and the wired lane is the LAN bridge's non-wireless port(s). One
@@ -732,16 +781,6 @@ printf '"lanebytes":{%s},' "$LBJ"
 printf '"wan":{"ip":"%s","rx_rate":%s,"tx_rate":%s,"rx_bytes":%s,"tx_bytes":%s},' \
     "$(esc "$WANIP")" "$WRX" "$WTX" "$RXB" "$TXB"
 
-# ---- which uplink owns the default route (for the dashboard hero) ----
-ACTDEV=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
-UPACT="none"
-if [ -n "$ACTDEV" ]; then
-    for _n in wan wwan tethering; do
-        _l=$(ubus call network.interface.$_n status 2>/dev/null \
-              | awk -F'"' '/"l3_device"/{print $4; exit}')
-        [ "$_l" = "$ACTDEV" ] && { UPACT="$_n"; break; }
-    done
-fi
 printf '"uplink":{"active":"%s","dev":"%s"},' "$UPACT" "$(esc "$ACTDEV")"
 printf '"air":%s,"sta":%s,"neigh":%s,"oui":%s,"wired":%s,"events":%s,"nlbw":%s,' \
     "$AIRJ" "$STAJ" "$NBJ" "$OUIJ" "$WIREDJ" "$EVJ" "$NLJ"

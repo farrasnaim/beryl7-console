@@ -67,15 +67,19 @@
             <div id="spark"></div>
             <div class="cap"><span id="spkL"></span><span id="spkM"></span><span id="spkR"></span></div>
 
-            <div class="rowsep"></div>
-            <div class="metricrow"><span class="ro__k">Packet loss</span><span id="lossState"></span></div>
-            <div id="lossChart"></div>
-            <div class="cap"><span id="lossL"></span><span id="lossM"></span><span id="lossR"></span></div>
-
+            <!-- Jitter before loss: on a link that is mostly fine, jitter is
+                 what moves first and what you feel first, and loss is the
+                 rarer, louder event. Reading down the panel is then roughly
+                 "how fast, how far, how steady, how reliable". -->
             <div class="rowsep"></div>
             <div class="metricrow"><span class="ro__k">Jitter</span><span id="jitState"></span></div>
             <div id="jitChart"></div>
             <div class="cap"><span id="jitL"></span><span id="jitM"></span><span id="jitR"></span></div>
+
+            <div class="rowsep"></div>
+            <div class="metricrow"><span class="ro__k">Packet loss</span><span id="lossState"></span></div>
+            <div id="lossChart"></div>
+            <div class="cap"><span id="lossL"></span><span id="lossM"></span><span id="lossR"></span></div>
           </div>
         </section>
         <section class="panel">
@@ -737,15 +741,67 @@ function paintSys(sys) {
     bar('Temperature', (t ? t.toFixed(1) : '—') + ' °C', Math.min(1, t / 100),
         t > 85 ? 'bad' : t > 75 ? 'warn' : null,
         sys.fan_rpm ? 'fan at ' + sys.fan_rpm + ' rpm' : 'fan idle');
-    if (!box._up) {
-        var upRow = el('div');
-        upRow.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px';
-        upRow.appendChild(el('span', 'ro__k', 'Uptime'));
-        box._up = el('span', 'n'); box._up.style.fontSize = '12px';
-        upRow.appendChild(box._up);
-        box.appendChild(upRow);
+    /* Flash, not RAM. Everything uci commits and every installed package lands
+       on the overlay, and when it fills, writes start failing in ways that look
+       like unrelated bugs. The Memory bar above says nothing about it. */
+    var ovlPct = sys.ovl_total ? (sys.ovl_used || 0) / sys.ovl_total : 0;
+    if (sys.ovl_total) {
+        bar('Storage', Math.round((sys.ovl_used || 0) / 1024) + ' / ' +
+                       Math.round(sys.ovl_total / 1024) + ' MB',
+            ovlPct, ovlPct > 0.9 ? 'bad' : ovlPct > 0.75 ? 'warn' : null,
+            Math.round((sys.ovl_total - (sys.ovl_used || 0)) / 1024) +
+            ' MB free for settings and packages');
     }
-    setTxt(box._up, OS.dur(sys.uptime || 0));
+
+    /* Plain label/value rows, built once and then updated in place like the
+       bars above — three near-identical copies of this markup had already
+       accumulated before there was a fourth. */
+    function row(key, label, valTxt, meta) {
+        var r = box._rows && box._rows[key];
+        if (!r) {
+            r = el('div'); r.style.marginTop = '10px';
+            var top = el('div');
+            top.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px';
+            top.appendChild(el('span', 'ro__k', label));
+            r._val = el('span', 'n'); r._val.style.fontSize = '12px';
+            top.appendChild(r._val);
+            r.appendChild(top);
+            r._meta = el('div', 'ro__m'); r._meta.style.marginTop = '4px';
+            r.appendChild(r._meta);
+            box.appendChild(r);
+            (box._rows = box._rows || {})[key] = r;
+        }
+        setTxt(r._val, valTxt);
+        setTxt(r._meta, meta || '');
+        r._meta.hidden = !meta;
+        return r;
+    }
+
+    row('up', 'Uptime', OS.dur(sys.uptime || 0));
+
+    /* How long the LINK has been up, which is not how long the router has. The
+       gap between the two is the only thing on this page that reports a
+       connection having dropped while nobody was watching — so the caption only
+       appears when there IS a gap, and says what it means rather than restating
+       the number beside it. */
+    /* Created even when there is nothing to show, then hidden: an uplink that is
+       down at first paint and comes back later would otherwise insert its row
+       below the ones built after it. */
+    var wu = +sys.wan_uptime, wuOk = isFinite(wu) && wu >= 0;
+    var gap = wuOk ? (sys.uptime || 0) - wu : 0;
+    row('wan', 'Uplink up', wuOk ? OS.dur(wu) : '—',
+        !wuOk ? ''
+              : gap > 120 ? 'the router has been up ' + OS.dur(sys.uptime) + ', so the link dropped'
+                          : 'no drop since the router booted'
+    ).hidden = !wuOk;
+
+    /* The capacity limit nothing else here hints at: not load, not free memory.
+       Running out looks like random connection failures rather than like a full
+       table, which is exactly the kind of thing worth one quiet line. */
+    var connPct = sys.conn_max ? (sys.conn || 0) / sys.conn_max : 0;
+    row('conn', 'Connections', String(sys.conn || 0),
+        sys.conn_max ? 'of ' + sys.conn_max + ' the router can track' : ''
+    ).hidden = !sys.conn_max;
 
     /* After a storm clears, keep one quiet line pointing at what happened —
        the 2026-08-10 loop wrapped the log ring in 42s, so by the time anyone
@@ -769,8 +825,14 @@ function paintSys(sys) {
     }
 
     var chipBox = $('#sysChip'); clear(chipBox);
-    var worst = (t > 85 || memPct > 0.9 || load > cores || v6 >= 100) ? ['DEGRADED', 'bad']
-              : (t > 75 || memPct > 0.75 || load > cores * 0.7) ? ['WARM', 'warn']
+    /* The chip summarises every bar under it, so the two new ones count too — a
+       full overlay or an exhausted connection table is a degraded router even
+       with a cold CPU and free memory, and those are precisely the failures that
+       present as something else entirely. */
+    var worst = (t > 85 || memPct > 0.9 || load > cores || v6 >= 100 ||
+                 ovlPct > 0.9 || connPct > 0.9) ? ['DEGRADED', 'bad']
+              : (t > 75 || memPct > 0.75 || load > cores * 0.7 ||
+                 ovlPct > 0.75 || connPct > 0.75) ? ['WARM', 'warn']
               : ['NOMINAL', 'ok'];
     chipBox.appendChild(OS.stateWord(worst[0], worst[1]));
 }
