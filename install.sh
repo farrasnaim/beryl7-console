@@ -76,7 +76,7 @@ cp    $S/www/cgi-bin/*-api /www/cgi-bin/
 
 # Helper daemons and the nftables generator.
 cp $S/usr/sbin/dashmon $S/usr/sbin/apwatch $S/usr/sbin/vpnwatch $S/usr/sbin/beryl-vpndns \
-   $S/usr/sbin/pingmon /usr/sbin/
+   $S/usr/sbin/beryl-pbrtbl $S/usr/sbin/pingmon /usr/sbin/
 
 # Hotplug automation and system tunables.
 mkdir -p /etc/hotplug.d/iface /etc/hotplug.d/net /etc/hotplug.d/usb /etc/sysctl.d
@@ -93,6 +93,7 @@ chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api 
           /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
           /www/cgi-bin/probe-api \
           /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
+          /usr/sbin/beryl-pbrtbl \
           /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
           /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
           /etc/init.d/cpugovernor /usr/sbin/pingmon /etc/init.d/pingmon
@@ -132,6 +133,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
          /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
          /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
+         /usr/sbin/beryl-pbrtbl \
          /etc/dashboard /etc/crontabs/root \
          /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \

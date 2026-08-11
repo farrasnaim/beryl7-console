@@ -384,10 +384,17 @@ function renderTopo(d, M) {
              up === 'tethering' ? 'live' : '');
     OS.flagTab('/vpn/', !!staleVpn);
 
+    /* "routed through a tunnel" is a claim about where traffic actually goes, so
+       it must not be made for a device whose tunnel is not carrying it. Saying it
+       anyway is worse than saying nothing: it is the sentence someone reads to
+       reassure themselves before using an untrusted network. */
     setTxt($('#subtitle'), online
         ? 'Online via the ' + (UPNAME[up] || up) + ' uplink. ' + clients +
           ' device' + (clients === 1 ? '' : 's') + ' connected' +
-          (vpnCount ? ', ' + vpnCount + ' routed through a tunnel.' : '.')
+          (vpnCount
+            ? ', ' + vpnCount + ' routed through a tunnel' +
+              (staleVpn ? ' — ' + staleVpn + ' not actually reaching it.' : '.')
+            : '.')
         : 'No route to the internet. Check the Wi-Fi or USB uplink.');
 }
 

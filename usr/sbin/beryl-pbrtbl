@@ -1,0 +1,38 @@
+#!/bin/sh
+# Which pbr routing tables actually carry a route, and of what kind.
+#
+# Prints one line: |pbr_wan=route|pbr_wwan=blocked|pbr_wg_X=route|
+# Names are wrapped in '|' so one table cannot match inside another's name.
+#
+#   route    the table has a usable route (a policy bound to it works)
+#   blocked  the table deliberately fail-closes (unreachable/blackhole/prohibit)
+#   absent   the table is not listed at all -> marked packets find nothing there,
+#            fall through to the main table, and leave over the plain uplink
+#
+# WHY THIS IS NOT THE SAME QUESTION AS "IS THE TUNNEL UP":
+# pbr pins itself to one uplink (pbr.config.uplink_interface). Fail the Ethernet
+# over to a Wi-Fi or USB uplink and pbr can no longer resolve that uplink's
+# gateway, so its whole rebuild aborts and EVERY table empties — including a
+# tunnel's, which never needed the WAN gateway. The tunnel keeps handshaking
+# perfectly while nothing routes into it, so a handshake check reports health
+# and the device is in fact unprotected. Measured on a USB tether: `ip route get
+# ... mark 0x30000` returned the cellular device, identical to an unrouted
+# client, and the device's DNS — DNAT'd to a resolver inside the tunnel — became
+# unreachable, so it lost internet entirely while the console still called it
+# tunnelled.
+#
+# Single implementation, shared by dashboard-api and vpn-api, so the Overview
+# and the VPN page can never disagree about whether a device is really carried.
+#
+# ONE pass over every table: both callers are polled endpoints, and asking
+# `ip route get` per policy would be a fork per routed device on every poll.
+ip route show table all 2>/dev/null | awk '
+    /table pbr_/ {
+        t = ""
+        for (i = 1; i <= NF; i++) if ($i == "table") { t = $(i+1); break }
+        if (t == "") next
+        kind = ($1 == "unreachable" || $1 == "blackhole" || $1 == "prohibit") \
+               ? "blocked" : "route"
+        seen[t "=" kind] = 1
+    }
+    END { s = "|"; for (k in seen) s = s k "|"; print s }'

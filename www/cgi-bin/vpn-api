@@ -570,15 +570,28 @@ done
 
 POLS=""
 idx=0
+# An enabled policy pointing at a live tunnel still carries nothing if pbr's
+# table for that tunnel is empty, and that is invisible from the tunnel's own
+# state — see /usr/sbin/beryl-pbrtbl. Read once, outside the loop; the same
+# helper feeds dashboard-api, so the Overview and this page cannot disagree.
+PBRTBL=$(/usr/sbin/beryl-pbrtbl 2>/dev/null)
 while :; do
     p=$(uci -q get pbr.@policy[$idx] 2>/dev/null) || break
     [ -n "$p" ] || break
     sa=$(uci -q get pbr.@policy[$idx].src_addr)
     inf=$(uci -q get pbr.@policy[$idx].interface)
     en=$(uci -q get pbr.@policy[$idx].enabled)
+    # `carrying` answers "is this device's traffic actually going into the
+    # tunnel right now", which is what the row claims to the reader. A disabled
+    # policy is not a fault, so it reports false without being flagged.
+    case "$PBRTBL" in
+        *"|pbr_$inf=route|"*) carry=true ;;
+        *)                    carry=false ;;
+    esac
+    [ "$en" = "0" ] && carry=false
     case "$sa" in
         [0-9A-Fa-f][0-9A-Fa-f]:*)
-            POLS="$POLS${POLS:+,}{\"mac\":\"$(esc "$sa")\",\"iface\":\"$(esc "$inf")\",\"enabled\":$( [ "$en" = "0" ] && echo false || echo true )}" ;;
+            POLS="$POLS${POLS:+,}{\"mac\":\"$(esc "$sa")\",\"iface\":\"$(esc "$inf")\",\"enabled\":$( [ "$en" = "0" ] && echo false || echo true ),\"carrying\":$carry}" ;;
     esac
     idx=$((idx+1))
     [ "$idx" -gt 64 ] && break

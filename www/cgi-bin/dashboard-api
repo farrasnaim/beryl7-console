@@ -350,9 +350,15 @@ LJ="{$LJ}"
 # count as "on VPN" — a parked policy (see sync_pbr in vpn-api) is not routing
 # anything, so badging it would be a lie.
 VPNJ=""
-VPNSTALE=""     # devices force-routed to a tunnel that is DOWN (blackholed)
+VPNSTALE=""     # devices whose tunnel is not actually carrying them
 vidx=0
 NOWTS=$(date +%s)
+
+# Which pbr tables actually carry a route. A live tunnel is NOT the same thing
+# as a tunnel something routes into — see the header of the helper for the
+# failure this catches and how it was measured. Shared with vpn-api so the
+# Overview and the VPN page cannot disagree about the same device.
+PBRTBL=$(/usr/sbin/beryl-pbrtbl 2>/dev/null)
 while [ "$vidx" -lt 64 ]; do
     pn=$(uci -q get pbr.@policy[$vidx].name 2>/dev/null) || break
     [ -n "$pn" ] || break
@@ -372,8 +378,22 @@ while [ "$vidx" -lt 64 ]; do
                 # owner staring at a dead device with no idea why.
                 hs=$(wg show "$inf" latest-handshakes 2>/dev/null | awk 'NR==1{print $2+0}')
                 : "${hs:=0}"
+                # `reason` distinguishes two failures that look identical from the
+                # outside but need opposite remedies: a dead tunnel is fixed by
+                # pausing the VPN, whereas a live tunnel that nothing routes into
+                # is a policy-routing fault and pausing would not help.
+                vreason=""
                 if [ "$hs" -eq 0 ] || [ $((NOWTS - hs)) -gt 200 ]; then
-                    VPNSTALE="$VPNSTALE${VPNSTALE:+,}{\"mac\":\"$(esc "$sa")\",\"label\":\"$(esc "$lbl")\"}"
+                    vreason="down"
+                else
+                    case "$PBRTBL" in
+                        *"|pbr_$inf=route|"*)   vreason="" ;;
+                        *"|pbr_$inf=blocked|"*) vreason="blocked" ;;
+                        *)                      vreason="unrouted" ;;
+                    esac
+                fi
+                if [ -n "$vreason" ]; then
+                    VPNSTALE="$VPNSTALE${VPNSTALE:+,}{\"mac\":\"$(esc "$sa")\",\"label\":\"$(esc "$lbl")\",\"reason\":\"$vreason\"}"
                 fi
             fi ;;
     esac
