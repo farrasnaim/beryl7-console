@@ -128,22 +128,33 @@ function renderMapV(d) {
         var macs = byIface[t.iface];
         var up = !t.disabled && t.up && t.handshake && (now - t.handshake) <= 200;
         var cls = up ? 'on' : 'off';
+        /* The trunk has to start at the FIRST device's stub. It used to be
+           derived as y-14 after the loop, which lands on the LAST stub, so
+           every device above it hung unconnected — correct only while a tunnel
+           carried exactly one device. */
+        var trunkTop = y + 6;
         macs.forEach(function (m) {
             s2.appendChild(sv('path', { 'class': 'link ' + cls,
                 d: 'M' + cx + ' ' + (y + 6) + ' H' + (cx + 16) }));
             s2.appendChild(svtext(cx + 24, y + 10, nameOf(m), 't1'));
             y += 20;
         });
-        var trunkTop = y - 14;
+        /* The flow overlay is drawn in the SAME segments as the links, never as
+           one long run. The node boxes sit at x=LX with the trunk at cx=LX+20,
+           i.e. the line passes *inside* them horizontally, and .nodebox.on is
+           filled with --sig-dim at 15% alpha — so a flow path spanning the
+           whole column showed through both boxes and crossed the "Beryl 7" and
+           tunnel-name text. */
         y += 6;
         s2.appendChild(sv('path', { 'class': 'link ' + cls,
-            d: 'M' + cx + ' ' + trunkTop + ' V' + (y + 0) }));
+            d: 'M' + cx + ' ' + trunkTop + ' V' + y }));
         if (up) s2.appendChild(sv('path', { 'class': 'flow',
-            d: 'M' + cx + ' ' + trunkTop + ' V' + (y + 34 + 14 + 44 + 14) }));
+            d: 'M' + cx + ' ' + trunkTop + ' V' + y }));
         s2.appendChild(sv('rect', { 'class': 'nodebox on', x: LX, y: y, width: 110, height: 30, rx: 2 }));
         s2.appendChild(svtext(LX + 12, y + 19, 'Beryl 7', 't1'));
         y += 30;
         s2.appendChild(sv('path', { 'class': 'link ' + cls, d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
+        if (up) s2.appendChild(sv('path', { 'class': 'flow', d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
         y += 14;
         s2.appendChild(sv('rect', { 'class': 'nodebox ' + (up ? 'on' : 'bad'),
             x: LX, y: y, width: NW, height: 44, rx: 2 }));
@@ -153,6 +164,7 @@ function renderMapV(d) {
                : (t.disabled ? 'off' : 'no handshake'), 't2'));
         y += 44;
         s2.appendChild(sv('path', { 'class': 'link ' + cls, d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
+        if (up) s2.appendChild(sv('path', { 'class': 'flow', d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
         y += 14;
         var ep = (t.endpoint || '').split(':')[0];
         s2.appendChild(svtext(LX, y + 12, ep || 'endpoint', 't1'));
@@ -190,7 +202,7 @@ function renderMap(d) {
     var W = 940, rowH = 48;
     var lanes = used.map(function (t) { return { t: t, macs: byIface[t.iface] }; });
     var H = 26 + lanes.reduce(function (a, L) {
-        return a + Math.max(rowH, L.macs.length * 22 + 26); }, 0);
+        return a + Math.max(rowH, L.macs.length * 22 + 28); }, 0);
     var s2 = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, 'class': 'topo',
                          preserveAspectRatio: 'xMinYMid meet' });
     s2.style.height = H + 'px'; s2.style.minWidth = '620px';
@@ -205,18 +217,52 @@ function renderMap(d) {
     lanes.forEach(function (L) {
         var t = L.t;
         var up = !t.disabled && t.up && t.handshake && (now - t.handshake) <= 200;
-        var laneH = Math.max(rowH, L.macs.length * 22 + 26);
+        /* +28, not +26. The lane centre is where the router box sits and where
+           the line into it is drawn; the device rows are at 14 + i*22. With
+           +26 the centre lands exactly 1px off a row for every even device
+           count — two horizontals a pixel apart both meeting the bus, which
+           renders as a thick smudged junction rather than a join. +28 puts the
+           centre either exactly ON a row (even counts, so the row and the
+           box-entry line are one straight line) or a clean 11px between rows
+           (odd counts). */
+        var laneH = Math.max(rowH, L.macs.length * 22 + 28);
         var mid = y + laneH / 2;
         var cls = up ? 'on' : 'off';
 
+        /* Trunk and spur. Each device runs to a shared vertical bus held OFF
+           the box, then one line carries into the router at the lane's centre:
+
+               iPad Air  ----+
+                             |---[ Beryl 7 ]
+               iPhone    ----+
+
+           The bus is at colRouter-14, not on colRouter itself. Drawn on the
+           edge it merged with the box border and the device rows appeared to
+           graze the top-left corner rather than connect to anything. Spanning
+           the rows AND mid means it joins correctly for any device count,
+           including one (where the row and the centre differ by 10px). */
+        var busX = colRouter - 14;
         L.macs.forEach(function (m, i) {
             var ty = y + 14 + i * 22;
             s2.appendChild(svtext(colDev, ty + 4, nameOf(m), 't1'));
             s2.appendChild(sv('path', { 'class': 'link ' + cls,
-                d: 'M' + (colDev + 236) + ' ' + ty + ' H' + colRouter }));
+                d: 'M' + (colDev + 236) + ' ' + ty + ' H' + busX }));
             if (up) s2.appendChild(sv('path', { 'class': 'flow',
-                d: 'M' + (colDev + 236) + ' ' + ty + ' H' + colRouter }));
+                d: 'M' + (colDev + 236) + ' ' + ty + ' H' + busX }));
         });
+
+        var busTop = Math.min(y + 14, mid);
+        var busBot = Math.max(y + 14 + (L.macs.length - 1) * 22, mid);
+        if (busBot > busTop) {
+            s2.appendChild(sv('path', { 'class': 'link ' + cls,
+                d: 'M' + busX + ' ' + busTop + ' V' + busBot }));
+            if (up) s2.appendChild(sv('path', { 'class': 'flow',
+                d: 'M' + busX + ' ' + busTop + ' V' + busBot }));
+        }
+        s2.appendChild(sv('path', { 'class': 'link ' + cls,
+            d: 'M' + busX + ' ' + mid + ' H' + colRouter }));
+        if (up) s2.appendChild(sv('path', { 'class': 'flow',
+            d: 'M' + busX + ' ' + mid + ' H' + colRouter }));
 
         s2.appendChild(sv('rect', { 'class': 'nodebox on', x: colRouter, y: mid - 14,
             width: 92, height: 28, rx: 2 }));
@@ -245,6 +291,29 @@ function renderMap(d) {
         y += laneH;
     });
     box.appendChild(s2);
+
+    /* Second pass, after the SVG is in the document so text can be measured:
+       pull the device stubs left until they start just past the longest name.
+       The device column is a fixed 236px, but the names are nowhere near that
+       wide — measured here, the longest ends at 134, leaving 118px of dead air
+       with a short dash floating in the middle of it. A constant would work
+       until a device gets renamed to something longer, so it is measured.
+       Clamped so a very long name cannot push the stub into the bus. */
+    var maxEnd = 0;
+    Array.prototype.forEach.call(s2.querySelectorAll('text.t1'), function (t) {
+        if (+t.getAttribute('x') === colDev) {
+            maxEnd = Math.max(maxEnd, colDev + t.getComputedTextLength());
+        }
+    });
+    if (maxEnd > 0) {
+        var startX = Math.min(Math.ceil(maxEnd) + 14, colRouter - 14 - 24);
+        Array.prototype.forEach.call(s2.querySelectorAll('path'), function (p) {
+            var m = (p.getAttribute('d') || '').match(/^M([\d.]+) ([\d.]+) H([\d.]+)$/);
+            if (m && +m[1] === colDev + 236) {
+                p.setAttribute('d', 'M' + startX + ' ' + m[2] + ' H' + m[3]);
+            }
+        });
+    }
 }
 
 /* --------------------------------------------------------------- tunnels - */
@@ -767,10 +836,17 @@ function render(d) {
     var routed = (d.policies || []).filter(function (p) { return p.enabled; }).length;
     OS.stage('routing', routed ? routed + ' tunnelled' : 'Direct',
              dead.length ? 'fault' : routed ? 'live' : '');
+    /* "through one" was hardcoded, so three devices spread across two tunnels
+       still read as going through a single one. Count the tunnels actually
+       carrying something. */
+    var carrying = {};
+    (d.policies || []).forEach(function (p) { if (p.enabled) carrying[p.iface] = 1; });
+    var nCarry = Object.keys(carrying).length;
     setTxt($('#subtitle'), (d.tunnels || []).length
         ? upCount + ' of ' + d.tunnels.length + ' tunnel' + (d.tunnels.length === 1 ? '' : 's') +
           ' connected. ' + (routed ? routed + ' device' + (routed === 1 ? ' is' : 's are') +
-          ' routed through one.' : 'No device is using one.')
+          (nCarry === 1 ? ' routed through one.' : ' routed across ' + nCarry + ' of them.')
+          : 'No device is using one.')
         : 'Add a WireGuard configuration to start routing devices through a tunnel.');
 
     renderMap(d);
