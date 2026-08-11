@@ -61,6 +61,16 @@ while [ "$idx" -lt 64 ]; do
                             mv "$MARK.n" "$MARK" 2>/dev/null
                             changed=1
                             $LOG "tunnel $piface healthy again -> resumed '$pname'"
+                        elif [ "$pen" = "1" ] && grep -qxF "$pname" "$MARK" 2>/dev/null; then
+                            # Already back on, and not by us — the owner re-enabled it
+                            # from the VPN page before this once-a-minute check came
+                            # round. Drop the mark, because holding it breaks the
+                            # promise at the top of this file: the next time the
+                            # owner DELIBERATELY pauses this device, a stale mark
+                            # would make us treat their pause as ours and undo it.
+                            grep -vxF "$pname" "$MARK" > "$MARK.n" 2>/dev/null
+                            mv "$MARK.n" "$MARK" 2>/dev/null
+                            $LOG "'$pname' was re-enabled by hand; releasing our claim on it"
                         fi
                     fi ;;
             esac ;;
