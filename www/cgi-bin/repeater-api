@@ -169,16 +169,36 @@ if [ "$ACTION" = "scan" ]; then
         /^\tInterface / { ifc=$2 }
         /^\t\tchannel / { f=$3; sub(/\(/,"",f); if (f+0 >= 3000) { print ifc; exit } }')
 
-    # ONE active sweep, not one per radio. Both radios sit on the same PHY, so a
-    # single scan already covers every channel in both bands — issuing a second
-    # one back to back just collides with the first ("command failed: Resource
-    # busy (-16)"), which is what made the 2nd/3rd click fail.
+    # ONE ACTIVE SWEEP PER RADIO — not one for the whole PHY.
     #
-    # `scan dump` (the driver's cached table) is then folded in: it costs nothing,
-    # can't fail, and means a click that lands while another scan is in flight
-    # still returns results instead of an error. Duplicates are removed below.
-    SCANIF="$IF5"; [ -n "$SCANIF" ] || SCANIF="$IF24"
-    ALL=$( { [ -n "$SCANIF" ] && iw dev "$SCANIF" scan 2>/dev/null
+    # This used to issue a single sweep from the 5 GHz interface, on the theory
+    # that both radios share phy0 so one scan covers every channel in both bands.
+    # That is not how this hardware behaves. Each radio is a separate scan domain
+    # (`#channels <= 1` per radio in the wiphy's interface combinations), so a
+    # sweep started on the 5 GHz vif only sweeps 5 GHz. Measured, flushed cache,
+    # three alternating rounds:
+    #
+    #     sweep from 5 GHz vif  ->  2.4 GHz networks found: 3, 2, 2
+    #     sweep from 2.4 GHz vif ->  2.4 GHz networks found: 10, 9, 8
+    #
+    # The 2.4 GHz half of the list was therefore whatever happened to be left in
+    # the cached `scan dump` — often nothing. A 2.4 GHz-only AP could be missing
+    # from the page entirely, which is precisely the hotel/travel case this
+    # feature exists for. Found when the router could not see an ONT's 2.4 GHz
+    # SSID that every phone in the room could.
+    #
+    # The old comment warned that a second sweep collides with "Resource busy
+    # (-16)". That happens when two scans are in flight at once; these are
+    # sequential and `iw ... scan` blocks until its results are ready, so the
+    # second starts after the first has finished. Re-measured: 3/3 trials, both
+    # sweeps rc=0, no busy error. The cost is one extra sweep's latency on a
+    # button the user pressed deliberately.
+    #
+    # `scan dump` (the driver's cached table) is still folded in afterwards: it
+    # costs nothing, can't fail, and means a click that lands while another scan
+    # is in flight still returns results. Duplicates are removed below.
+    ALL=$( { [ -n "$IF5" ]  && iw dev "$IF5"  scan 2>/dev/null
+             [ -n "$IF24" ] && iw dev "$IF24" scan 2>/dev/null
              [ -n "$IF5" ]  && iw dev "$IF5"  scan dump 2>/dev/null
              [ -n "$IF24" ] && iw dev "$IF24" scan dump 2>/dev/null; } | awk '
         BEGIN { for (i=0; i<16; i++) { h=sprintf("%X",i); HX[h]=i; HX[tolower(h)]=i } }
