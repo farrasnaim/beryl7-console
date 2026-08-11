@@ -398,8 +398,19 @@ fi
 
 MUX=0; pgrep usbmuxd >/dev/null 2>&1 && MUX=1
 
+# Same escaping as settings-api's jesc(), and for the same reasons — see the
+# comment there. Both of the obvious spellings are broken under busybox awk:
+# gsub(/"/,"\\\"") drops the backslash entirely, so quotes came through raw,
+# and gsub(/\\/,"\\\\") emits one backslash rather than two, escaping nothing.
+# Only the "\\\\&" form (literal backslash, then re-emit the match) works.
+# Backslashes first, or the quote pass escapes its own additions.
+#
+# This is not hypothetical: netifd logs `Command failed: ubus call
+# network.interface notify_proto { "action": 0, ... }` on every tethering
+# ifdown, so simply unplugging the phone produced invalid JSON and the USB
+# uplink page stopped rendering.
 LOGJ=$(logread -e tethering 2>/dev/null | tail -14 | awk '
-    { gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); gsub(/\t/," ")
+    { gsub(/\\/,"\\\\&"); gsub(/"/,"\\\\&"); gsub(/\t/," "); gsub(/[[:cntrl:]]/,"")
       if(out!="") out=out ","; out=out "\"" $0 "\"" }
     END{ print out }')
 
