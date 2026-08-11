@@ -41,23 +41,51 @@ case "$TX" in ''|*[!0-9]*) TX=0 ;; esac
 UP=$(awk '{printf "%.2f", $1; exit}' /proc/uptime 2>/dev/null)
 case "$UP" in ''|*[!0-9.]*) UP=0 ;; esac
 
-# Latency: the newest sample from pingmon's ring, NOT a probe of our own.
+# Latency: pingmon's whole 5-minute ring, NOT a probe of our own.
 #
 # This used to fork its own `ping -c1 -W1`, which made the endpoint's worst case
 # a full second of waiting on a round-trip, and meant the probe rate scaled with
 # the number of open tabs — two dashboards were two probes a second, measuring
 # different instants and reporting different numbers for the same router. One
-# prober, one answer, and reading the last line of a file costs nothing.
+# prober, one answer, and reading a file costs nothing.
 #
-# Falls back to a probe if pingmon is not running, so the live figure survives
-# the service being stopped. -1 in the ring means the second was probed and got
-# no reply; null tells the client to draw a gap rather than invent a value.
+# The WHOLE ring rather than the newest sample, because this endpoint is polled
+# once a second and the ping / loss / jitter charts are drawn from it. Sending
+# the ring makes it the single source for all three: no client-side ring to
+# maintain, no dedup or gap-filling when a poll is late, and nothing to drift
+# out of step with the router. ~1.8 KB, against dashboard-api's 19 KB every 5s.
+#
+# Dense, on a fixed 1s pitch: v[i] is the second at t-(n-1-i), so no timestamp
+# per sample is needed. Positive is a round-trip, -1 was probed and got no
+# reply, -2 was never probed. Keeping those two distinct matters — collapsing
+# them would report a freshly started prober as 100% loss.
+#
+# pingmon has already written it as JSON, so this just reads two lines with the
+# shell's own `read`. Deriving the array here instead measured 33ms a call, and
+# it would have been redone on every poll of every open tab to produce the
+# identical bytes; letting the prober format it once a second brings the
+# endpoint to 20ms, of which the two reads are 2.2ms and the `date` fork 1.8ms
+# — the rest is simply carrying 1.3 KB of body instead of 150 bytes.
+#
+# The header line carries the age. A ring nobody is still writing to is not
+# served as though it ended this second — after 10s of silence the charts are
+# handed an empty ring and say NO DATA, which is true, rather than showing a
+# frozen five minutes that looks live.
 PING=null
+PINGRING='{"t":0,"n":0,"v":[]}'
 if [ -f /tmp/.pingring ]; then
-    PING=$(tail -1 /tmp/.pingring 2>/dev/null)
-    case "$PING" in ''|*[!0-9.-]*) PING=null ;; esac
-    case "$PING" in -*) PING=null ;; esac
-else
+    { read -r _hdr; read -r _json; } < /tmp/.pingring 2>/dev/null
+    _age=$(( $(date +%s) - ${_hdr%% *} ))
+    if [ "$_age" -ge 0 ] && [ "$_age" -le 10 ]; then
+        case "$_json" in
+            '{"t":'*']}') PINGRING="$_json"; PING=${_json##*,}; PING=${PING%]\}} ;;
+        esac
+        case "$PING" in ''|*[!0-9.-]*|-*) PING=null ;; esac
+    fi
+fi
+if [ "$PING" = null ] && [ ! -f /tmp/.pingring ]; then
+    # pingmon stopped: fall back to a probe so the live figure still works, and
+    # leave the ring empty so the charts say so rather than inventing history.
     PING=$(ping -c1 -W1 1.1.1.1 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -1)
     case "$PING" in ''|*[!0-9.]*) PING=null ;; esac
 fi
@@ -82,4 +110,5 @@ case "$MEMT" in ''|*[!0-9]*) MEMT=0 ;; esac
 case "$MEMA" in ''|*[!0-9]*) MEMA=0 ;; esac
 
 printf '{"ok":true,"dev":"%s","up":%s,"rx":%s,"tx":%s,"ping":%s,' "$DEV" "$UP" "$RX" "$TX" "$PING"
-printf '"load":"%s","temp":%s,"fan":%s,"memt":%s,"mema":%s}' "$LOAD1" "$TEMPV" "$FANV" "$MEMT" "$MEMA"
+printf '"load":"%s","temp":%s,"fan":%s,"memt":%s,"mema":%s,' "$LOAD1" "$TEMPV" "$FANV" "$MEMT" "$MEMA"
+printf '"ring":%s}' "$PINGRING"

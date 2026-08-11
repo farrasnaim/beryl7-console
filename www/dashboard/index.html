@@ -255,8 +255,7 @@ function renderTopo(d, M) {
     var box = $('#topo'); clear(box);
     var up = (d.uplink && d.uplink.active) || 'none';
     var online = up !== 'none';
-    var lat = d.wanlat && d.wanlat.length ? d.wanlat[d.wanlat.length - 1] : null;
-    var loss = lat ? +lat[2] : 100;
+    var loss = d.probe ? +d.probe.loss : 100;
     var rx = (d.wan && d.wan.rx_rate) || 0, tx = (d.wan && d.wan.tx_rate) || 0;
     var flowing = online && (rx + tx) > 2048;
     var vpnCount = Object.keys(d.vpn || {}).length;
@@ -326,7 +325,7 @@ function renderTopo(d, M) {
            range — so repeating the number here was the same fact twice. What is
            NOT in that panel is the case where nothing comes back at all, and
            that belongs at the top where the eye lands first. */
-        latency: lat && lat[1] > 0 ? '' : 'not responding',
+        latency: (d.probe && +d.probe.ping > 0) ? '' : 'not responding',
         uplink: UPNAME[up] || up,
         uplinkSub: (d.wan && d.wan.ip) || 'no address',
         router: sy.host || 'Beryl 7',
@@ -370,6 +369,7 @@ function renderTopo(d, M) {
    no whole-second rounding and two open tabs cannot corrupt each other. */
 var RATE_API = '/cgi-bin/rate-api';
 var FAST_MS = 1000;          /* sample period while the session is active */
+var IDLE_MS = 5000;          /* ... and after that, still sampling, slower */
 var FAST_WINDOW = 300000;    /* 5 minutes, renewed by any interaction     */
 var RING_MAX = 300;          /* 5 min at 1s, and the ribbon is 300px wide */
 var ring = { t: [], dn: [], up: [] };
@@ -379,12 +379,12 @@ var rPrev = null, fastTimer = null, fastBusy = false, activeUntil = 0;
    one moment when fastBusy is already false and fastTimer is not yet
    rescheduled — so both read false while sampling is very much alive. */
 var fastOn = false;
-var lastLat = [];        /* dashmon's 4h ring: [t, avg_ms, loss_pct, jitter_ms] */
 /* pingmon's 5-minute ring, on a fixed 1s pitch: v[i] is the second at
    t - (n-1-i). Positive is a round-trip, -1 was probed and got no reply, -2 is
    a second before the prober was running. Unlike the throughput ring above,
    this one is NOT built here — it arrives already five minutes long, which is
-   the whole reason it lives on the router. */
+   the whole reason it lives on the router, and it arrives on the 1s poll, so
+   the charts advance a second at a time rather than in five-second jumps. */
 var pingRing = { t: 0, n: 0, v: [] };
 
 function pushSample(dn, up) {
@@ -526,28 +526,9 @@ function jitTone(ms) {
     return ['ERRATIC', 'bad'];
 }
 
-/* The 4h context line under each chart, from dashmon's per-minute ring. Since
-   dashmon now aggregates the same 1s prober, a minute here is 60 probes rather
-   than the 3 it used to be — which is what makes a 4h loss figure meaningful
-   below 33%. */
-function hist4h() {
-    var pings = [], losses = [], jits = [], badMin = 0, lastBad = 0, i, r;
-    for (i = 0; i < lastLat.length; i++) {
-        r = lastLat[i];
-        if (+r[1] >= 0) pings.push(+r[1]);
-        if (isFinite(+r[2])) {
-            losses.push(+r[2]);
-            if (+r[2] > 0) { badMin++; lastBad = +r[0]; }
-        }
-        if (+r[3] >= 0) jits.push(+r[3]);
-    }
-    return { ping: mean(pings), loss: mean(losses), jit: mean(jits),
-             badMin: badMin, lastBad: lastBad, mins: losses.length };
-}
-
 function drawPing() {
     var sp = $('#spark'); if (!sp) return;
-    var v = pingRing.v, H = hist4h();
+    var v = pingRing.v;
     var ok = [], i;
     for (i = 0; i < v.length; i++) if (v[i] > 0) ok.push(v[i]);
 
@@ -568,17 +549,13 @@ function drawPing() {
 
     setTxt($('#spkL'), ok.length ? 'last ' + OS.dur(v.length) : 'collecting…');
     setTxt($('#spkM'), '');
-    setTxt($('#spkR'), ok.length
-        ? 'avg ' + fine(mean(ok)) + ' ms' + (H.ping != null ? '  ·  4h ' + fine(H.ping) + ' ms' : '')
-        : '');
-    /* the headline number only falls back to the ring when the 1s sampler is
-       idle; while it runs, fastTick writes a fresher one every second */
-    if (!fastOn) setTxt($('#pingNow'), ok.length ? fine(ok[ok.length - 1]) + ' ms' : '—');
+    setTxt($('#spkR'), ok.length ? 'avg ' + fine(mean(ok)) + ' ms' : '');
+    setTxt($('#pingNow'), ok.length ? fine(ok[ok.length - 1]) + ' ms' : '—');
 }
 
 function drawLoss() {
     var st = $('#lossState'), box = $('#lossChart'); if (!st || !box) return;
-    var v = pingRing.v, H = hist4h();
+    var v = pingRing.v;
     var probed = 0, lost = 0, i;
     for (i = 0; i < v.length; i++) {
         if (v[i] === -2) continue;
@@ -607,17 +584,13 @@ function drawLoss() {
     box.title = 'share of the last ' + ROLL + ' probes that got no reply';
 
     setTxt($('#lossL'), probed ? lost + ' of ' + probed + ' probes' : '');
-    setTxt($('#lossM'), lost ? fine(pct) + '% over 5 min' : '');
-    setTxt($('#lossR'), H.mins
-        ? '4h  ' + fine(H.loss) + '%' +
-          (H.badMin ? '  ·  ' + H.badMin + (H.badMin === 1 ? ' minute' : ' minutes') +
-                      ', last ' + OS.ago(H.lastBad) : '')
-        : '');
+    setTxt($('#lossM'), '');
+    setTxt($('#lossR'), probed ? fine(pct) + '% over 5 min' : '');
 }
 
 function drawJitter() {
     var st = $('#jitState'), box = $('#jitChart'); if (!st || !box) return;
-    var v = pingRing.v, H = hist4h();
+    var v = pingRing.v;
     var now = winJitter(v, 0, v.length - 1);
 
     clear(st);
@@ -638,16 +611,21 @@ function drawJitter() {
 
     setTxt($('#jitL'), now != null ? fine(now) + ' ms over 5 min' : '');
     setTxt($('#jitM'), '');
-    setTxt($('#jitR'), (peak ? 'peak ' + fine(peak) + ' ms' : '') +
-        (H.jit != null ? (peak ? '  ·  ' : '') + '4h ' + fine(H.jit) + ' ms' : ''));
+    setTxt($('#jitR'), peak ? 'peak ' + fine(peak) + ' ms' : '');
 }
 
 function drawProbe() { drawPing(); drawLoss(); drawJitter(); }
 
 function fastTick() {
     fastTimer = null;
-    if (document.visibilityState !== 'visible' || Date.now() > activeUntil) { fastStop(); return; }
-    if (fastBusy) { fastTimer = setTimeout(fastTick, FAST_MS); return; }
+    if (document.visibilityState !== 'visible') { fastStop(); return; }
+    /* Going idle slows this down, it does NOT stop it. The probe charts are
+       drawn from this endpoint, and the whole point of them is being able to
+       leave the page open during a match and look over at it — which is exactly
+       the situation with no clicks in it for five minutes. At 20ms a call the
+       idle rate costs 0.4% of one core. */
+    fastOn = true;
+    if (fastBusy) { fastTimer = setTimeout(fastTick, tickMs()); return; }
     fastBusy = true;
     var ctl = ('AbortController' in window) ? new AbortController() : null;
     var killer = setTimeout(function () { if (ctl) ctl.abort(); }, 4000);
@@ -664,10 +642,11 @@ function fastTick() {
                     pushSample((j.rx - rPrev.rx) / s, (j.tx - rPrev.tx) / s);
                 }
                 rPrev = j;
-                /* the headline ping, once a second. rate-api reads it off
-                   pingmon's ring rather than probing, so this is the same
-                   measurement the chart below is drawn from — and every open
-                   tab now reads the identical number. */
+                /* The probe ring, once a second — the charts advance a sample
+                   at a time rather than jumping five. rate-api reads it off
+                   pingmon rather than probing, so every open tab is drawing the
+                   identical samples instead of its own. */
+                if (j.ring && j.ring.v) { pingRing = j.ring; drawProbe(); }
                 setTxt($('#pingNow'), j.ping == null ? 'no reply' : fine(j.ping) + ' ms');
                 if (lastSys && j.load != null) {
                     lastSys.load = j.load;
@@ -679,45 +658,31 @@ function fastTick() {
                     paintSys(lastSys);
                 }
             }
-            fastTimer = setTimeout(fastTick, FAST_MS);
+            fastTimer = setTimeout(fastTick, tickMs());
         })
         .catch(function () {
             clearTimeout(killer); fastBusy = false;
             /* the 5s poll owns link state and reports its own errors; a missed
                sample here is worth a longer gap, not a toast */
             rPrev = null;
-            fastTimer = setTimeout(fastTick, FAST_MS * 3);
+            fastTimer = setTimeout(fastTick, tickMs() * 3);
         });
 }
+function tickMs() { return Date.now() < activeUntil ? FAST_MS : IDLE_MS; }
 function fastStart() {
     activeUntil = Date.now() + FAST_WINDOW;
     if (!fastTimer && !fastBusy && document.visibilityState === 'visible') {
         fastOn = true;
-        /* the two sources cover different windows; carrying one's eased scale
-           into the other would show as a slow drift after every switch */
-        scaleY.peak = scaleY.lo = scaleY.hi = null;
+        scaleY.peak = null;
         fastTimer = setTimeout(fastTick, 0);
     }
 }
 function fastStop() {
+    /* Only ever on a hidden tab now. The throughput ring is this session's and
+       its scale resets; the probe ring is the router's five minutes and is
+       left alone, which is why it is all still there on the way back. */
     clearTimeout(fastTimer); fastTimer = null; rPrev = null; fastOn = false;
-    /* only the throughput scale resets. The probe charts are the router's
-       five minutes, not this session's, and they neither start nor stop with
-       the sampler — which is exactly why they survive a closed tab. */
     scaleY.peak = null;
-    drawProbe();
-}
-
-function renderCharts(d) {
-    /* While the 1s sampler runs it owns the ribbon. Once the session goes idle
-       the 5s poll keeps it advancing on the server-side rate, so the chart
-       never freezes — it just gets coarser, which the span label shows. */
-    if (!fastOn) {
-        pushSample((d.wan && d.wan.rx_rate) || 0, (d.wan && d.wan.tx_rate) || 0);
-    }
-    lastLat = d.wanlat || [];
-    if (d.ping && d.ping.v) pingRing = d.ping;
-    drawProbe();
 }
 
 /* System is fed by whichever source is currently fresher: the 1s sampler while
@@ -1439,7 +1404,6 @@ function render(d) {
     last = d;
     var M = model(d);
     renderTopo(d, M);
-    renderCharts(d);
     renderSys(d);
     renderClients(d, M);
     renderTraffic(d, M);

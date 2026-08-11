@@ -2,58 +2,21 @@
 # /usr/sbin/dashmon — 1-minute telemetry collector for the dashboard.
 # Ring buffers live in /tmp (RAM): no flash wear, lost on reboot by design.
 
-LAT=/tmp/.wanlat
 PRES=/tmp/.presence
 SNAP=/tmp/.dashmon.sta
 now=$(date +%s)
 
-# ---- WAN latency, loss and jitter (router-originated => via WAN, never the VPN) ----
-# Preferred source is pingmon's 1-second ring: aggregating its last 60 samples
-# costs no packets at all and gives a minute built from 60 probes instead of 3,
-# so the loss column resolves to 1.7% instead of jumping 0 / 33 / 67 / 100. It
-# also makes this row and the dashboard's live 5-minute chart the same
-# measurement rather than two probes that can disagree.
+# ---- WAN reachability, for the status LED below -----------------------------
+# Three packets, once a minute, and nothing is kept. This used to append a row
+# to a 4-hour ring at /tmp/.wanlat; that ring was deleted 2026-08-11 because
+# five minutes is the window that actually gets looked at, and pingmon keeps
+# that at 1-second resolution.
 #
-# The fallback is the original 3-packet probe, kept because this ring is the
-# only 4-hour history there is: if pingmon is stopped or wedged, the history
-# must get coarser, not stop.
-RING=/tmp/.pingring
-avg=''; loss=''; jit=-1
-if [ -f "$RING" ]; then
-    agg=$(awk -v now="$now" '
-        NR==1 { if (now - ($1 + 0) > 90) bad = 1; next }   # stale ring: not ours to trust
-        bad   { next }
-        { val[++i] = $1 + 0 }
-        END {
-            if (bad || i < 30) exit 1
-            lo = (i > 60 ? i - 59 : 1)
-            prev = -1
-            for (k = lo; k <= i; k++) {
-                x = val[k]
-                if (x == -2) continue          # second never measured: not a probe
-                probes++
-                if (x < 0) { lost++; prev = -1; next }
-                sum += x; ok++
-                # jitter as the mean absolute change between CONSECUTIVE replies;
-                # a loss breaks the chain rather than being spanned, so a gap
-                # cannot masquerade as one enormous swing.
-                if (prev >= 0) { d = x - prev; if (d < 0) d = -d; jsum += d; jn++ }
-                prev = x
-            }
-            if (probes == 0) exit 1
-            printf "%.1f %d %.1f", (ok ? sum / ok : -1), (lost * 100 / probes), (jn ? jsum / jn : 0)
-        }' "$RING" 2>/dev/null) && [ -n "$agg" ] && { set -- $agg; avg=$1; loss=$2; jit=$3; }
-fi
-if [ -z "$avg" ]; then
-    out=$(ping -c3 -W1 -q 1.1.1.1 2>/dev/null)
-    avg=$(printf '%s\n' "$out" | awk -F/ '/round-trip/{printf "%.1f", $4}')
-    loss=$(printf '%s\n' "$out" | awk -F, '/packet loss/{gsub(/[^0-9]/,"",$3); print $3}')
-    jit=-1
-fi
-[ -n "$avg" ] || avg=-1
+# Deliberately its OWN probe rather than reading pingmon's ring. It is three
+# packets a minute, and it means the LED keeps telling the truth even if pingmon
+# is stopped — one less thing that has to be working for another thing to work.
+loss=$(ping -c3 -W1 -q 1.1.1.1 2>/dev/null | awk -F, '/packet loss/{gsub(/[^0-9]/,"",$3); print $3}')
 [ -n "$loss" ] || loss=100
-echo "$now $avg $loss $jit" >> "$LAT"
-tail -n 240 "$LAT" > "$LAT.n" && mv "$LAT.n" "$LAT"
 
 # ---- IPv6 reachability ------------------------------------------------------
 # Separate from the v4 probe above because they fail independently: the

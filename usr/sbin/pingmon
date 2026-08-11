@@ -76,16 +76,43 @@ exec awk -v out="$RING" -v win="$WINDOW" -v target="$TARGET" '
     # the prober started is unmeasured. Deriving loss from elapsed time rather
     # than from ICMP sequence numbers means a restarted ping — new sequence
     # counter, same second — cannot fake a gap or hide one.
-    function flush(   t, s) {
-        s = ""
-        for (t = last - win + 1; t <= last; t++) {
-            s = s ((t in v) ? v[t] : NODATA) "\n"
+    # Three lines, written once a second:
+    #
+    #   1  <epoch> <window>              header, readable without parsing
+    #   2  {"t":…,"n":…,"v":[…]}         the ring, already JSON
+    #   3  <loss%> <avg ms> <jitter ms>  the last 60s, summarised
+    #
+    # Line 2 is JSON because rate-api is polled once a second by every open
+    # dashboard and would otherwise re-derive it every time. Formatting it here
+    # happens once per second no matter how many clients are watching, and drops
+    # that endpoint from 33ms a call back to about 9. Line 3 exists so
+    # dashboard-api can answer "is the internet reachable" with two shell reads
+    # and no parser at all.
+    function flush(   t, x, j, first, probed, lost, sum, ok, prev, d, jsum, jn) {
+        j = ""; first = last - win + 1
+        probed = 0; lost = 0; sum = 0; ok = 0; prev = -1; jsum = 0; jn = 0
+        for (t = first; t <= last; t++) {
+            x = (t in v) ? v[t] : NODATA
+            j = j (t == first ? "" : ",") x
+            if (t <= last - 60) continue          # summary covers the last minute
+            if (x == NODATA) continue             # never probed: not a probe
+            probed++
+            if (x < 0) { lost++; prev = -1; continue }
+            sum += x; ok++
+            # jitter as the mean absolute change between CONSECUTIVE replies; a
+            # loss breaks the chain rather than being spanned, so a gap cannot
+            # masquerade as one enormous swing
+            if (prev >= 0) { d = x - prev; if (d < 0) d = -d; jsum += d; jn++ }
+            prev = x
         }
-        printf "%d %d\n%s", last, win, s > tmp
+        printf "%d %d\n{\"t\":%d,\"n\":%d,\"v\":[%s]}\n%d %.1f %.1f\n",
+               last, win, last, win, j,
+               (probed ? lost * 100 / probed : 100),
+               (ok ? sum / ok : -1), (jn ? jsum / jn : -1) > tmp
         close(tmp)
-        # rename rather than rewrite in place: the readers are a 5s CGI poll and
-        # a 1s one, and a truncate-then-write would hand them a torn file
-        # roughly once an hour. One fork a second is the cheaper mistake.
+        # rename rather than rewrite in place: the reader is a 1s CGI poll, and
+        # a truncate-then-write would hand it a torn file roughly once an hour.
+        # One fork a second is the cheaper mistake.
         system("mv " tmp " " out)
     }
     function sample(line,   i, n, rtt, now, t) {
