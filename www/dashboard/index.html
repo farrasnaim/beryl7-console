@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=35041bc6">
+<link rel="stylesheet" href="/os.css?v=9ce5e881">
 </head>
 <body>
 <div class="shell">
@@ -892,13 +892,13 @@ function paintSys(sys) {
         OS.meterSet(r._meter, frac, tone);
     }
     bar('Load average', load.toFixed(2), Math.min(1, load / cores),
-        load > cores ? 'bad' : load > cores * 0.7 ? 'warn' : null,
+        load > cores ? 'bad' : load > cores * 0.7 ? 'warn' : 'ok',
         (load / cores * 100).toFixed(0) + '% of ' + cores + ' cores, 1 min average');
     bar('Memory', Math.round(memUsed / 1024) + ' / ' + Math.round((sys.mem_total || 0) / 1024) + ' MB',
-        memPct, memPct > 0.9 ? 'bad' : memPct > 0.75 ? 'warn' : null,
+        memPct, memPct > 0.9 ? 'bad' : memPct > 0.75 ? 'warn' : 'ok',
         Math.round((sys.mem_avail || 0) / 1024) + ' MB available');
     bar('Temperature', (t ? t.toFixed(1) : '—') + ' °C', Math.min(1, t / 100),
-        t > 85 ? 'bad' : t > 75 ? 'warn' : null,
+        t > 85 ? 'bad' : t > 75 ? 'warn' : 'ok',
         sys.fan_rpm ? 'fan at ' + sys.fan_rpm + ' rpm' : 'fan idle');
     /* Flash, not RAM. Everything uci commits and every installed package lands
        on the overlay, and when it fills, writes start failing in ways that look
@@ -907,7 +907,7 @@ function paintSys(sys) {
     if (sys.ovl_total) {
         bar('Storage', Math.round((sys.ovl_used || 0) / 1024) + ' / ' +
                        Math.round(sys.ovl_total / 1024) + ' MB',
-            ovlPct, ovlPct > 0.9 ? 'bad' : ovlPct > 0.75 ? 'warn' : null,
+            ovlPct, ovlPct > 0.9 ? 'bad' : ovlPct > 0.75 ? 'warn' : 'ok',
             Math.round((sys.ovl_total - (sys.ovl_used || 0)) / 1024) + ' MB free');
     }
 

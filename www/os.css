@@ -42,6 +42,7 @@
     --sig:#3fd9be; --sig-fg:#55e2ca; --sig-solid:#3fd9be; --sig-ink:#04231f;
     --sig-dim:rgba(63,217,190,.15); --sig-line:rgba(63,217,190,.34);
 
+    --good:#22c55e;    --good-fg:#4ade80;
     --caution:#eba13a; --caution-fg:#f2b45f;
     --fault:#ff5a52;   --fault-fg:#ff7d76;
     --idle:#5a5955;
@@ -61,6 +62,7 @@
     --ink:#16150f; --ink-2:#4e4c47; --ink-4:#65635d;
     --sig:#0b8e7c; --sig-fg:#0a6f61; --sig-solid:#0a6f61; --sig-ink:#ffffff;
     --sig-dim:rgba(11,142,124,.13); --sig-line:rgba(11,142,124,.32);
+    --good:#16a34a; --good-fg:#15803d;
     --caution:#a9700c; --caution-fg:#7f5407;
     --fault:#c3352c; --fault-fg:#a52a22; --idle:#a5a29a;
   }
@@ -71,6 +73,7 @@
   --ink:#f2f1ee; --ink-2:#a3a19c; --ink-4:#8a8883;
   --sig:#3fd9be; --sig-fg:#55e2ca; --sig-solid:#3fd9be; --sig-ink:#04231f;
   --sig-dim:rgba(63,217,190,.15); --sig-line:rgba(63,217,190,.34);
+  --good:#22c55e; --good-fg:#4ade80;
   --caution:#eba13a; --caution-fg:#f2b45f; --fault:#ff5a52; --fault-fg:#ff7d76; --idle:#5a5955;
 }
 :root[data-theme="light"]{
@@ -79,6 +82,7 @@
   --ink:#16150f; --ink-2:#4e4c47; --ink-4:#65635d;
   --sig:#0b8e7c; --sig-fg:#0a6f61; --sig-solid:#0a6f61; --sig-ink:#ffffff;
   --sig-dim:rgba(11,142,124,.13); --sig-line:rgba(11,142,124,.32);
+  --good:#16a34a; --good-fg:#15803d;
   --caution:#a9700c; --caution-fg:#7f5407; --fault:#c3352c; --fault-fg:#a52a22; --idle:#a5a29a;
 }
 /* aliases: page code written against the old names keeps resolving */
@@ -98,7 +102,11 @@
    follows without knowing accents exist. Every value below was verified
    numerically against every ground it can sit on — fg >=4.5:1 on bg..face-3
    and on the chip wash, sig >=3:1 for graphics, ink >=4.5:1 on solid — same
-   bar the mint tokens were held to. Semantic amber/red never move.
+   bar the mint tokens were held to. Semantic green/amber/red never
+   move: a status is a judgement about the network, not decoration, so
+   EXCELLENT must read green whatever accent is selected. Only DATA takes the
+   accent — traces, topology links, magnitude bars, buttons. QUALITY takes
+   --good / --caution / --fault.
    Cascade contract: these sit AFTER the [data-theme] blocks so the bare rule
    beats them on order; the [data-theme][data-accent] pairs (0,3,0) then pin
    the explicit-theme cases, mirroring the base theme's own 4-rule matrix. */
@@ -331,7 +339,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 /* ---- state word: the only uppercase in the interface -------------------- */
 .sw{font-size:10px;font-weight:650;letter-spacing:.13em;text-transform:uppercase;
     color:var(--ink-4);white-space:nowrap}
-.sw--ok{color:var(--sig-fg)} .sw--warn{color:var(--caution-fg)}
+.sw--ok{color:var(--good-fg)} .sw--warn{color:var(--caution-fg)}
 .sw--bad{color:var(--fault-fg)} .sw--idle{color:var(--ink-4)}
 
 /* ---- readout ------------------------------------------------------------ */
@@ -571,7 +579,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
     line-height:1.45;animation:rise 200ms var(--ease)}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}}
 .toast__b{width:2px;align-self:stretch;background:var(--idle);flex:none}
-.toast--ok .toast__b{background:var(--sig)}
+.toast--ok .toast__b{background:var(--good)}
 .toast--bad .toast__b{background:var(--fault)}
 .toast--warn .toast__b{background:var(--caution)}
 .veil{position:fixed;inset:0;z-index:100;display:none;background:rgba(0,0,0,.6);
@@ -673,6 +681,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .meter{display:flex;gap:2px;height:10px;align-items:stretch}
 .meter i{flex:1;background:var(--rule);transition:background var(--t) var(--ease)}
 .meter i.on{background:var(--sig)}
+.meter[data-tone="ok"] i.on{background:var(--good)}
 .meter[data-tone="warn"] i.on{background:var(--caution)}
 .meter[data-tone="bad"] i.on{background:var(--fault)}
 .meter[data-tone="idle"] i.on{background:var(--idle)}
