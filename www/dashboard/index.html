@@ -204,10 +204,23 @@ function model(d) {
             ? Math.max.apply(null, dv.links.map(function (l) { return OS.genOf(l.st); }))
             : 0;
     });
+    /* Which heading a device files under. Deliberately separate from .medium,
+       which still says how it is attached (5 / 2.4 / eth) and drives the
+       signal, band and generation columns — an IoT plug is still a 2.4 GHz
+       Wi-Fi 4 client and should render as one.
+       The split is by NETWORK, not by band: the IoT devices sit on 192.168.10.0
+       in their own firewall zone, while the Apple Watch is on the main LAN and
+       merely happens to use 2.4 GHz. Filing them together hid a real boundary.
+       blocked/idle win, since "not connected" outranks where it would sit. */
+    out.forEach(function (dv) {
+        dv.group = (dv.medium === 'idle' || dv.medium === 'blocked') ? dv.medium
+                 : (dv.zone && dv.zone !== LANNET) ? 'iot'
+                 : dv.medium;
+    });
     /* within a band: newest Wi-Fi generation first, then name A-Z */
-    var order = { eth: 0, '5': 1, '2.4': 2, blocked: 3, idle: 4 };
+    var order = { eth: 0, '5': 1, '2.4': 2, iot: 3, blocked: 4, idle: 5 };
     out.sort(function (a, b) {
-        if (order[a.medium] !== order[b.medium]) return order[a.medium] - order[b.medium];
+        if (order[a.group] !== order[b.group]) return order[a.group] - order[b.group];
         if (a.gen !== b.gen) return b.gen - a.gen;
         return a.name.localeCompare(b.name);
     });
@@ -556,6 +569,7 @@ var MEDIA = {
     eth:     { k: 'Ethernet',  note: 'wired to the LAN port' },
     '5':     { k: '5 GHz',     note: '' },
     '2.4':   { k: '2.4 GHz',   note: '' },
+    iot:     { k: 'IoT',       note: 'separate network — cannot reach the main one' },
     blocked: { k: 'Blocked',   note: 'denied by MAC filter' },
     idle:    { k: 'Not connected', note: 'known, currently offline' }
 };
@@ -572,11 +586,11 @@ function renderClients(d, M) {
         return;
     }
     var groups = {};
-    devs.forEach(function (v) { (groups[v.medium] = groups[v.medium] || []).push(v); });
+    devs.forEach(function (v) { (groups[v.group] = groups[v.group] || []).push(v); });
 
     /* Offline devices are counted in the header but not rendered: the
        Overview is the CURRENT state of the network, not its roster. */
-    ['eth', '5', '2.4', 'blocked'].forEach(function (key) {
+    ['eth', '5', '2.4', 'iot', 'blocked'].forEach(function (key) {
         var list = groups[key];
         if (!list || !list.length) return;
         var g = el('div', 'tbl__group');
@@ -584,11 +598,16 @@ function renderClients(d, M) {
         if (MEDIA[key].note) { var nn = el('span', 'row__sub', MEDIA[key].note); g.appendChild(nn); }
         g.appendChild(el('span', 'tbl__gn', String(list.length)));
         box.appendChild(g);
-        list.forEach(function (v) { box.appendChild(rowFor(v, d)); if (expanded[v.mac]) box.appendChild(detailFor(v, d)); });
+        /* The per-row zone chip is suppressed under the IoT heading — it would
+           repeat "iot" on every row of a group that already says so. */
+        list.forEach(function (v) {
+            box.appendChild(rowFor(v, d, key === 'iot'));
+            if (expanded[v.mac]) box.appendChild(detailFor(v, d));
+        });
     });
 }
 
-function rowFor(v, d) {
+function rowFor(v, d, inZoneGroup) {
     var r = el('div', 'row row--entity');
     r.style.gridTemplateColumns = 'minmax(0,1fr) auto auto auto';
     r.setAttribute('role', 'button');
@@ -603,7 +622,7 @@ function rowFor(v, d) {
     var title = el('div', 'row__title');
     title.appendChild(el('span', 'row__nm', v.name));
     if (v.vpn) title.appendChild(OS.chip('VPN', 'on'));
-    if (v.zone && v.zone !== 'lan') title.appendChild(OS.chip(v.zone, 'flat'));
+    if (v.zone && v.zone !== LANNET && !inZoneGroup) title.appendChild(OS.chip(v.zone, 'flat'));
     txt.appendChild(title);
     /* the identity line reads like the operator would say it:
        "5 GHz · Wi-Fi 7 · 2402 Mb/s" */
