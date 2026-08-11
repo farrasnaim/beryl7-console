@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=02c68675">
+<link rel="stylesheet" href="/os.css?v=e5186730">
 </head>
 <body>
 <div class="shell">
@@ -62,8 +62,32 @@
                  alt-tab out of a match, open this, and the bad minute is still
                  on screen. A browser-side ring could never do it, because the
                  console does not poll a hidden tab. -->
+            <!-- The selector belongs to the Ping row and not to the panel
+                 header, because Throughput does not depend on it at all — that
+                 is WAN byte counters, every packet through the router. These
+                 three strips are the only things aimed at a host, and the page
+                 should say which host rather than presenting one path as a
+                 fact about "your connection". -->
             <div class="rowsep"></div>
-            <div class="metricrow"><span class="ro__k">Ping</span><span class="n" id="pingNow"></span></div>
+            <div class="metricrow">
+              <span class="inline">
+                <span class="ro__k">Ping</span>
+                <select id="probeSel" class="select select--inline" aria-label="What to probe">
+                  <option value="cf">Cloudflare</option>
+                  <option value="google">Google</option>
+                  <option value="gw">Gateway</option>
+                  <option value="custom">Custom…</option>
+                </select>
+                <span class="ro__m" id="probeAddr"></span>
+              </span>
+              <span class="n" id="pingNow"></span>
+            </div>
+            <div class="inline probecustom" id="probeCustom" hidden>
+              <input id="probeIp" class="input input--inline" type="text" inputmode="decimal"
+                     maxlength="15" spellcheck="false" autocomplete="off" placeholder="203.0.113.7">
+              <button id="probeGo" class="btn btn--sm" type="button">Use</button>
+            </div>
+            <div class="ro__m probenote" id="probeNote" hidden></div>
             <div id="spark"></div>
             <div class="cap"><span id="spkL"></span><span id="spkM"></span><span id="spkR"></span></div>
 
@@ -259,7 +283,10 @@ function renderTopo(d, M) {
     var box = $('#topo'); clear(box);
     var up = (d.uplink && d.uplink.active) || 'none';
     var online = up !== 'none';
-    var loss = d.probe ? +d.probe.loss : 100;
+    /* Decided by dashboard-api from the WAN route and a FIXED reachability
+       probe, never from the selectable target — aiming the probe at a game
+       server that drops ICMP must not black out the hero panel. */
+    var reachable = d.probe ? d.probe.online !== false : true;
     var rx = (d.wan && d.wan.rx_rate) || 0, tx = (d.wan && d.wan.tx_rate) || 0;
     var flowing = online && (rx + tx) > 2048;
     var vpnCount = Object.keys(d.vpn || {}).length;
@@ -322,14 +349,13 @@ function renderTopo(d, M) {
     }
 
     box.appendChild(OS.topology({
-        online: online && loss < 100,
+        online: online && reachable,
         flowing: flowing,
-        /* Only when it is bad news. The round-trip figure lives in the
-           Throughput panel, which states the current value, the trend and the
-           range — so repeating the number here was the same fact twice. What is
-           NOT in that panel is the case where nothing comes back at all, and
-           that belongs at the top where the eye lands first. */
-        latency: (d.probe && +d.probe.ping > 0) ? '' : 'not responding',
+        /* Only when it is bad news, and only when it is bad news about the
+           LINK. A chosen target that never answers is silent, not unreachable,
+           so it must not put "not responding" on the hero panel — that is what
+           the note under the selector is for. */
+        latency: reachable ? '' : 'not responding',
         uplink: UPNAME[up] || up,
         uplinkSub: (d.wan && d.wan.ip) || 'no address',
         router: sy.host || 'Beryl 7',
@@ -482,13 +508,16 @@ function rollSeries(v, fn) {
     }
     return out;
 }
-/* -2 is a second that was never probed (before the prober started, or after it
-   died). It is NOT loss, and counting it as loss would report a freshly booted
-   router as 100% down. */
+/* Three values are not measurements and must never be counted as loss:
+     -1  probed, no reply                     <- this one IS loss
+     -2  never probed (prober younger than the window, or stopped)
+     -3  the target changed here; the trace breaks rather than spanning it
+   Counting -2 would report a freshly booted router as 100% down, and counting
+   -3 would invent a lost packet out of every failover. */
 function winLoss(v, a, b) {
     var probed = 0, lost = 0, i;
     for (i = a; i <= b; i++) {
-        if (v[i] === -2) continue;
+        if (v[i] === -2 || v[i] === -3) continue;
         probed++;
         if (v[i] < 0) lost++;
     }
@@ -572,7 +601,7 @@ function drawLoss() {
     var v = pingRing.v;
     var probed = 0, lost = 0, i;
     for (i = 0; i < v.length; i++) {
-        if (v[i] === -2) continue;
+        if (v[i] === -2 || v[i] === -3) continue;
         probed++;
         if (v[i] < 0) lost++;
     }
@@ -636,7 +665,66 @@ function drawJitter() {
     setTxt($('#jitR'), peak ? 'peak ' + fine(peak) + ' ms' : '');
 }
 
-function drawProbe() { drawPing(); drawLoss(); drawJitter(); }
+/* ------------------------------------------------------- the probe target --
+   The router owns this, not the browser: one prober serves every client, so
+   changing it here changes it for the phone in your pocket too. That is the
+   correct behaviour — they are all reading the same ring — but it makes this a
+   router setting rather than a view filter, which is why it POSTs.
+
+   The dropdown shows what is LIVE, not what was last requested. Cloudflare and
+   Google are a symmetric pair: whichever is answering is the one you are on,
+   and an automatic switch moves the dropdown with it and says why. Anything
+   else would leave the control disagreeing with the chart under it. */
+var PROBE_API = '/cgi-bin/probe-api';
+var probeBusy = false;
+
+function paintProbe() {
+    var sel = $('#probeSel'); if (!sel) return;
+    /* never yank the control out from under someone who has it open */
+    if (!probeBusy && document.activeElement !== sel && pingRing.sel && sel.value !== pingRing.sel) {
+        sel.value = pingRing.sel;
+    }
+    setTxt($('#probeAddr'), pingRing.target || '');
+    $('#probeCustom').hidden = (sel.value !== 'custom');
+
+    /* A target that has never answered is a fact about the TARGET — most game
+       servers drop ICMP outright — and saying so is very different from
+       claiming the connection is broken. */
+    var msg = pingRing.note ||
+              (pingRing.state === 'silent' ? 'this address does not answer pings' : '');
+    var note = $('#probeNote');
+    setTxt(note, msg);
+    note.hidden = !msg;
+}
+
+function setProbe(sel, ip) {
+    probeBusy = true;
+    var body = 'sel=' + encodeURIComponent(sel) + (ip ? '&ip=' + encodeURIComponent(ip) : '');
+    fetch(PROBE_API, {
+        method: 'POST', cache: 'no-store',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            probeBusy = false;
+            if (!j || !j.ok) {
+                OS.toast((j && j.error) || 'could not change the probe target', 'bad');
+                if (pingRing.sel) $('#probeSel').value = pingRing.sel;
+                return;
+            }
+            /* Said out loud because it is not obvious: the five minutes on
+               screen measured a different path and cannot be carried over. */
+            OS.toast('Now probing ' + (ip || sel === 'gw' ? (ip || 'the gateway') : sel) +
+                     ' — the five-minute history starts again', 'ok');
+        })
+        .catch(function () {
+            probeBusy = false;
+            OS.toast('could not reach the router', 'bad');
+        });
+}
+
+function drawProbe() { drawPing(); drawLoss(); drawJitter(); paintProbe(); }
 
 function fastTick() {
     fastTimer = null;
@@ -1493,6 +1581,24 @@ OS.tp.start();
    jump when the ribbon appears ~2s later (it needs two samples for a delta) */
 drawRibbon();
 drawProbe();
+$('#probeSel').addEventListener('change', function () {
+    /* Custom needs an address before it means anything, so the select alone
+       does not commit — it reveals the field and waits. */
+    if (this.value === 'custom') {
+        $('#probeCustom').hidden = false;
+        $('#probeIp').focus();
+        return;
+    }
+    $('#probeCustom').hidden = true;
+    setProbe(this.value, '');
+});
+$('#probeGo').addEventListener('click', function () {
+    var ip = $('#probeIp').value.replace(/\s+/g, '');
+    if (ip) setProbe('custom', ip);
+});
+$('#probeIp').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); $('#probeGo').click(); }
+});
 ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) {
     document.addEventListener(ev, fastStart, { passive: true });
 });

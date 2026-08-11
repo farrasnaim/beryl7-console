@@ -72,13 +72,16 @@ case "$UP" in ''|*[!0-9.]*) UP=0 ;; esac
 # handed an empty ring and say NO DATA, which is true, rather than showing a
 # frozen five minutes that looks live.
 PING=null
-PINGRING='{"t":0,"n":0,"v":[]}'
+PINGRING='{"up":0,"n":0,"sel":"","target":"","name":"","state":"off","note":"","v":[]}'
 if [ -f /tmp/.pingring ]; then
     { read -r _hdr; read -r _json; } < /tmp/.pingring 2>/dev/null
-    _age=$(( $(date +%s) - ${_hdr%% *} ))
+    # The age is in UPTIME, not wall clock: monotonic, so an NTP step cannot
+    # make a live ring look stale, and this endpoint has already read
+    # /proc/uptime for its own delta so it costs nothing.
+    _age=$(( ${UP%.*} - ${_hdr%% *} ))
     if [ "$_age" -ge 0 ] && [ "$_age" -le 10 ]; then
         case "$_json" in
-            '{"t":'*']}') PINGRING="$_json"; PING=${_json##*,}; PING=${PING%]\}} ;;
+            '{"up":'*']}') PINGRING="$_json"; PING=${_json##*,}; PING=${PING%]\}} ;;
         esac
         case "$PING" in ''|*[!0-9.-]*|-*) PING=null ;; esac
     fi

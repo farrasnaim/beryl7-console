@@ -26,9 +26,14 @@ start_service() {
 }
 
 stop_service() {
-    # procd kills the awk instance, but its ping child outlives it — so the
-    # script is asked to clear its own strays. It matches on the executable and
-    # the exact argv; see reap_strays() in /usr/sbin/pingmon.
-    "$PROG" reap
+    # No reaping needed any more: the prober runs `ping -c1 -W1`, which lives at
+    # most a second, so there is no long-lived child to be orphaned. The old
+    # `while …| awk` version had one, and procd signalling only the pid it
+    # tracks left the whole pipeline running invisibly.
+    #
+    # The RING goes, because a stale one served as live would be a lie. The
+    # SELECTION stays: a crash-and-respawn must not silently change what is
+    # being measured. Only a reboot resets it, which is the point — /tmp is
+    # empty at boot and the default is Cloudflare.
     rm -f /tmp/.pingring /tmp/.pingring.tmp
 }

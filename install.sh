@@ -91,6 +91,7 @@ cp $S/etc/sysctl.d/99-local.conf /etc/sysctl.d/
 # silently, so set it explicitly rather than hoping.
 chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
           /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
+          /www/cgi-bin/probe-api \
           /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
           /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
           /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
@@ -135,7 +136,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
          /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
-         /usr/sbin/pingmon /etc/init.d/pingmon; do
+         /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api; do
     grep -qxF "$p" /etc/sysupgrade.conf || echo "$p" >> /etc/sysupgrade.conf
 done
 echo "  . sysupgrade.conf updated"
@@ -143,7 +144,7 @@ rm -rf /tmp/beryl7'
 
 # --------------------------------------------------------------------- check --
 say "Verifying"
-for ep in dashboard-api rate-api vpn-api repeater-api tethering-api settings-api; do
+for ep in dashboard-api rate-api vpn-api repeater-api tethering-api settings-api probe-api; do
     CODE=$(ssh -n "$TARGET" "uclient-fetch -q -O /dev/null http://127.0.0.1/cgi-bin/$ep 2>&1 && echo 200 || echo ERR")
     printf '  %-14s %s\n' "$ep" "$CODE"
 done

@@ -1,0 +1,96 @@
+#!/bin/sh
+# /www/cgi-bin/probe-api  —  which host the Overview's probe is aimed at.
+#
+# One job: write /tmp/.pingtarget. pingmon notices within a second and switches.
+# Reading the current target is not here — it arrives with the ring on rate-api,
+# because the dropdown has to agree with the chart it sits above, and two
+# endpoints answering the same question is how they end up disagreeing.
+#
+# POST + same-origin, like every other write on this console. There is no
+# password: the console is unauthenticated on the trusted LAN by design, and the
+# same-origin check is what stops a web page you happen to be visiting from
+# driving this through your browser. This endpoint changes what the router
+# measures and what every other open dashboard sees, so it is a write even
+# though it touches nothing in /etc.
+#
+# The selection lives in /tmp deliberately — see the header of pingmon. It
+# resets to Cloudflare on every boot, so there is no flash write here at all.
+
+SEL_FILE=/tmp/.pingtarget
+POST_MAX=512
+
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+fail() { printf '{"ok":false,"error":"%s"}' "$(esc "$1")"; exit 0; }
+
+[ "$REQUEST_METHOD" = "POST" ] || fail "POST required"
+
+CL="${CONTENT_LENGTH:-0}"; case "$CL" in ''|*[!0-9]*) CL=0 ;; esac
+[ "$CL" -gt "$POST_MAX" ] && fail "body too large"
+BODY=""
+[ "$CL" -gt 0 ] && BODY=$(dd bs=1 count="$CL" 2>/dev/null)
+
+# Same check the other write endpoints use: the request must come from a page
+# served by this router, identified by one of its own addresses.
+src="${HTTP_ORIGIN:-$HTTP_REFERER}"
+src="${src#*://}"; src="${src%%[:/]*}"
+ok=0
+case "$src" in
+    "") ok=0 ;;
+    localhost|127.0.0.1|::1) ok=1 ;;
+    *) for ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
+         [ "$ip" = "$src" ] && { ok=1; break; }
+       done ;;
+esac
+[ "$ok" = 1 ] || fail "bad origin"
+
+qs_get() {
+    printf '%s' "${QUERY_STRING}&${BODY}" | tr '&' '\n' \
+      | awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}'
+}
+
+# A literal unicast IPv4 address and nothing else.
+#
+# NOT a hostname: resolving one at probe time could go out through the VPN, or
+# fail during exactly the outage the probe exists to measure. NOT multicast or
+# broadcast, which do not mean anything as a round-trip target. A LAN address IS
+# allowed — pointing this at something on your own network is a legitimate thing
+# to want to measure.
+valid_ip4() {
+    case "$1" in
+        ''|*[!0-9.]*|*..*|.*|*.) return 1 ;;
+    esac
+    _c=0; _first=""
+    _oldifs=$IFS; IFS=.
+    for _o in $1; do
+        case "$_o" in ''|*[!0-9]*) IFS=$_oldifs; return 1 ;; esac
+        [ "${#_o}" -gt 3 ] && { IFS=$_oldifs; return 1; }
+        [ "$_o" -gt 255 ] && { IFS=$_oldifs; return 1; }
+        _c=$((_c + 1))
+        [ "$_c" = 1 ] && _first=$_o
+    done
+    IFS=$_oldifs
+    [ "$_c" = 4 ] || return 1
+    [ "$_first" = 0 ] && return 1            # "this network"
+    [ "$_first" -ge 224 ] && return 1        # multicast, and 255.x broadcast
+    return 0
+}
+
+SEL=$(qs_get sel)
+IP=$(qs_get ip)
+
+case "$SEL" in
+    cf|google|gw) LINE="$SEL" ;;
+    custom)
+        valid_ip4 "$IP" || fail "not a usable IPv4 address"
+        LINE="custom $IP"
+        ;;
+    *) fail "unknown target" ;;
+esac
+
+printf '%s\n' "$LINE" > "$SEL_FILE.tmp" 2>/dev/null || fail "cannot write the selection"
+mv "$SEL_FILE.tmp" "$SEL_FILE" 2>/dev/null || fail "cannot write the selection"
+
+printf '{"ok":true,"sel":"%s"}' "$(esc "$SEL")"

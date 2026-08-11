@@ -18,6 +18,14 @@ now=$(date +%s)
 loss=$(ping -c3 -W1 -q 1.1.1.1 2>/dev/null | awk -F, '/packet loss/{gsub(/[^0-9]/,"",$3); print $3}')
 [ -n "$loss" ] || loss=100
 
+# Published so the dashboard's "is there internet" verdict has a second,
+# independent source. The Overview's probe target is user-selectable and may be
+# aimed at a game server that never answers pings; this one is fixed, so a
+# silent custom target can never make the hero panel claim the line is down.
+# Uptime rather than wall clock, so an NTP step cannot make it look stale.
+read -r _u _rest < /proc/uptime 2>/dev/null
+echo "${_u%.*} $loss" > /tmp/.wanreach
+
 # ---- IPv6 reachability ------------------------------------------------------
 # Separate from the v4 probe above because they fail independently: the
 # 2026-08-10 outage took IPv6 down completely while v4 stayed perfect, and

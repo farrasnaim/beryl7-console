@@ -1,147 +1,271 @@
 #!/bin/sh
-# /usr/sbin/pingmon — one continuous 1-second probe, five minutes of it kept.
+# /usr/sbin/pingmon — the console's probe. One target at a time, once a second,
+# five minutes kept, with failover between the two public resolvers.
 #
-# WHY THIS EXISTS AT ALL, given that the rule on this router is "boring is a
-# feature" and the 2026-08-11 cleanup deleted every custom daemon it could:
+# WHY THIS EXISTS, given that the rule on this router is "boring is a feature"
+# and the 2026-08-11 cleanup deleted every custom daemon it could:
 #
 # The Overview's ping / loss / jitter history has to survive the dashboard being
 # closed. The whole point is to alt-tab out of a match, open the console, and
 # see the last five minutes — including the part that happened while nothing was
 # watching. A browser cannot do that: the console does not poll a hidden tab by
 # design, so a client-side ring is empty exactly when it is wanted. Cron cannot
-# do it either; its floor is one minute, and a five-minute chart needs seconds.
+# either; its floor is one minute and a five-minute chart needs seconds.
 #
-# So the measurement moves to the router, and it is deliberately the ONLY thing
-# this process does. It supervises nothing, restarts nothing, and writes no
-# config — the failure mode that produced the 2026-08-10 incident. If it dies,
-# the dashboard shows less history and nothing else changes.
+# WHAT IT IS ALLOWED TO DO, which is the part that matters. This is a mechanism
+# that reacts to a detected condition by changing something, and that is the
+# exact shape of the automation that caused the 2026-08-10 incident. The
+# difference, and it must stay true: the only thing it ever changes is WHICH IP
+# AN ICMP PACKET IS ADDRESSED TO. No uci write, no service restart, no interface
+# touched, nothing reloaded. The worst failure it can produce is a wrong number
+# on a chart. If a future change to this file breaks that property, it has
+# become the other kind of thing and needs the same scrutiny the watchdogs got.
 #
-# It also does not ADD a probe so much as move one. rate-api used to fork a ping
-# on every call, so an open dashboard was already one probe per second — two
-# with a second tab open, which is why two browsers never agreed on the number.
-# Now there is exactly one prober, every reader sees the same samples, and
-# rate-api no longer blocks up to a second waiting for a round-trip.
+# WHY SHELL AND NOT AWK. It began as awk holding the ring, which was fine while
+# the logic was "record what comes back". It is now a state machine — target
+# selection, consecutive-failure counting, candidate verification, a backoff
+# ladder — and busybox awk is a poor place to keep one: no debugger, and it has
+# already produced three separate silent-wrongness bugs in this console (an
+# octal escape in a bracket expression, the gsub backreference idiom, and a
+# byte-at-a-time read of /proc/sys). Shell is legible and the failure paths can
+# be driven by hand. awk is kept for the one thing it is good at: a single pass
+# over the ring to emit the file.
 #
-# COST: one process, one ICMP echo per second, ~1.8 KB rewritten in /tmp (RAM,
-# no flash wear) per second. Measured idle CPU below the resolution of top.
+# It also removed the orphan class. The awk version ran a long-lived `ping` and
+# procd signals only the pid it tracks, so a stop left the prober running
+# invisibly. `ping -c1 -W1` lives at most one second, so there is nothing left
+# behind to reap.
 #
-# Stop with: /etc/init.d/pingmon stop   (the dashboard falls back to dashmon's
-# own 1-minute probe, which keeps its own 4-hour ring either way.)
+# COST, measured on this router: ~22ms of wall per iteration of which ~16ms is
+# the round-trip itself, four forks a second (ping, awk, mv, sleep), and ~1.8 KB
+# rewritten in /tmp (RAM, no flash wear) per second.
+#
+# STATE LIVES IN /tmp AND IS MEANT TO. The selection resets to Cloudflare on
+# every boot, deliberately: choosing a probe target is something you do while
+# looking into a problem, not a setting you carry forever. That also means no
+# flash write on a change, and no reset logic to get wrong.
 
-RING=/tmp/.pingring
-TARGET=${PINGMON_TARGET:-1.1.1.1}
-WINDOW=300                      # seconds of history == 5 minutes
+RING_FILE=/tmp/.pingring
+SEL_FILE=/tmp/.pingtarget
+WINDOW=300              # probes kept == about five minutes at one a second
+MISS_TRIGGER=10         # consecutive silent probes before considering a switch
+VERIFY_TRIES=3          # a single dropped packet must not condemn a target
 
-# Clear a ping left behind by a previous instance.
-#
-# Needed because ping does NOT die when awk does — measured, not assumed: after
-# awk was killed its ping child was still running two minutes later. Left alone
-# it is harmless to the data (only awk writes the ring) but every restart would
-# add another probe, so the router would quietly drift towards several ICMP
-# packets a second with no supervisor aware of any of them.
-#
-# Matched on /proc/<pid>/comm — the EXECUTABLE — and then on the exact argv.
-# NOT on a `pgrep -f` command-line pattern, which on this router also matches
-# any shell that merely mentions the string, including the one running this
-# script. That specific mistake has already cost time here twice.
-reap_strays() {
-    for _d in /proc/[0-9]*; do
-        [ "$(cat "$_d/comm" 2>/dev/null)" = "ping" ] || continue
-        case "$(tr '\0' ' ' < "$_d/cmdline" 2>/dev/null)" in
-            "ping -W 1 $TARGET "*) kill "${_d#/proc/}" 2>/dev/null ;;
-        esac
-    done
+CF=1.1.1.1
+GOOGLE=8.8.8.8
+
+LOST=-1                 # probed, no reply
+NODATA=-2               # slot never filled (prober younger than the window)
+SWITCHED=-3             # the target changed here; not a loss, not a measurement
+
+SEL=cf; CUSTOM=""; TARGET=$CF; NAME="Cloudflare"
+RING=""; MISS=0; EVER=0; STATE=ok; NOTE=""
+UNREACH=0; NEXTTRY=0; BACKOFF=30
+SELRAW=""; GWSEEN=0; UPI=0
+
+gw_addr() {
+    ip route show default 2>/dev/null |
+        awk '{for (i = 1; i <= NF; i++) if ($i == "via") { print $(i+1); exit }}'
 }
-[ "$1" = "reap" ] && { reap_strays; exit 0; }
-reap_strays
 
-# EXACTLY ONE long-lived process, and awk spawns ping itself rather than being
-# the right-hand side of a `while ...; done | awk` pipeline.
-#
-# The pipeline version was written first and was WRONG in a way this router has
-# already been bitten by once. procd signals the pid it tracks; the members of a
-# pipeline are that shell's children, so `/etc/init.d/pingmon stop` killed the
-# wrapper and left the loop, the awk and the ping running as orphans — invisible
-# to procd, still writing to the ring, and about to be joined by a second copy
-# of themselves on the next `start`. Verified by ps, not assumed.
-#
-# With awk as the only process, procd has one thing to kill and ping dies with
-# it: the moment awk is gone, ping's next write hits a closed pipe. awk also
-# keeps its in-memory ring across ping restarts, which is what the loop was for
-# — busybox ping EXITS when the route goes away, which is precisely the event
-# most worth having a record of.
-exec awk -v out="$RING" -v win="$WINDOW" -v target="$TARGET" '
-    # Time is the only index. A second with a reply holds its round-trip; a
-    # second between two replies that produced none is a loss; a second before
-    # the prober started is unmeasured. Deriving loss from elapsed time rather
-    # than from ICMP sequence numbers means a restarted ping — new sequence
-    # counter, same second — cannot fake a gap or hide one.
-    # Three lines, written once a second:
-    #
-    #   1  <epoch> <window>              header, readable without parsing
-    #   2  {"t":…,"n":…,"v":[…]}         the ring, already JSON
-    #   3  <loss%> <avg ms> <jitter ms>  the last 60s, summarised
-    #
-    # Line 2 is JSON because rate-api is polled once a second by every open
-    # dashboard and would otherwise re-derive it every time. Formatting it here
-    # happens once per second no matter how many clients are watching, and drops
-    # that endpoint from 33ms a call back to about 9. Line 3 exists so
-    # dashboard-api can answer "is the internet reachable" with two shell reads
-    # and no parser at all.
-    function flush(   t, x, j, first, probed, lost, sum, ok, prev, d, jsum, jn) {
-        j = ""; first = last - win + 1
-        probed = 0; lost = 0; sum = 0; ok = 0; prev = -1; jsum = 0; jn = 0
-        for (t = first; t <= last; t++) {
-            x = (t in v) ? v[t] : NODATA
-            j = j (t == first ? "" : ",") x
-            if (t <= last - 60) continue          # summary covers the last minute
-            if (x == NODATA) continue             # never probed: not a probe
-            probed++
+apply_sel() {
+    case "$SEL" in
+        google) TARGET=$GOOGLE; NAME="Google" ;;
+        gw)     TARGET=$(gw_addr); NAME="Gateway"
+                [ -n "$TARGET" ] || { SEL=cf; TARGET=$CF; NAME="Cloudflare"; } ;;
+        custom) TARGET=$CUSTOM; NAME="Custom"
+                [ -n "$TARGET" ] || { SEL=cf; TARGET=$CF; NAME="Cloudflare"; } ;;
+        *)      SEL=cf; TARGET=$CF; NAME="Cloudflare" ;;
+    esac
+}
+
+# One packet, one second of patience. -W is undocumented in this busybox's
+# --help but is honoured (verified: -W1 returns in 1.00s, -W3 in 3.00s).
+probe() {
+    _o=$(ping -c1 -W1 "$1" 2>/dev/null)
+    case "$_o" in *time=*) _o=${_o##*time=}; printf '%s' "${_o%% *}" ;; esac
+}
+
+# Three tries, accept on any reply. One probe is too weak a test in both
+# directions: a single dropped packet would condemn a good target, and one lucky
+# reply would bless a host that is about to start filtering.
+verify() {
+    _n=0
+    while [ "$_n" -lt "$VERIFY_TRIES" ]; do
+        [ -n "$(probe "$1")" ] && return 0
+        # these seconds are part of the outage that brought us here, and the
+        # chart should say so rather than quietly skipping them
+        RING="$RING $LOST"
+        _n=$((_n + 1))
+    done
+    return 1
+}
+
+remember_sel() {        # keep the file in step with reality, without
+    SELRAW="$1"         # re-triggering the change detector on the next pass
+    printf '%s\n' "$1" > "$SEL_FILE.tmp" 2>/dev/null &&
+        mv "$SEL_FILE.tmp" "$SEL_FILE" 2>/dev/null
+}
+
+switch_to() {           # $1 sel  $2 ip  $3 name  $4 note
+    SEL=$1; TARGET=$2; NAME=$3; NOTE=$4
+    MISS=0; EVER=1; STATE=ok; UNREACH=0; BACKOFF=30
+    # An AUTOMATIC switch keeps the history. The silence that triggered it is
+    # the evidence, and clearing the ring would destroy exactly the thing worth
+    # looking at. The boundary is marked instead, so nothing spans it.
+    RING="$RING $SWITCHED"
+    remember_sel "$1"
+}
+
+write_ring() {
+    awk -v ring="$RING" -v up="$UPI" -v win="$WINDOW" -v sel="$SEL" \
+        -v target="$TARGET" -v name="$NAME" -v state="$STATE" -v note="$NOTE" '
+    function esc(s) { gsub(/\\/, "\\\\&", s); gsub(/"/, "\\\\&", s); return s }
+    BEGIN {
+        n = split(ring, v, " ")
+        if (n > win) n = win
+        pad = win - n; if (pad < 0) pad = 0
+        j = ""
+        for (i = 1; i <= pad; i++) j = j (i > 1 ? "," : "") "-2"
+        for (i = 1; i <= n; i++)  j = j ((i > 1 || pad > 0) ? "," : "") v[i]
+
+        # the last 60 probes, summarised for dashboard-api. -2 was never
+        # probed and -3 is a boundary; neither is a lost packet, and counting
+        # them would invent loss out of a restart.
+        lo = (n > 60 ? n - 59 : 1); prev = -1
+        for (k = lo; k <= n; k++) {
+            x = v[k] + 0
+            if (x == -2 || x == -3) continue
+            probes++
             if (x < 0) { lost++; prev = -1; continue }
             sum += x; ok++
-            # jitter as the mean absolute change between CONSECUTIVE replies; a
-            # loss breaks the chain rather than being spanned, so a gap cannot
-            # masquerade as one enormous swing
             if (prev >= 0) { d = x - prev; if (d < 0) d = -d; jsum += d; jn++ }
             prev = x
         }
-        printf "%d %d\n{\"t\":%d,\"n\":%d,\"v\":[%s]}\n%d %.1f %.1f\n",
-               last, win, last, win, j,
-               (probed ? lost * 100 / probed : 100),
-               (ok ? sum / ok : -1), (jn ? jsum / jn : -1) > tmp
-        close(tmp)
-        # rename rather than rewrite in place: the reader is a 1s CGI poll, and
-        # a truncate-then-write would hand it a torn file roughly once an hour.
-        # One fork a second is the cheaper mistake.
-        system("mv " tmp " " out)
-    }
-    function sample(line,   i, n, rtt, now, t) {
-        rtt = ""
-        n = split(line, f, " ")
-        for (i = 1; i <= n; i++) if (substr(f[i], 1, 5) == "time=") rtt = substr(f[i], 6)
-        if (rtt == "" || rtt + 0 <= 0) return
-        now = systime()
-        if (last == 0) last = now - 1
-        # NTP stepping the clock backwards would otherwise strand the ring in
-        # the future; treat it as a restart rather than emitting a huge gap.
-        if (now < last) { delete v; last = now - 1 }
-        for (t = last + 1; t < now; t++) v[t] = LOST
-        v[now] = rtt + 0
-        last = now
-        for (t in v) if (t < last - win) delete v[t]
-        flush()
-    }
-    BEGIN {
-        LOST = -1; NODATA = -2; tmp = out ".tmp"; last = 0
-        cmd = "ping -W 1 " target " 2>/dev/null"
-        while (1) {
-            while ((cmd | getline line) > 0) if (line ~ /time=/) sample(line)
-            # ping gave up — no route, most likely. Close the pipe, wait, and
-            # start it again. The ring is untouched: the seconds spent without
-            # a reply are filled in as LOST by the next sample that arrives, so
-            # an outage records itself instead of erasing the record.
-            close(cmd)
-            system("sleep 1")
-        }
-    }
-'
+        # line 1 is deliberately plain: the two readers need the age and the
+        # state, and both should get them with a shell `read` and no parser.
+        # The age is UPTIME, not wall clock — monotonic, and both readers have
+        # /proc/uptime open already for their own reasons.
+        printf "%d %d %s\n", up, win, state
+        printf "{\"up\":%d,\"n\":%d,\"sel\":\"%s\",\"target\":\"%s\",\"name\":\"%s\"", \
+               up, win, esc(sel), esc(target), esc(name)
+        printf ",\"state\":\"%s\",\"note\":\"%s\",\"v\":[%s]}\n", esc(state), esc(note), j
+        printf "%d %.1f %.1f\n", (probes ? lost * 100 / probes : 100), \
+               (ok ? sum / ok : -1), (jn ? jsum / jn : -1)
+    }' > "$RING_FILE.tmp" && mv "$RING_FILE.tmp" "$RING_FILE"
+}
+
+while :; do
+    read -r _u _rest < /proc/uptime 2>/dev/null
+    UPI=${_u%.*}
+    case "$UPI" in ''|*[!0-9]*) UPI=0 ;; esac
+
+    # ---- did anyone change the selection? one read, no fork ----------------
+    _raw=""
+    [ -f "$SEL_FILE" ] && read -r _raw < "$SEL_FILE" 2>/dev/null
+    if [ "$_raw" != "$SELRAW" ]; then
+        SELRAW="$_raw"
+        set -- $_raw
+        SEL=${1:-cf}; CUSTOM=${2:-}
+        apply_sel
+        # A MANUAL change starts a fresh window. The old samples measured a
+        # different path, and keeping them would draw a step that never
+        # happened and a jitter spike nobody experienced.
+        RING=""; MISS=0; EVER=0; NOTE=""; STATE=ok
+        UNREACH=0; BACKOFF=30; NEXTTRY=0
+    fi
+
+    # The gateway is a role, not an address: it moves when the uplink fails
+    # over to Wi-Fi or a tethered phone. Re-read it occasionally rather than
+    # every second, since it costs two forks.
+    if [ "$SEL" = gw ] && [ $((UPI - GWSEEN)) -ge 10 ]; then
+        GWSEEN=$UPI
+        _g=$(gw_addr)
+        if [ -n "$_g" ] && [ "$_g" != "$TARGET" ]; then
+            TARGET=$_g; RING=""; MISS=0; EVER=0
+            NOTE="the uplink changed — now probing $_g"
+        fi
+    fi
+
+    # ---- the probe --------------------------------------------------------
+    RTT=$(probe "$TARGET")
+    if [ -n "$RTT" ]; then
+        RING="$RING $RTT"; MISS=0; EVER=1; STATE=ok
+        if [ "$UNREACH" = 1 ]; then UNREACH=0; BACKOFF=30; NOTE=""; fi
+    else
+        RING="$RING $LOST"; MISS=$((MISS + 1))
+        # A target that has NEVER answered is a property of the target, not a
+        # verdict on the connection — most game servers drop ICMP outright.
+        # Saying "not answering" is true; saying "lossy" would not be.
+        [ "$EVER" = 0 ] && [ "$UNREACH" = 0 ] && STATE=silent
+    fi
+
+    # ---- failover ---------------------------------------------------------
+    if [ "$UNREACH" = 1 ]; then
+        # Nothing was reachable last time we looked. Retry on a widening
+        # ladder, Cloudflare first every time because it is the default.
+        if [ "$UPI" -ge "$NEXTTRY" ]; then
+            if verify "$CF"; then
+                switch_to cf "$CF" "Cloudflare" "the connection came back"
+            elif verify "$GOOGLE"; then
+                switch_to google "$GOOGLE" "Google" "the connection came back on $GOOGLE"
+            else
+                case "$BACKOFF" in
+                    30) BACKOFF=60 ;;
+                    60) BACKOFF=300 ;;
+                    *)  BACKOFF=300 ;;
+                esac
+                NEXTTRY=$((UPI + BACKOFF))
+            fi
+        fi
+    elif [ "$MISS" -ge "$MISS_TRIGGER" ]; then
+        case "$SEL" in
+            cf|google)
+                if [ "$SEL" = cf ]; then _cs=google; _ci=$GOOGLE; _cn="Google"
+                else                      _cs=cf;     _ci=$CF;     _cn="Cloudflare"; fi
+                if verify "$_ci"; then
+                    switch_to "$_cs" "$_ci" "$_cn" "$TARGET stopped answering — now using $_ci"
+                else
+                    # NEVER switch on the failure of the current target alone.
+                    # Two independent anycast resolvers going silent at once is
+                    # far better evidence that the problem is here than that
+                    # both providers failed — so stop switching and say so,
+                    # instead of flapping between them every ten seconds.
+                    UNREACH=1; STATE=down; BACKOFF=30; NEXTTRY=$((UPI + BACKOFF))
+                    NOTE="neither $CF nor $GOOGLE is answering — the connection looks down"
+                fi
+                ;;
+            custom)
+                # Only revert a custom target that PROVED it speaks ICMP and
+                # then went quiet. One that never answered is left alone: it was
+                # chosen deliberately, and yanking it back would make the option
+                # useless for the game servers it exists for.
+                if [ "$EVER" = 1 ]; then
+                    switch_to cf "$CF" "Cloudflare" "$TARGET stopped answering — back to $CF"
+                fi
+                ;;
+            gw)
+                # A deliberate diagnostic choice. If the gateway stops
+                # answering, that IS the finding; reverting would hide it.
+                :
+                ;;
+        esac
+    fi
+
+    # ---- keep the window, publish it --------------------------------------
+    set -- $RING
+    while [ $# -gt $WINDOW ]; do shift; done
+    RING="$*"
+    write_ring
+
+    # Pace from the CLOCK, not from whether the probe succeeded.
+    #
+    # The obvious version — sleep only when a reply came back, since a timeout
+    # already spent its second inside -W1 — busy-spins the moment there is no
+    # route at all: ping then fails instantly with ENETUNREACH rather than
+    # waiting, so an unplugged cable would turn this into a hot loop. Comparing
+    # the second we started in against the one we are in now covers both, and
+    # both reads are builtins.
+    read -r _u2 _rest < /proc/uptime 2>/dev/null
+    [ "${_u2%.*}" = "$UPI" ] && sleep 1
+done

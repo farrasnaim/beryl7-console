@@ -565,15 +565,43 @@ OUIJ="{$OUIJ}"
 # loss=100 with no ring at all is the honest default — it drives the topology's
 # "no route to the internet", and claiming reachability we cannot demonstrate is
 # the wrong way to be wrong.
-PROBE_LOSS=100; PROBE_PING=-1; PROBE_JIT=-1
+PROBE_LOSS=100; PROBE_PING=-1; PROBE_JIT=-1; PROBE_STATE=unknown
+read -r _upnow _ < /proc/uptime 2>/dev/null; _upnow=${_upnow%.*}
+case "$_upnow" in ''|*[!0-9]*) _upnow=0 ;; esac
 if [ -f /tmp/.pingring ]; then
     { read -r _h; read -r _; read -r _sum; } < /tmp/.pingring 2>/dev/null
-    if [ $(( NOW - ${_h%% *} )) -le 90 ] && [ -n "$_sum" ]; then
+    set -- $_h
+    if [ -n "$1" ] && [ $(( _upnow - $1 )) -le 90 ]; then
+        PROBE_STATE=${3:-unknown}
         set -- $_sum
         case "$1$2$3" in
             ''|*[!0-9.-]*) : ;;
             *) PROBE_LOSS=$1; PROBE_PING=$2; PROBE_JIT=$3 ;;
         esac
+    fi
+fi
+
+# ---- is there internet, decided WITHOUT the selectable probe target ---------
+# The Overview lets you aim the probe at a game server or at your own gateway,
+# and most game servers drop ICMP outright. If the hero panel took its verdict
+# from whatever you happened to select, pointing the probe at a silent host
+# would black out the whole page and claim you were offline.
+#
+# So it is the union of two things that fail differently:
+#   * no default route at all  -> the cable or the upstream box is gone
+#   * nothing reachable        -> the route is there and the internet is not
+# `silent` is NOT offline: it means the chosen target does not answer pings,
+# which is a fact about the target. Only `down` — set when neither public
+# resolver replies — counts. dashmon's own independent probe is the fallback
+# for pingmon being stopped, so the verdict never depends on one mechanism.
+ONLINE=true
+[ "$UPACT" = "none" ] && ONLINE=false
+[ "$PROBE_STATE" = "down" ] && ONLINE=false
+if [ "$PROBE_STATE" = "unknown" ] && [ -f /tmp/.wanreach ]; then
+    read -r _wu _wl < /tmp/.wanreach 2>/dev/null
+    case "$_wu" in ''|*[!0-9]*) _wu=-1 ;; esac
+    if [ "$_wu" -ge 0 ] && [ $(( _upnow - _wu )) -le 150 ] && [ "$_wl" = "100" ]; then
+        ONLINE=false
     fi
 fi
 
@@ -768,7 +796,8 @@ printf '"wan":{"ip":"%s","rx_rate":%s,"tx_rate":%s,"rx_bytes":%s,"tx_bytes":%s},
 printf '"uplink":{"active":"%s","dev":"%s"},' "$UPACT" "$(esc "$ACTDEV")"
 printf '"air":%s,"sta":%s,"neigh":%s,"oui":%s,"wired":%s,"events":%s,"nlbw":%s,' \
     "$AIRJ" "$STAJ" "$NBJ" "$OUIJ" "$WIREDJ" "$EVJ" "$NLJ"
-printf '"probe":{"loss":%s,"ping":%s,"jit":%s},' "$PROBE_LOSS" "$PROBE_PING" "$PROBE_JIT"
+printf '"probe":{"loss":%s,"ping":%s,"jit":%s,"state":"%s","online":%s},' \
+    "$PROBE_LOSS" "$PROBE_PING" "$PROBE_JIT" "$(esc "$PROBE_STATE")" "$ONLINE"
 printf '"nlbw_period":%s,"nlbw_daily":%s,' \
     "$( [ -n "$NLPER" ] && printf '"%s"' "$NLPER" || echo null )" "$NLDAILY"
 printf '"classmap":%s,' "$CMJ"
