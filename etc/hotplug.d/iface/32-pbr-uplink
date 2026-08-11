@@ -1,0 +1,138 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/32-pbr-uplink
+#
+# Keep pbr's uplink pointed at an interface that is actually up.
+#
+# THE FAULT THIS PREVENTS, and how it was measured:
+#
+# pbr takes a single interface NAME in pbr.config.uplink_interface. When that
+# interface is down it cannot resolve a gateway ("Uplink (IPv4): wan/eth0/
+# 0.0.0.0"), and a pbr *restart* in that state flushes every routing table and
+# rebuilds none of them — including a VPN tunnel's, which never needed the WAN
+# gateway at all. It also stops installing the nftables mark rule, so a device
+# pinned to a tunnel is not merely misrouted, it is not marked at all: its
+# traffic goes out the live uplink in the clear. Measured with the WAN unplugged
+# and the phone tethering:
+#
+#     tables:       (empty)
+#     iPad mark:    none installed
+#     iPad traffic: 1.1.1.1 ... via 172.20.10.1 dev eth2      <- in the clear
+#
+# and the same again with a Wi-Fi uplink carrying instead of the tether. The
+# tunnel stays up and handshakes throughout, so nothing about the tunnel's own
+# state reveals it. Repointing uplink_interface at a live interface and
+# reloading rebuilt every table, reinstalled the mark, and put the device back
+# inside the tunnel — DNS included.
+#
+# WHY THIS DOES NOT CHASE THE ACTIVE ROUTE. pbr does not need to know which
+# uplink is actually carrying traffic; it needs a name it can resolve a gateway
+# for. Measured: with pbr pinned to `tethering` while the Wi-Fi uplink held the
+# default route, tunnel routing was perfectly correct. So this only acts when
+# the pinned interface is DOWN, or when a better one comes back. That keeps UCI
+# writes rare, which matters on flash.
+#
+# ORDER mirrors the interface metrics (wan 10, wwan 20, tethering 30), so once
+# the wired uplink returns pbr goes back to it.
+#
+# `tethering` is included deliberately: pbr decides what counts as an uplink by
+# matching the interface NAME (is_wan4: wan*/*wan), so it ignores a USB tether
+# entirely until it is named as the uplink.
+
+[ "$ACTION" = "ifup" ] || [ "$ACTION" = "ifdown" ] || exit 0
+
+CANDIDATES="wan wwan tethering"
+
+# Only uplink events matter. A LAN or tunnel interface flapping must not cost a
+# pbr reload.
+case " $CANDIDATES " in *" $INTERFACE "*) ;; *) exit 0 ;; esac
+
+[ "$(uci -q get pbr.config.enabled)" = "1" ] || exit 0
+
+LOCK=/tmp/.pbr-uplink.lock
+LOG="logger -t pbr-uplink"
+
+. /lib/functions/network.sh
+
+# Up AND with a gateway we can actually resolve — "up" alone is not enough,
+# which is the whole failure above.
+live() {
+    network_is_up "$1" || return 1
+    local gw=""
+    network_get_gateway gw "$1" true
+    [ -n "$gw" ] && [ "$gw" != "0.0.0.0" ]
+}
+
+CUR=$(uci -q get pbr.config.uplink_interface)
+
+WANT=""
+for c in $CANDIDATES; do
+    live "$c" && { WANT="$c"; break; }
+done
+
+# Nothing is up. Leave the pin alone: pointing it at another dead interface
+# gains nothing, and the router has no internet to route anyway.
+[ -n "$WANT" ] || exit 0
+[ "$WANT" = "$CUR" ] && exit 0
+
+# A single failover raises several ifup/ifdown events, and a pbr reload takes
+# ~16s to settle. Without this the reloads queue up and overlap.
+if ! mkdir "$LOCK" 2>/dev/null; then
+    # Stale lock from a killed run should not wedge this permanently.
+    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then
+        rmdir "$LOCK" 2>/dev/null
+        mkdir "$LOCK" 2>/dev/null || exit 0
+    else
+        exit 0
+    fi
+fi
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
+# Re-read after taking the lock: an earlier event in the same failover may have
+# already moved it while this one was waiting.
+CUR=$(uci -q get pbr.config.uplink_interface)
+[ "$WANT" = "$CUR" ] && exit 0
+
+uci set pbr.config.uplink_interface="$WANT"
+uci commit pbr
+# Two different events reach this line and the distinction matters when reading
+# the log after a bad night: either the pinned uplink died, or a preferred one
+# came back while the current one was still perfectly fine. Saying "unusable"
+# for both claimed a healthy USB tether had failed every time the Ethernet
+# returned.
+if live "$CUR"; then
+    $LOG "'$WANT' is back and outranks '$CUR' -> pbr now tracks '$WANT'"
+else
+    $LOG "uplink '$CUR' is down -> pbr now tracks '$WANT'"
+fi
+/etc/init.d/pbr reload >/dev/null 2>&1
+
+# Changing the interface set renumbers pbr's fwmarks, and fw4 only ever ADDs
+# chains — one that drops out of the generated ruleset survives a pbr restart
+# and a firewall reload both. Harmless but confusing, so tidy it up.
+#
+# The test is "is it still in the file pbr generated", NOT "does anything jump
+# to it". Most mark chains are legitimately unreferenced: pbr emits one per
+# supported interface, and only the ones with a device policy attached are ever
+# jumped to. An earlier version used the reference count and deleted three live
+# chains pbr had just written.
+#
+# Backgrounded: this has to wait for pbr's reload to finish rewriting the file,
+# and a hotplug handler should not sit blocking netifd for that long.
+GEN=/usr/share/nftables.d/ruleset-post/30-pbr.nft
+(
+    # Drop the inherited EXIT trap FIRST. This subshell outlives the parent by
+    # ~20s, and without this it would rmdir the lock on its way out — quite
+    # possibly a lock a later failover event had legitimately just taken.
+    trap - EXIT INT TERM
+    sleep 20
+    # No file, or an unreadable one, means we cannot tell orphan from live —
+    # so delete nothing.
+    [ -s "$GEN" ] || exit 0
+    keep=$(grep -oE 'pbr_mark_0x[0-9a-f]+' "$GEN" 2>/dev/null | sort -u)
+    [ -n "$keep" ] || exit 0
+    for ch in $(nft list ruleset 2>/dev/null | grep -oE 'pbr_mark_0x[0-9a-f]+' | sort -u); do
+        printf '%s\n' "$keep" | grep -qx "$ch" && continue
+        nft delete chain inet fw4 "$ch" 2>/dev/null &&
+            $LOG "removed stale mark chain $ch left by the renumbering"
+    done
+) >/dev/null 2>&1 &
