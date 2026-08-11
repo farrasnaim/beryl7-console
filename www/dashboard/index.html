@@ -84,7 +84,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=b8c30a3c"></script>
+<script src="/os.js?v=78b158c2"></script>
 <script>
 (function () {
 'use strict';
@@ -588,12 +588,7 @@ function paintSys(sys) {
         setTxt(r._val, valTxt);
         setTxt(r._meta, meta || '');
         r._meta.hidden = !meta;
-        if (tone) r._meter.setAttribute('data-tone', tone);
-        else r._meter.removeAttribute('data-tone');
-        var lit = Math.max(0, Math.min(12, Math.round(frac * 12)));
-        for (var i = 0; i < r._meter.children.length; i++) {
-            r._meter.children[i].className = i < lit ? 'on' : '';
-        }
+        OS.meterSet(r._meter, frac, tone);
     }
     bar('Load average', load.toFixed(2), Math.min(1, load / cores),
         load > cores ? 'bad' : load > cores * 0.7 ? 'warn' : null,
@@ -658,15 +653,26 @@ var MEDIA = {
     idle:    { k: 'Not connected', ico: 'dev', note: 'known, currently offline' }
 };
 
+/* The list is KEYED, not rebuilt (see OS.keyed). Every heading, row and open
+   panel keeps the same DOM node across polls and is updated in place, which is
+   what lets the signal scales travel to their new value instead of jumping to
+   it. Order here is stable by construction — model() sorts by group, then
+   generation, then name — so the reconciler's move loop normally does nothing.
+   DOM order is preserved rather than faked with CSS `order`, because
+   .tbl__group:first-child and .row:last-child draw their borders from it. */
 function renderClients(d, M) {
-    var box = $('#clients'); clear(box);
+    var box = $('#clients');
     var devs = M.devices;
     var onlineN = devs.filter(function (v) { return v.medium !== 'idle' && v.medium !== 'blocked'; }).length;
     setTxt($('#cliCount'), onlineN + ' online · ' + devs.length + ' known');
 
+    var K = OS.keyed(box);
     if (!devs.length) {
-        box.appendChild(OS.emptyState('No devices seen yet',
-            'Devices appear here the moment they connect or take a DHCP lease.', 'dev'));
+        K.want('empty', function () {
+            return OS.emptyState('No devices seen yet',
+                'Devices appear here the moment they connect or take a DHCP lease.', 'dev');
+        });
+        K.commit();
         return;
     }
     var groups = {};
@@ -680,129 +686,186 @@ function renderClients(d, M) {
         /* A heading that names a radio can open to show that radio. Ethernet
            and Blocked have no radio behind them and stay inert. */
         var ap = apForGroup(key, M.aps);
-        var g = el('div', 'tbl__group');
-        if (ap) {
-            g.setAttribute('role', 'button');
-            g.setAttribute('tabindex', '0');
-            g.setAttribute('aria-expanded', radioOpen[key] ? 'true' : 'false');
-            g.style.cursor = 'pointer';
+        var g = K.want('g:' + key, function () { return groupHead(key); }).node;
+        syncGroupHead(g, key, ap, list.length);
+        if (ap && radioOpen[key]) {
+            K.want('rd:' + key, radioDetail).node._sync(ap, d);
         }
-        if (MEDIA[key].ico) g.appendChild(OS.icon(MEDIA[key].ico));
-        g.appendChild(el('span', 'tbl__gk', MEDIA[key].k));
-        if (MEDIA[key].note) { var nn = el('span', 'row__sub', MEDIA[key].note); g.appendChild(nn); }
-        g.appendChild(el('span', 'tbl__gn', String(list.length)));
-        if (ap) {
-            var caret = el('div'); caret.style.cssText =
-                'width:5px;height:5px;flex:none;margin-left:2px;' +
-                'border-right:1.5px solid var(--ink-4);border-bottom:1.5px solid var(--ink-4);' +
-                'transform:rotate(' + (radioOpen[key] ? '225deg' : '45deg') + ');' +
-                'transition:transform 150ms';
-            g.appendChild(caret);
-            var toggleRadio = function () { radioOpen[key] = !radioOpen[key]; render(last); };
-            g.addEventListener('click', toggleRadio);
-            g.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRadio(); }
-            });
-        }
-        box.appendChild(g);
-        if (ap && radioOpen[key]) box.appendChild(radioDetail(ap, d));
         /* The per-row zone chip is suppressed under the IoT heading — it would
            repeat "iot" on every row of a group that already says so. */
         list.forEach(function (v) {
-            box.appendChild(rowFor(v, d, key === 'iot'));
-            if (expanded[v.mac]) box.appendChild(detailFor(v, d));
+            K.want('r:' + v.mac, function () { return rowFor(v.mac); })
+             .node._sync(v, key === 'iot');
+            if (expanded[v.mac]) {
+                detailFor(K.want('d:' + v.mac, function () { return el('div', 'det'); }).node, v, d);
+            }
         });
     });
+    K.commit();
 }
 
-function rowFor(v, d, inZoneGroup) {
+/* A group heading is built for the widest case — caret and all — and then told
+   what it is. Building two shapes would mean rebuilding the node whenever a
+   radio came or went, and a rebuilt caret cannot rotate. */
+function groupHead(key) {
+    var g = el('div', 'tbl__group');
+    if (MEDIA[key].ico) g.appendChild(OS.icon(MEDIA[key].ico));
+    g.appendChild(el('span', 'tbl__gk', MEDIA[key].k));
+    if (MEDIA[key].note) g.appendChild(el('span', 'row__sub', MEDIA[key].note));
+    g._n = el('span', 'tbl__gn');
+    g.appendChild(g._n);
+    g._caret = el('div'); g._caret.style.cssText =
+        'width:5px;height:5px;flex:none;margin-left:2px;' +
+        'border-right:1.5px solid var(--ink-4);border-bottom:1.5px solid var(--ink-4);' +
+        'transition:transform 150ms var(--ease)';
+    g.appendChild(g._caret);
+    function toggle() {
+        if (!g._ap) return;
+        radioOpen[key] = !radioOpen[key];
+        render(last);
+    }
+    g.addEventListener('click', toggle);
+    g.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+    return g;
+}
+function syncGroupHead(g, key, ap, n) {
+    g._ap = ap;
+    setTxt(g._n, String(n));
+    g._caret.hidden = !ap;
+    g._caret.style.transform = 'rotate(' + (ap && radioOpen[key] ? '225deg' : '45deg') + ')';
+    if (ap) {
+        g.setAttribute('role', 'button');
+        g.setAttribute('tabindex', '0');
+        g.setAttribute('aria-expanded', radioOpen[key] ? 'true' : 'false');
+        g.style.cursor = 'pointer';
+    } else {
+        g.removeAttribute('role');
+        g.removeAttribute('tabindex');
+        g.removeAttribute('aria-expanded');
+        g.style.cursor = '';
+    }
+}
+
+/* Built once per MAC and kept. Everything that moves — the signal scale, the
+   caret — is a lasting element that gets a new value; only the parts with no
+   motion of their own (chips, the state word) are still replaced. */
+function rowFor(mac) {
     var r = el('div', 'row row--entity');
     r.style.gridTemplateColumns = 'minmax(0,1fr) auto auto auto';
     r.setAttribute('role', 'button');
     r.setAttribute('tabindex', '0');
-    r.setAttribute('aria-expanded', expanded[v.mac] ? 'true' : 'false');
 
     var id = el('div', 'row__id re-id');
-    var ic = el('div', 'row__ico');
-    ic.appendChild(OS.icon(OS.CLASS_ICON[v.cls] || 'dev'));
-    id.appendChild(ic);
+    r._ico = el('div', 'row__ico');
+    id.appendChild(r._ico);
     var txt = el('div'); txt.style.minWidth = '0';
-    var title = el('div', 'row__title');
-    title.appendChild(el('span', 'row__nm', v.name));
-    if (v.vpn) title.appendChild(OS.chip('VPN', 'on'));
-    if (v.zone && v.zone !== LANNET && !inZoneGroup) title.appendChild(OS.chip(v.zone, 'flat'));
-    txt.appendChild(title);
+    r._title = el('div', 'row__title');
+    r._nm = el('span', 'row__nm');
+    r._title.appendChild(r._nm);
+    txt.appendChild(r._title);
     /* the identity line reads like the operator would say it:
        "5 GHz · Wi-Fi 7 · 2402 Mb/s" */
-    var subBits = [];
-    if (v.links.length) {
-        var L = v.links[0], st = L.st || {};
-        subBits.push(L.band + ' GHz');
-        subBits.push(OS.GEN[OS.genOf(st)]);
-    } else if (v.medium === 'eth') {
-        subBits.push('wired');
-    }
-    if (v.ip) subBits.push(v.ip);
-    txt.appendChild(el('div', 'row__sub', subBits.join('  ·  ') || v.mac));
+    r._sub = el('div', 'row__sub');
+    txt.appendChild(r._sub);
     id.appendChild(txt);
     r.appendChild(id);
 
-    /* signal, plotted on the calibrated -90..-20 rule */
+    /* signal, plotted on the calibrated -90..-20 rule. The scale is created
+       here and only ever moved afterwards: os.css asks for a 400ms travel on
+       the fill and the marker, and a scale rebuilt every poll has no previous
+       position to travel from — which is exactly why it used to jump. Wired and
+       blocked rows hide the two children rather than the wrapper, so the row
+       keeps its four grid columns either way. */
     var mid = el('div', 're-sig'); mid.style.cssText = 'display:flex;align-items:center;gap:10px';
-    if (v.medium === '5' || v.medium === '2.4') {
-        var sc = OS.rssiScale(v.signal, true);
-        sc.style.width = '64px';
-        sc.title = v.signal + ' dBm';
-        mid.appendChild(sc);
-        var dbm = el('span', 'row__num', v.signal + ' dBm');
-        dbm.style.cssText += ';color:var(--ink-2);width:56px';
-        mid.appendChild(dbm);
-    }
+    r._sc = OS.rssiScale(-90, true);
+    r._sc.style.width = '64px';
+    mid.appendChild(r._sc);
+    r._dbm = el('span', 'row__num');
+    r._dbm.style.cssText += ';color:var(--ink-2);width:56px';
+    mid.appendChild(r._dbm);
     r.appendChild(mid);
 
     /* the state word: the single uppercase element in the row */
-    var wordBox = el('div', 're-state'); wordBox.style.cssText = 'text-align:right;min-width:82px';
-    if (v.medium === '5' || v.medium === '2.4') {
-        var active = v.idleMs < 3000;
-        var q = OS.quality(v.signal);
-        wordBox.appendChild(OS.stateWord(active ? 'ACTIVE' : q.word,
-            active ? 'ok' : q.tone === 'ok' ? null : q.tone));
-    } else if (v.medium === 'eth') {
-        wordBox.appendChild(OS.stateWord('WIRED', 'ok'));
-    } else if (v.medium === 'blocked') {
-        wordBox.appendChild(OS.stateWord('BLOCKED', 'bad'));
-    } else {
-        wordBox.appendChild(OS.stateWord('OFFLINE', 'idle'));
-    }
-    /* the entity's footprint: what it has moved today, on every row */
-    if (v.traffic && (v.traffic.dn + v.traffic.up) > 0) {
-        wordBox.appendChild(el('div', 'row__cap',
-            OS.bytes(v.traffic.dn + v.traffic.up) + ' today'));
-    } else if (v.links.length && v.idleMs >= 3000) {
-        wordBox.appendChild(el('div', 'row__cap', 'idle ' + OS.dur(v.idleMs / 1000)));
-    }
-    r.appendChild(wordBox);
+    r._word = el('div', 're-state'); r._word.style.cssText = 'text-align:right;min-width:82px';
+    r.appendChild(r._word);
 
     /* expand affordance */
-    var caret = el('div', 're-caret'); caret.style.cssText =
+    r._caret = el('div', 're-caret'); r._caret.style.cssText =
         'width:5px;height:5px;border-right:1.5px solid var(--ink-4);' +
-        'border-bottom:1.5px solid var(--ink-4);transform:rotate(' +
-        (expanded[v.mac] ? '225deg' : '45deg') + ');transition:transform 150ms';
-    r.appendChild(caret);
+        'border-bottom:1.5px solid var(--ink-4);transition:transform 150ms var(--ease)';
+    r.appendChild(r._caret);
 
     function toggle() {
-        expanded[v.mac] = !expanded[v.mac];
+        expanded[mac] = !expanded[mac];
         render(last);
     }
     r.addEventListener('click', toggle);
     r.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
     });
+
+    r._sync = function (v, inZoneGroup) {
+        r.setAttribute('aria-expanded', expanded[v.mac] ? 'true' : 'false');
+        var ic = OS.CLASS_ICON[v.cls] || 'dev';
+        if (r._ic !== ic) { r._ic = ic; clear(r._ico); r._ico.appendChild(OS.icon(ic)); }
+        setTxt(r._nm, v.name);
+        while (r._title.childNodes.length > 1) r._title.removeChild(r._title.lastChild);
+        if (v.vpn) r._title.appendChild(OS.chip('VPN', 'on'));
+        if (v.zone && v.zone !== LANNET && !inZoneGroup) r._title.appendChild(OS.chip(v.zone, 'flat'));
+
+        var subBits = [];
+        if (v.links.length) {
+            var L = v.links[0], st = L.st || {};
+            subBits.push(L.band + ' GHz');
+            subBits.push(OS.GEN[OS.genOf(st)]);
+        } else if (v.medium === 'eth') {
+            subBits.push('wired');
+        }
+        if (v.ip) subBits.push(v.ip);
+        setTxt(r._sub, subBits.join('  ·  ') || v.mac);
+
+        var wifi = v.medium === '5' || v.medium === '2.4';
+        r._sc.hidden = !wifi;
+        r._dbm.hidden = !wifi;
+        if (wifi) {
+            OS.rssiScaleSet(r._sc, v.signal);
+            r._sc.title = v.signal + ' dBm';
+            setTxt(r._dbm, v.signal + ' dBm');
+        }
+
+        clear(r._word);
+        if (wifi) {
+            var active = v.idleMs < 3000;
+            var q = OS.quality(v.signal);
+            r._word.appendChild(OS.stateWord(active ? 'ACTIVE' : q.word,
+                active ? 'ok' : q.tone === 'ok' ? null : q.tone));
+        } else if (v.medium === 'eth') {
+            r._word.appendChild(OS.stateWord('WIRED', 'ok'));
+        } else if (v.medium === 'blocked') {
+            r._word.appendChild(OS.stateWord('BLOCKED', 'bad'));
+        } else {
+            r._word.appendChild(OS.stateWord('OFFLINE', 'idle'));
+        }
+        /* the entity's footprint: what it has moved today, on every row */
+        if (v.traffic && (v.traffic.dn + v.traffic.up) > 0) {
+            r._word.appendChild(el('div', 'row__cap',
+                OS.bytes(v.traffic.dn + v.traffic.up) + ' today'));
+        } else if (v.links.length && v.idleMs >= 3000) {
+            r._word.appendChild(el('div', 'row__cap', 'idle ' + OS.dur(v.idleMs / 1000)));
+        }
+
+        r._caret.style.transform = 'rotate(' + (expanded[v.mac] ? '225deg' : '45deg') + ')';
+    };
     return r;
 }
 
-function detailFor(v, d) {
-    var box = el('div', 'det');
+/* Fills a caller-owned panel rather than returning a new one, so the expanded
+   panel keeps its identity across polls (its <details> state already survives
+   via advOpen). The contents carry no motion, so they are still rebuilt. */
+function detailFor(box, v, d) {
+    clear(box);
 
     /* actions first: this panel is opened to DO something as often as to read */
     var acts = el('div', 'inline');
@@ -990,62 +1053,83 @@ function apForGroup(key, aps) {
    sits in the spectrum, and airtime. Folded in here so the page states each
    fact once — the heading above already gives the band and the client count,
    so those are not repeated. */
-function radioDetail(ap, d) {
+/* Built empty and filled by _sync, so the airtime needle — the only thing in
+   here that changes between polls — is a lasting element that can travel. */
+function radioDetail() {
     var box = el('div', 'det');
-    var inf = ap.info || {};
 
-    var top = el('div');
-    top.style.cssText = 'display:flex;align-items:baseline;gap:8px;min-width:0';
-    var nm = el('span', null, inf.ssid || ap.section);
-    nm.style.cssText = 'font-size:13.5px;font-weight:600;letter-spacing:-.015em;' +
+    box._top = el('div');
+    box._top.style.cssText = 'display:flex;align-items:baseline;gap:8px;min-width:0';
+    box._nm = el('span');
+    box._nm.style.cssText = 'font-size:13.5px;font-weight:600;letter-spacing:-.015em;' +
         'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-    top.appendChild(nm);
-    if (ap.network !== LANNET) top.appendChild(OS.chip(ap.network, 'flat'));
-    if (ap.macfilter === 'deny' && (ap.maclist || []).length)
-        top.appendChild(OS.chip((ap.maclist || []).length + ' blocked', 'warn'));
-    box.appendChild(top);
+    box._top.appendChild(box._nm);
+    box.appendChild(box._top);
 
-    var meta = el('div', 'row__sub');
-    var gen = { be: 'Wi-Fi 7', ax: 'Wi-Fi 6', ac: 'Wi-Fi 5' }[inf.hwmode] || '';
-    meta.textContent = [gen, 'ch ' + (inf.channel || '?'),
-        inf.txpower != null ? 'tx ' + inf.txpower + ' dBm' : '']
-        .filter(Boolean).join('  ·  ');
-    meta.style.marginTop = '2px';
-    box.appendChild(meta);
+    box._meta = el('div', 'row__sub');
+    box._meta.style.marginTop = '2px';
+    box.appendChild(box._meta);
 
     /* the instrument: where this radio actually sits in its band */
-    var mhz = parseInt(String(inf.htmode || '').replace(/[A-Z]+/, ''), 10) || 20;
-    var specEl = OS.spectrum(ap.band, inf.channel || 1, inf.center_chan1 || inf.channel, mhz, 44);
-    specEl.style.marginTop = '10px';
-    box.appendChild(specEl);
+    box._spec = el('div');
+    box._spec.style.marginTop = '10px';
+    box.appendChild(box._spec);
 
     /* airtime under the spectrum, on a calibrated 0-100 with a tick at the
        70% congestion threshold. Only the LAN AP reports it: the counters are
        per-radio, so an isolated SSID sharing a radio would double-count. */
-    var air = d.air || {};
-    var g = ap.band === '5g' ? air.g5 : air.g24;
-    if (g && g.active && ap.network === LANNET) {
-        var pct = airPct(ap.band, g);
-        if (pct != null) {
-            var row = el('div');
-            row.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:10px';
-            var lab = el('span', 'row__cap', 'airtime');
-            lab.style.width = '48px'; lab.style.flex = 'none';
-            row.appendChild(lab);
-            var sc = OS.scale(pct, 0, 100, [70], pct > 70 ? 'warn' : null, true);
-            sc.style.flex = '1';
-            row.appendChild(sc);
-            var v = el('span', 'n', pct + '%');
-            v.style.cssText = 'font-size:11px;width:36px;text-align:right;flex:none';
-            row.appendChild(v);
-            var word = pct > 70 ? OS.stateWord('CONGESTED', 'warn')
-                     : pct > 30 ? OS.stateWord('BUSY', null)
-                     : OS.stateWord('CLEAR', 'ok');
-            word.style.marginLeft = '6px';
-            row.appendChild(word);
-            box.appendChild(row);
+    box._air = el('div');
+    box._air.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:10px';
+    var lab = el('span', 'row__cap', 'airtime');
+    lab.style.width = '48px'; lab.style.flex = 'none';
+    box._air.appendChild(lab);
+    box._airSc = OS.scale(0, 0, 100, [70], null, true);
+    box._airSc.style.flex = '1';
+    box._air.appendChild(box._airSc);
+    box._airV = el('span', 'n');
+    box._airV.style.cssText = 'font-size:11px;width:36px;text-align:right;flex:none';
+    box._air.appendChild(box._airV);
+    box._airW = el('span');
+    box._airW.style.marginLeft = '6px';
+    box._air.appendChild(box._airW);
+    box.appendChild(box._air);
+
+    box._sync = function (ap, d) {
+        var inf = ap.info || {};
+        setTxt(box._nm, inf.ssid || ap.section);
+        while (box._top.childNodes.length > 1) box._top.removeChild(box._top.lastChild);
+        if (ap.network !== LANNET) box._top.appendChild(OS.chip(ap.network, 'flat'));
+        if (ap.macfilter === 'deny' && (ap.maclist || []).length)
+            box._top.appendChild(OS.chip((ap.maclist || []).length + ' blocked', 'warn'));
+
+        var gen = { be: 'Wi-Fi 7', ax: 'Wi-Fi 6', ac: 'Wi-Fi 5' }[inf.hwmode] || '';
+        setTxt(box._meta, [gen, 'ch ' + (inf.channel || '?'),
+            inf.txpower != null ? 'tx ' + inf.txpower + ' dBm' : '']
+            .filter(Boolean).join('  ·  '));
+
+        /* the spectrum plot is pure geometry: redraw it only when the geometry
+           actually changed, which on a fixed channel is never */
+        var mhz = parseInt(String(inf.htmode || '').replace(/[A-Z]+/, ''), 10) || 20;
+        var sig = [ap.band, inf.channel || 1, inf.center_chan1 || inf.channel, mhz].join('/');
+        if (box._specSig !== sig) {
+            box._specSig = sig;
+            clear(box._spec);
+            box._spec.appendChild(OS.spectrum(ap.band, inf.channel || 1,
+                inf.center_chan1 || inf.channel, mhz, 44));
         }
-    }
+
+        var air = d.air || {};
+        var g = ap.band === '5g' ? air.g5 : air.g24;
+        var pct = (g && g.active && ap.network === LANNET) ? airPct(ap.band, g) : null;
+        box._air.hidden = pct == null;
+        if (pct == null) return;
+        OS.scaleSet(box._airSc, pct, pct > 70 ? 'warn' : null);
+        setTxt(box._airV, pct + '%');
+        clear(box._airW);
+        box._airW.appendChild(pct > 70 ? OS.stateWord('CONGESTED', 'warn')
+                            : pct > 30 ? OS.stateWord('BUSY', null)
+                            : OS.stateWord('CLEAR', 'ok'));
+    };
     return box;
 }
 
@@ -1086,7 +1170,21 @@ function trafficHeading(period, daily) {
 
 function renderTraffic(d, M) {
     setTxt($('#trafTitle'), trafficHeading(d.nlbw_period, d.nlbw_daily));
-    var box = $('#traffic'); clear(box);
+    var box = $('#traffic');
+    /* The grid and the hint are built once and kept. A meter segment carries a
+       background transition in os.css; it can only fade if the segment is the
+       same element it was a poll ago. */
+    if (!box._grid) {
+        clear(box);
+        box._hint = el('div', 'hint', 'No per-device accounting yet today.');
+        box.appendChild(box._hint);
+        /* full-width panel: two columns of meters on desktop, one on a phone —
+           a lone 900px meter says less than two 440px ones */
+        box._grid = el('div');
+        box._grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));' +
+                                  'gap:4px 32px';
+        box.appendChild(box._grid);
+    }
     /* Every device the router accounted for today, minus the IoT network —
        plugs and bulbs trading a few hundred KB are noise beside real devices,
        and they sit on their own isolated network anyway. Nothing here is a
@@ -1102,32 +1200,40 @@ function renderTraffic(d, M) {
     var grand = 0;
     all.forEach(function (v) { grand += v.traffic.dn + v.traffic.up; });
     setTxt($('#trafTotal'), grand ? OS.bytes(grand) + ' total' : '');
-    if (!all.length) {
-        box.appendChild(el('div', 'hint', 'No per-device accounting yet today.'));
-        return;
-    }
+    box._hint.hidden = !!all.length;
+
     all.sort(function (a, b) { return (b.traffic.dn + b.traffic.up) - (a.traffic.dn + a.traffic.up); });
-    var rows = all;
-    var top = rows[0].traffic.dn + rows[0].traffic.up || 1;
-    /* full-width panel now: two columns of meters on desktop, one on a phone —
-       a lone 900px meter says less than two 440px ones */
-    var grid = el('div');
-    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));' +
-                         'gap:4px 32px';
-    rows.forEach(function (v) {
-        var tot = v.traffic.dn + v.traffic.up;
-        var r = el('div'); r.style.marginBottom = '9px';
-        var t = el('div'); t.style.cssText = 'display:flex;justify-content:space-between;gap:8px;margin-bottom:4px';
-        var nm = el('span'); nm.style.cssText = 'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-        nm.textContent = v.name; t.appendChild(nm);
-        var vv = el('span', 'n'); vv.style.cssText = 'font-size:11px;color:var(--ink-3);flex:none';
-        vv.textContent = '↓ ' + OS.bytes(v.traffic.dn) + '   ↑ ' + OS.bytes(v.traffic.up);
-        t.appendChild(vv);
-        r.appendChild(t);
-        r.appendChild(OS.meter(tot / top, null, true));
-        grid.appendChild(r);
+    var top = all.length ? (all[0].traffic.dn + all[0].traffic.up || 1) : 1;
+    /* Ranked with CSS `order`, not by moving nodes. This list DOES reorder — two
+       devices a few MB apart swap places all evening — and a node yanked out of
+       the tree and put back loses the transition it was in the middle of. There
+       are no sibling selectors in this grid, so visual order can differ from DOM
+       order with nothing to give it away. */
+    var K = OS.keyed(box._grid, true);
+    all.forEach(function (v, i) {
+        var r = K.want(v.mac, trafRow).node;
+        r.style.order = i;
+        setTxt(r._nm, v.name);
+        setTxt(r._vv, '↓ ' + OS.bytes(v.traffic.dn) + '   ↑ ' + OS.bytes(v.traffic.up));
+        OS.meterSet(r._meter, (v.traffic.dn + v.traffic.up) / top);
     });
-    box.appendChild(grid);
+    K.commit();
+}
+function trafRow() {
+    var r = el('div'); r.style.marginBottom = '9px';
+    var t = el('div'); t.style.cssText = 'display:flex;justify-content:space-between;gap:8px;margin-bottom:4px';
+    r._nm = el('span');
+    r._nm.style.cssText = 'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    t.appendChild(r._nm);
+    r._vv = el('span', 'n');
+    r._vv.style.cssText = 'font-size:11px;color:var(--ink-3);flex:none';
+    t.appendChild(r._vv);
+    r.appendChild(t);
+    /* value comes from the sync that follows; from then on the same 12 segments
+       are re-lit rather than replaced, which is what lets them fade */
+    r._meter = OS.meter(0, null, true);
+    r.appendChild(r._meter);
+    return r;
 }
 
 /* ----------------------------------------------------------------- boot -- */

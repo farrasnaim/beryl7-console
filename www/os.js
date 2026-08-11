@@ -25,6 +25,63 @@ function clear(n) { while (n && n.firstChild) n.removeChild(n.firstChild); }
 function setTxt(n, t) { if (n && n.textContent !== String(t)) n.textContent = t; }
 function frag() { return document.createDocumentFragment(); }
 
+/* KEYED LIST — the reason a live panel can animate at all.
+   os.css already carries the transitions (400ms on a scale's fill and marker,
+   var(--t) on a meter segment). They never fired anywhere on this page because
+   every poll ran clear(box) and built fresh nodes: a brand-new element has no
+   previous computed style to travel from, so it simply appears at its final
+   value. Exactly the same failure as the flow-dash phase reset above — the
+   animation was authored, the element just never survived long enough to run it.
+
+   So: same key, same DOM node, contents updated in place. The tree is only
+   touched when the SEQUENCE actually changes, and in the steady state the
+   commit loop below moves nothing at all.
+
+   Deliberately not CSS `order`: the clients list styles .tbl__group:first-child
+   and .row:last-child, which follow DOM order, not visual order — reordering
+   visually would put those borders on the wrong rows. Panels with no such
+   sibling selectors (the traffic grid) can and do use `order` instead, which
+   avoids moving a node mid-transition.
+
+   want(key, build) -> { node, fresh }; call commit() when the sequence is done.
+   Nodes that stopped being wanted are removed, as is anything in the box that
+   the keyed set never owned (an empty state, a hint).
+
+   unordered:true keeps every surviving node exactly where it is and appends new
+   ones at the end — for a box that ranks itself with CSS `order`, where a swap
+   would otherwise yank a node out of the tree mid-transition. */
+function keyed(box, unordered) {
+    var map = box._keyed || (box._keyed = {});
+    var seq = [], seen = {};
+    return {
+        want: function (key, build) {
+            var n = map[key], fresh = false;
+            if (!n) { n = map[key] = build(); fresh = true; }
+            seen[key] = 1; seq.push(n);
+            return { node: n, fresh: fresh };
+        },
+        commit: function () {
+            Object.keys(map).forEach(function (k) {
+                if (seen[k]) return;
+                if (map[k].parentNode) map[k].parentNode.removeChild(map[k]);
+                delete map[k];
+            });
+            if (unordered) {
+                for (var j = 0; j < seq.length; j++) {
+                    if (!seq[j].parentNode) box.appendChild(seq[j]);
+                }
+                return;
+            }
+            var cur = box.firstChild;
+            for (var i = 0; i < seq.length; i++) {
+                if (cur === seq[i]) { cur = cur.nextSibling; continue; }
+                box.insertBefore(seq[i], cur);
+            }
+            while (cur) { var nx = cur.nextSibling; box.removeChild(cur); cur = nx; }
+        }
+    };
+}
+
 /* Parse a trusted static icon string into nodes. Only ever called with the
    literal SVG constants below — never with data from the router. */
 /* Phase for the marching-dash flow animation.
@@ -157,10 +214,19 @@ function icon(name) { return svg(I[name] || I.dev); }
 /* Segmented meter. n of 12 lit, tone encodes state. */
 function meter(frac, tone, small) {
     var m = el('div', 'meter' + (small ? ' meter--sm' : ''));
-    if (tone) m.setAttribute('data-tone', tone);
-    var lit = Math.max(0, Math.min(12, Math.round(frac * 12)));
-    for (var i = 0; i < 12; i++) m.appendChild(el('i', i < lit ? 'on' : ''));
+    for (var i = 0; i < 12; i++) m.appendChild(el('i'));
+    meterSet(m, frac, tone);
     return m;
+}
+/* Re-light an existing meter. Only the segments that changed are written, so
+   the ones that did not are never restyled and never re-run their fade. */
+function meterSet(m, frac, tone) {
+    if (tone) m.setAttribute('data-tone', tone); else m.removeAttribute('data-tone');
+    var lit = Math.max(0, Math.min(12, Math.round(frac * 12)));
+    for (var i = 0; i < 12; i++) {
+        var want = i < lit ? 'on' : '';
+        if (m.children[i].className !== want) m.children[i].className = want;
+    }
 }
 function readout(k, v, u, meta, state, small) {
     var r = el('div', 'ro' + (small ? ' ro--sm' : ''));
@@ -947,28 +1013,39 @@ function stateWord(text, tone) {
    reads "past the good line" instead of decoding a percentage. */
 function scale(val, min, max, ticks, tone, small) {
     var s = el('div', 'scale' + (small ? ' scale--sm' : ''));
-    if (tone) s.setAttribute('data-tone', tone);
-    var pct = Math.max(0, Math.min(1, (val - min) / (max - min)));
     s.appendChild(el('i', 'scale__track'));
-    var fill = el('i', 'scale__fill'); fill.style.width = (pct * 100) + '%';
-    s.appendChild(fill);
+    s._fill = el('i', 'scale__fill');
+    s.appendChild(s._fill);
     (ticks || []).forEach(function (t) {
         var p = (t - min) / (max - min);
         if (p < 0 || p > 1) return;
         var k = el('i', 'scale__tick'); k.style.left = (p * 100) + '%';
         s.appendChild(k);
     });
-    var m = el('i', 'scale__m'); m.style.left = (pct * 100) + '%';
-    s.appendChild(m);
+    s._m = el('i', 'scale__m');
+    s.appendChild(s._m);
+    s._min = min; s._max = max;
+    scaleSet(s, val, tone);
     return s;
+}
+/* Move an existing scale to a new value. THIS is what makes the 400ms
+   transitions in os.css run: the fill and the marker keep their previous
+   computed width/left, so the browser has something to interpolate from.
+   min/max are remembered from the build so a caller cannot silently rescale
+   the axis under a needle that is mid-flight. */
+function scaleSet(s, val, tone) {
+    if (tone) s.setAttribute('data-tone', tone); else s.removeAttribute('data-tone');
+    var pct = Math.max(0, Math.min(1, (val - s._min) / (s._max - s._min))) * 100;
+    s._fill.style.width = pct + '%';
+    s._m.style.left = pct + '%';
 }
 /* RSSI is the number everyone misreads, so it gets a named helper with the
    quality boundaries drawn on the rule itself. */
+function rssiClamp(dbm) { return Math.max(-90, Math.min(-20, dbm || -90)); }
 function rssiScale(dbm, small) {
-    var q = quality(dbm);
-    return scale(Math.max(-90, Math.min(-20, dbm || -90)), -90, -20,
-                 [-75, -67, -55], q.tone, small);
+    return scale(rssiClamp(dbm), -90, -20, [-75, -67, -55], quality(dbm).tone, small);
 }
+function rssiScaleSet(s, dbm) { scaleSet(s, rssiClamp(dbm), quality(dbm).tone); }
 
 /* SPECTRUM — the occupied band drawn at true centre and true width on the
    real channel axis. The difference between being told "channel 40, EHT160"
@@ -1027,8 +1104,8 @@ function spectrum(band, chan, centerChan, widthMHz, h) {
    internet that bypasses the uplink node. */
 /* Vertical topology — the phone composition of the same drawing. Identical
    node/link/flow vocabulary; the chain simply runs down the page:
-   Internet / Uplink / Router / radio lanes / Encrypted path, with the VPN
-   bypass drawn up the left margin back to the Internet node. */
+   Internet / Uplink / Router / radio lanes / VPN, with the VPN bypass drawn
+   up the left margin back to the Internet node. */
 function topologyV(m) {
     /* Phone composition of the same drawing, built to be short: each node's
        caption sits INSIDE the box as a label column instead of claiming its own
@@ -1197,22 +1274,27 @@ function topology(m, compact) {
         s.appendChild(sv('rect', { 'class': 'nodebox ' + (m.vpnUp ? 'on' : 'bad'),
             x: bx, y: vy - 15, width: bw, height: 30, rx: 2 }));
         s.appendChild(svtext(bx + 12, vy + 4, m.vpnLabel, 't1'));
-        cap(bx + 12, vy - 21, 'Encrypted path', m.vpnUp);
+        /* "VPN", matching the phone composition — the desktop drawing kept the
+           old "Encrypted path" wording because it is a separate function. */
+        cap(bx + 12, vy - 21, 'VPN', m.vpnUp);
     }
     return s;
 }
 
 global.OS = {
     el: el, $: $, $$: $$, clear: clear, setTxt: setTxt, frag: frag, svg: svg, icon: icon,
+    keyed: keyed,
     I: I, CLASS_ICON: CLASS_ICON,
     bytes: bytes, rate: rate, brate: brate, dur: dur, ago: ago, clock: clock,
     bars: bars, signalWord: signalWord, genOf: genOf, GEN: GEN,
     LANNET: LANNET, bandLabel: bandLabel, netLabel: netLabel,
-    meter: meter, readout: readout, chip: chip, emptyState: emptyState, note: note,
+    meter: meter, meterSet: meterSet, readout: readout, chip: chip,
+    emptyState: emptyState, note: note,
     spark: spark, ribbon: ribbon,
     sourcesList: sourcesList, failoverControl: failoverControl,
     sv: sv, svtext: svtext, gem: gem, quality: quality, stateWord: stateWord,
-    scale: scale, rssiScale: rssiScale, spectrum: spectrum, topology: topology,
+    scale: scale, scaleSet: scaleSet, rssiScale: rssiScale, rssiScaleSet: rssiScaleSet,
+    spectrum: spectrum, topology: topology,
     toast: toast, dialog: dialog, askConfirm: askConfirm,
     Transport: Transport, post: post, act: act,
     buildShell: buildShell, stage: stage, flagTab: flagTab, dockAction: dockAction,
