@@ -1031,10 +1031,15 @@ function topologyV(m) {
     var cx = LX + 20, y = 0;
 
     function block(cap, capOn, t1, t2, cls) {
+        /* A one-line node centres its text in the box; a two-line node keeps
+           the 14/27 pair, which is already balanced around the middle. Both
+           lines used to start at 14 regardless, so single-line nodes — most of
+           them — sat visibly high in their box. */
+        var yc = t2 ? y + 14 : y + 21;
         s.appendChild(sv('rect', { 'class': 'nodebox ' + (cls || ''),
             x: LX, y: y, width: NW, height: BH, rx: 2 }));
-        s.appendChild(svtext(LX + 12, y + 14, cap, 'cap' + (capOn ? ' capon' : '')));
-        s.appendChild(svtext(LX + LBL, y + 14, t1, 't1'));
+        s.appendChild(svtext(LX + 12, yc, cap, 'cap' + (capOn ? ' capon' : '')));
+        s.appendChild(svtext(LX + LBL, yc, t1, 't1'));
         if (t2) s.appendChild(svtext(LX + LBL, y + 27, t2, 't2'));
         var out = { top: y, mid: y + BH / 2, bot: y + BH };
         y += BH;
@@ -1078,8 +1083,10 @@ function topologyV(m) {
             x: LX, y: vTop, width: NW, height: BH, rx: 2 }));
         /* same label column as the nodes above, so the bypass reads as part of
            the same drawing rather than a footnote to it */
-        s.appendChild(svtext(LX + 12, vTop + 14, 'Encrypted', 'cap' + (m.vpnUp ? ' capon' : '')));
-        s.appendChild(svtext(LX + 12, vTop + 27, 'path', 'cap' + (m.vpnUp ? ' capon' : '')));
+        /* "VPN", not "Encrypted path" — it fits on one line, so the label sits
+           on the same centre as every other single-line node instead of being
+           split across two. */
+        s.appendChild(svtext(LX + 12, vTop + 21, 'VPN', 'cap' + (m.vpnUp ? ' capon' : '')));
         s.appendChild(svtext(LX + LBL, vTop + 21, m.vpnLabel, 't1'));
         /* the bypass: up the left margin, back into the Internet node */
         var d = 'M' + LX + ' ' + vMid + ' H14 V' + a.mid + ' H' + LX;
