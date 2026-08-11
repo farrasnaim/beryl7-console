@@ -1,23 +1,34 @@
 #!/bin/sh
-# /www/cgi-bin/probe-api  —  which host the Overview's probe is aimed at.
+# /www/cgi-bin/probe-api  —  what the Overview's probe is aimed at, and the
+# saved addresses you can aim it at.
 #
-# One job: write /tmp/.pingtarget. pingmon notices within a second and switches.
-# Reading the current target is not here — it arrives with the ring on rate-api,
-# because the dropdown has to agree with the chart it sits above, and two
-# endpoints answering the same question is how they end up disagreeing.
+# Two different lifetimes, deliberately kept apart:
 #
-# POST + same-origin, like every other write on this console. There is no
-# password: the console is unauthenticated on the trusted LAN by design, and the
-# same-origin check is what stops a web page you happen to be visiting from
-# driving this through your browser. This endpoint changes what the router
-# measures and what every other open dashboard sees, so it is a write even
-# though it touches nothing in /etc.
+#   the SELECTION   /tmp/.pingtarget          resets to Cloudflare on every
+#                                             boot. Choosing a target is
+#                                             something you do while looking
+#                                             into a problem, not a setting to
+#                                             carry forever — and it means no
+#                                             flash write when you change it.
+#   the SAVED LIST  /etc/dashboard/ping-targets   survives reboots, because the
+#                                             whole point is not to retype a
+#                                             game server's address every time.
 #
-# The selection lives in /tmp deliberately — see the header of pingmon. It
-# resets to Cloudflare on every boot, so there is no flash write here at all.
+# All of it lives here rather than being split with settings-api, so the
+# address validator exists once. A wrong copy of that is how you end up
+# accepting a hostname in one place and rejecting it in the other.
+#
+# Writes are POST + same-origin, like every other write on this console. There
+# is no password: the console is unauthenticated on the trusted LAN by design,
+# and the same-origin check is what stops a web page you happen to be visiting
+# from driving this through your browser. `list` is a GET because it reads and
+# changes nothing — the same rule settings-api applies to its log reader.
 
 SEL_FILE=/tmp/.pingtarget
+TARGETS=/etc/dashboard/ping-targets
 POST_MAX=512
+MAX_SAVED=12            # the dropdown has to stay readable
+NAME_MAX=24
 
 printf 'Content-Type: application/json\r\n'
 printf 'Cache-Control: no-store\r\n\r\n'
@@ -25,31 +36,47 @@ printf 'Cache-Control: no-store\r\n\r\n'
 esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 fail() { printf '{"ok":false,"error":"%s"}' "$(esc "$1")"; exit 0; }
 
-[ "$REQUEST_METHOD" = "POST" ] || fail "POST required"
-
 CL="${CONTENT_LENGTH:-0}"; case "$CL" in ''|*[!0-9]*) CL=0 ;; esac
 [ "$CL" -gt "$POST_MAX" ] && fail "body too large"
 BODY=""
 [ "$CL" -gt 0 ] && BODY=$(dd bs=1 count="$CL" 2>/dev/null)
 
-# Same check the other write endpoints use: the request must come from a page
-# served by this router, identified by one of its own addresses.
-src="${HTTP_ORIGIN:-$HTTP_REFERER}"
-src="${src#*://}"; src="${src%%[:/]*}"
-ok=0
-case "$src" in
-    "") ok=0 ;;
-    localhost|127.0.0.1|::1) ok=1 ;;
-    *) for ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
-         [ "$ip" = "$src" ] && { ok=1; break; }
-       done ;;
-esac
-[ "$ok" = 1 ] || fail "bad origin"
-
 qs_get() {
     printf '%s' "${QUERY_STRING}&${BODY}" | tr '&' '\n' \
       | awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}'
 }
+urldec() {
+    printf '%s' "$1" | awk '
+    BEGIN{ for(i=0;i<16;i++){ h=sprintf("%X",i); H[h]=i; H[tolower(h)]=i } }
+    { gsub(/\+/," "); s=$0; n=length(s); out=""
+      for(i=1;i<=n;i++){ c=substr(s,i,1)
+        if(c=="%" && i+2<=n){ a=substr(s,i+1,1); b=substr(s,i+2,1)
+          if((a in H) && (b in H)){ out=out sprintf("%c",H[a]*16+H[b]); i+=2; continue } }
+        out=out c }
+      printf "%s", out }'
+}
+qs_get_dec() { urldec "$(qs_get "$1")"; }
+
+ACTION=$(qs_get action)
+[ -n "$ACTION" ] || ACTION=set
+
+# `list` reads and changes nothing, so it stays a GET. The POST rule exists to
+# stop a foreign page issuing a WRITE through your browser; a read cannot be
+# turned into one, and the browser will not hand the response to another origin.
+if [ "$ACTION" != "list" ]; then
+    [ "$REQUEST_METHOD" = "POST" ] || fail "POST required"
+    src="${HTTP_ORIGIN:-$HTTP_REFERER}"
+    src="${src#*://}"; src="${src%%[:/]*}"
+    ok=0
+    case "$src" in
+        "") ok=0 ;;
+        localhost|127.0.0.1|::1) ok=1 ;;
+        *) for ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
+             [ "$ip" = "$src" ] && { ok=1; break; }
+           done ;;
+    esac
+    [ "$ok" = 1 ] || fail "bad origin"
+fi
 
 # A literal unicast IPv4 address and nothing else.
 #
@@ -78,19 +105,81 @@ valid_ip4() {
     return 0
 }
 
-SEL=$(qs_get sel)
-IP=$(qs_get ip)
+# The file is `ip|name` per line, the same shape as the classmap and the oui
+# map. `|` and control characters are stripped from names on the way in, so a
+# line can never gain a second field or a newline.
+clean_name() {
+    printf '%s' "$1" | tr -d '|\000-\037' | cut -c1-"$NAME_MAX" \
+        | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
 
-case "$SEL" in
-    cf|google|gw) LINE="$SEL" ;;
-    custom)
-        valid_ip4 "$IP" || fail "not a usable IPv4 address"
-        LINE="custom $IP"
-        ;;
-    *) fail "unknown target" ;;
+list_json() {
+    printf '['
+    [ -f "$TARGETS" ] && awk -F'|' '
+        function esc(s) { gsub(/\\/, "\\\\&", s); gsub(/"/, "\\\\&", s); return s }
+        $1 != "" && $1 !~ /^#/ {
+            nm = (NF >= 2 && $2 != "") ? $2 : $1
+            printf "%s{\"ip\":\"%s\",\"name\":\"%s\"}", (c++ ? "," : ""), esc($1), esc(nm)
+        }' "$TARGETS" 2>/dev/null
+    printf ']'
+}
+
+save_list() {   # stdin -> the file, atomically
+    mkdir -p /etc/dashboard 2>/dev/null
+    cat > "$TARGETS.tmp" || return 1
+    mv "$TARGETS.tmp" "$TARGETS"
+}
+
+case "$ACTION" in
+
+list)
+    SEL=""; CUSTOM=""
+    [ -f "$SEL_FILE" ] && { read -r _l < "$SEL_FILE" 2>/dev/null; set -- $_l; SEL=$1; CUSTOM=$2; }
+    printf '{"ok":true,"sel":"%s","target":"%s","targets":%s,"max":%s}' \
+        "$(esc "$SEL")" "$(esc "$CUSTOM")" "$(list_json)" "$MAX_SAVED"
+    ;;
+
+add)
+    IP=$(qs_get ip)
+    NAME=$(clean_name "$(qs_get_dec name)")
+    valid_ip4 "$IP" || fail "not a usable IPv4 address"
+    [ -n "$NAME" ] || NAME="$IP"
+    _n=$(awk -F'|' '$1 != "" && $1 !~ /^#/ && $1 != ip' ip="$IP" "$TARGETS" 2>/dev/null | wc -l)
+    [ "$_n" -ge "$MAX_SAVED" ] && fail "that is as many as the list holds ($MAX_SAVED)"
+    # Re-adding an address that is already saved renames it rather than
+    # duplicating it — a list with the same IP twice has no useful meaning.
+    { [ -f "$TARGETS" ] && awk -F'|' -v ip="$IP" '$1 != ip' "$TARGETS" 2>/dev/null
+      printf '%s|%s\n' "$IP" "$NAME"
+    } | save_list || fail "cannot save the list"
+    printf '{"ok":true,"targets":%s}' "$(list_json)"
+    ;;
+
+del)
+    IP=$(qs_get ip)
+    [ -n "$IP" ] || fail "which address?"
+    [ -f "$TARGETS" ] || fail "nothing saved"
+    awk -F'|' -v ip="$IP" '$1 != ip' "$TARGETS" 2>/dev/null | save_list || fail "cannot save the list"
+    # The prober is deliberately NOT touched. Removing a shortcut should not
+    # change what the router is currently measuring; the Overview shows the
+    # live address whether or not it is still in the list.
+    printf '{"ok":true,"targets":%s}' "$(list_json)"
+    ;;
+
+set)
+    SEL=$(qs_get sel)
+    IP=$(qs_get ip)
+    case "$SEL" in
+        cf|google|gw) LINE="$SEL" ;;
+        custom)
+            valid_ip4 "$IP" || fail "not a usable IPv4 address"
+            LINE="custom $IP"
+            ;;
+        *) fail "unknown target" ;;
+    esac
+    printf '%s\n' "$LINE" > "$SEL_FILE.tmp" 2>/dev/null || fail "cannot write the selection"
+    mv "$SEL_FILE.tmp" "$SEL_FILE" 2>/dev/null || fail "cannot write the selection"
+    printf '{"ok":true,"sel":"%s"}' "$(esc "$SEL")"
+    ;;
+
+*) fail "unknown action" ;;
 esac
-
-printf '%s\n' "$LINE" > "$SEL_FILE.tmp" 2>/dev/null || fail "cannot write the selection"
-mv "$SEL_FILE.tmp" "$SEL_FILE" 2>/dev/null || fail "cannot write the selection"
-
-printf '{"ok":true,"sel":"%s"}' "$(esc "$SEL")"

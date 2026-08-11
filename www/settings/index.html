@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Settings — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=0fbff8d4">
+<link rel="stylesheet" href="/os.css?v=12b5e6fb">
 </head>
 <body>
 <div class="shell">
@@ -61,6 +61,19 @@
       <section class="panel mob-only">
         <div class="panel__h"><span class="panel__t">Internet sources</span></div>
         <div class="panel__b" id="b-failover" style="padding-top:4px"></div>
+      </section>
+    </div>
+
+    <!-- PING: addresses worth keeping. The Overview's dropdown is where you
+         pick one; this is where the list it picks from is kept. Deliberately
+         its own section rather than a corner of Network — Network is what the
+         router IS, this is what it MEASURES. -->
+    <div class="sect" id="ping"><span class="sect__t">Ping</span></div>
+    <div class="face">
+      <section class="panel">
+        <div class="panel__h"><span class="panel__t">Saved targets</span>
+          <div class="panel__aside"><span class="row__cap" id="st-ping"></span></div></div>
+        <div class="panel__b" id="b-ping"></div>
       </section>
     </div>
 
@@ -594,6 +607,135 @@ function renderAcl() {
     });
 }
 
+/* ------------------------------------------------------------------- ping -- */
+/* The addresses the Overview's probe can be aimed at. Fetched from probe-api
+   rather than carried in the settings payload, because probe-api owns both the
+   list and the address validator — one copy of "what counts as a usable
+   address", so this page and that dropdown can never disagree about it.
+   It changes when you edit it and never otherwise, so it is not on the poll. */
+var PROBE = '/cgi-bin/probe-api';
+var pingMax = 12;
+
+/* Arriving from the Overview's "Custom…". Landing on this section is harder
+   than a plain anchor because everything above it — the radio panels, LAN,
+   blocked devices — arrives from its own fetch and pushes this further down
+   after the browser has already jumped. So the scroll is repeated at the two
+   moments the layout actually changes, rather than raced against a timer:
+   when this panel renders, and when the first settings payload paints. A
+   backstop covers whatever lands last. Stops correcting once it is in place. */
+var pingLanded = false;
+function landOnPing() {
+    if (pingLanded || location.hash !== '#ping') return;
+    var s = $('#ping'); if (!s) return;
+    var top = s.getBoundingClientRect().top;
+    if (Math.abs(top) <= 4) { pingLanded = true; return; }
+    s.scrollIntoView({ block: 'start' });
+}
+
+function loadPing() {
+    fetch(PROBE + '?action=list', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            if (!j || !j.ok) return;
+            pingMax = j.max || pingMax;
+            renderPing(j.targets || [], j);
+            landOnPing();
+        })
+        .catch(function () { setTxt($('#st-ping'), 'unavailable'); });
+}
+
+function pingPost(params, btn) {
+    if (btn) btn.classList.add('is-busy');
+    return OS.post(PROBE, params)
+        .then(function (j) {
+            if (btn) btn.classList.remove('is-busy');
+            if (!j || !j.ok) { OS.toast((j && j.error) || 'could not save', 'bad'); return null; }
+            return j;
+        })
+        .catch(function () {
+            if (btn) btn.classList.remove('is-busy');
+            OS.toast('could not reach the router', 'bad');
+            return null;
+        });
+}
+
+function renderPing(targets, meta) {
+    var box = $('#b-ping'); if (!box) return;
+    clear(box);
+    setTxt($('#st-ping'), targets.length + ' of ' + pingMax);
+
+    box.appendChild(el('div', 'hint',
+        'Addresses the Overview can point its ping, jitter and packet-loss charts at. ' +
+        'Saved here so a game server you check often does not have to be retyped — the ' +
+        'list survives reboots, the choice of which one is live does not.'))
+        .style.margin = '0 0 12px';
+
+    var g = el('div', 'fgrid');
+    var ipIn = el('input', 'input'); ipIn.type = 'text'; ipIn.placeholder = '203.0.113.7';
+    ipIn.spellcheck = false; ipIn.autocomplete = 'off'; ipIn.maxLength = 15;
+    ipIn.setAttribute('inputmode', 'decimal');
+    g.appendChild(field('Address', ipIn, 'IPv4 only. A name would have to be resolved at ' +
+        'probe time, which can fail during exactly the outage you are trying to measure.'));
+    var nameIn = el('input', 'input'); nameIn.type = 'text'; nameIn.placeholder = 'Valorant SG';
+    nameIn.maxLength = 24;
+    g.appendChild(field('Name', nameIn, 'Optional — what the dropdown will call it.'));
+    box.appendChild(g);
+
+    var addRow = el('div', 'inline');
+    var addBtn = el('button', 'btn btn--sm', 'Add'); addBtn.type = 'button';
+    addBtn.disabled = targets.length >= pingMax;
+    addBtn.addEventListener('click', function () {
+        var ip = ipIn.value.replace(/\s+/g, '');
+        if (!ip) { ipIn.focus(); return; }
+        pingPost({ action: 'add', ip: ip, name: nameIn.value }, addBtn).then(function (j) {
+            if (!j) return;
+            ipIn.value = ''; nameIn.value = '';
+            renderPing(j.targets || [], meta);
+            OS.toast('Saved. It is in the Overview dropdown now.', 'ok');
+        });
+    });
+    ipIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); } });
+    nameIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); } });
+    addRow.appendChild(addBtn);
+    if (targets.length >= pingMax) {
+        addRow.appendChild(el('span', 'row__cap', 'remove one first'));
+    }
+    box.appendChild(addRow);
+
+    box.appendChild(el('div', 'rowsep'));
+    if (!targets.length) {
+        box.appendChild(el('div', 'hint',
+            'Nothing saved. The Overview still offers Cloudflare, Google and your gateway.'));
+        return;
+    }
+    /* A-Z by name, which is the order the dropdown shows them in. */
+    targets.slice().sort(function (a, b) { return a.name.localeCompare(b.name); })
+        .forEach(function (t) {
+            var r = el('div', 'inline'); r.style.marginBottom = '7px';
+            var txt = el('span', null, t.name);
+            txt.style.cssText = 'font-size:12px;flex:1;min-width:100px';
+            if (t.name !== t.ip) {
+                var ipTag = el('span', 'row__cap', t.ip);
+                ipTag.style.marginLeft = '8px';
+                txt.appendChild(ipTag);
+            }
+            r.appendChild(txt);
+            /* Live now? Say so, and still allow removing it: taking a shortcut
+               off the list should not change what the router is measuring. */
+            if (meta && meta.sel === 'custom' && meta.target === t.ip) {
+                r.appendChild(OS.stateWord('LIVE', 'ok'));
+            }
+            var b = el('button', 'btn btn--sm', 'Remove'); b.type = 'button';
+            b.addEventListener('click', function () {
+                pingPost({ action: 'del', ip: t.ip }, b).then(function (j) {
+                    if (j) renderPing(j.targets || [], meta);
+                });
+            });
+            r.appendChild(b);
+            box.appendChild(r);
+        });
+}
+
 /* --------------------------------------------------------------- failover -- */
 /* Fetched only when the phone layout is showing it, and only on demand — this
    setting changes about once a trip, so it has no business on a poll. */
@@ -1085,9 +1227,18 @@ function render(d) {
     renderLog();
     var up = radios.filter(function (r) { return r.current; }).length;
     setTxt($('#wifiMeta'), up + ' of ' + radios.length + ' radios up');
+    landOnPing();
 }
 loadAcl();
 loadFailover();
+loadPing();
+/* Arriving from the Overview's "Custom…" — land on the section, not the top.
+   Scrolled more than once on purpose: the wireless, LAN and blocked-device
+   panels all fill in from their own fetches, and each one that lands above
+   this section pushes it further down, so a single scroll at load ends up
+   pointing at whatever moved into that spot. Instant rather than smooth, so
+   the repeats correct the position instead of fighting an animation. */
+if (location.hash === '#ping') { landOnPing(); setTimeout(landOnPing, 1500); }
 
 /* Configuration barely moves on its own — poll gently, and only to keep the
    live "now" lines and the configured-vs-running notes honest. */

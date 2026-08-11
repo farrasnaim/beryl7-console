@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=0fbff8d4">
+<link rel="stylesheet" href="/os.css?v=12b5e6fb">
 </head>
 <body>
 <div class="shell">
@@ -72,20 +72,13 @@
             <div class="metricrow">
               <span class="inline">
                 <span class="ro__k">Ping</span>
-                <select id="probeSel" class="select select--inline" aria-label="What to probe">
-                  <option value="cf">Cloudflare</option>
-                  <option value="google">Google</option>
-                  <option value="gw">Gateway</option>
-                  <option value="custom">Custom…</option>
-                </select>
+                <!-- Options are built at load: the three built-ins, then the
+                     saved addresses A-Z, then "Custom…" last, which is a way
+                     out to Settings rather than a choice. -->
+                <select id="probeSel" class="select select--inline" aria-label="What to probe"></select>
                 <span class="ro__m" id="probeAddr"></span>
               </span>
               <span class="n" id="pingNow"></span>
-            </div>
-            <div class="inline probecustom" id="probeCustom" hidden>
-              <input id="probeIp" class="input input--inline" type="text" inputmode="decimal"
-                     maxlength="15" spellcheck="false" autocomplete="off" placeholder="203.0.113.7">
-              <button id="probeGo" class="btn btn--sm" type="button">Use</button>
             </div>
             <div class="ro__m probenote" id="probeNote" hidden></div>
             <div id="spark"></div>
@@ -677,29 +670,54 @@ function drawJitter() {
    else would leave the control disagreeing with the chart under it. */
 var PROBE_API = '/cgi-bin/probe-api';
 var probeBusy = false;
-/* The address field is a step in choosing, not part of the readout: it opens
-   when you pick Custom and closes once an address is accepted. Kept as its own
-   flag rather than derived from the select's value, because "Custom is
-   selected" and "you are typing an address" are different states — after a
-   successful submit the first is still true and the second is not. */
-var customOpen = false;
-function showCustom(on) { customOpen = on; $('#probeCustom').hidden = !on; }
+var savedTargets = [];
+
+/* Built once at load, because the saved list only changes on the Settings page
+   and getting here means a full page load anyway.
+   Order: the three built-ins in their own meaningful order — the default
+   first, and the failover pair kept together — then the saved addresses A-Z,
+   then "Custom…" last. That final entry is not a choice, it is the way to
+   Settings, which is why it sits below everything selectable. */
+function buildProbeOptions() {
+    var sel = $('#probeSel'); if (!sel) return;
+    var keep = sel.value;
+    clear(sel);
+    function opt(v, t) { var o = el('option', null, t); o.value = v; sel.appendChild(o); return o; }
+    opt('cf', 'Cloudflare');
+    opt('google', 'Google');
+    opt('gw', 'Gateway');
+    savedTargets.slice().sort(function (a, b) { return a.name.localeCompare(b.name); })
+        .forEach(function (t) { opt('ip:' + t.ip, t.name); });
+    opt('manage', 'Custom…');
+    if (keep) sel.value = keep;
+}
+
+function loadProbeTargets() {
+    fetch(PROBE_API + '?action=list', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (j && j.ok) { savedTargets = j.targets || []; buildProbeOptions(); paintProbe(); } })
+        .catch(function () { /* the built-ins still work */ });
+}
 
 function paintProbe() {
     var sel = $('#probeSel'); if (!sel) return;
-    /* never yank the control out from under someone who has it open */
-    if (!probeBusy && document.activeElement !== sel && pingRing.sel && sel.value !== pingRing.sel) {
-        sel.value = pingRing.sel;
+    /* What the router is live on, expressed as an option value. */
+    var want = pingRing.sel === 'custom' ? 'ip:' + pingRing.target : pingRing.sel;
+    /* A live address that is not in the saved list — it was removed while it
+       was being probed. Removing a shortcut deliberately does not change what
+       is being measured, so the control has to be able to say "this one",
+       and a transient entry is more honest than snapping to something else. */
+    if (pingRing.sel === 'custom' && pingRing.target &&
+        !sel.querySelector('option[value="' + want + '"]')) {
+        var o = el('option', null, pingRing.target + '  (not saved)');
+        o.value = want;
+        sel.insertBefore(o, sel.lastElementChild);
     }
-    var addr = $('#probeAddr');
-    setTxt(addr, pingRing.target || '');
-    /* On a custom target the address doubles as the way back to the field —
-       re-picking "Custom…" in the select fires no change event when it is
-       already selected, so without this there is no route to editing it. */
-    var editable = pingRing.sel === 'custom';
-    addr.className = 'ro__m' + (editable ? ' probeaddr--edit' : '');
-    addr.title = editable ? 'change the address' : '';
-    $('#probeCustom').hidden = !customOpen;
+    /* never yank the control out from under someone who has it open */
+    if (!probeBusy && document.activeElement !== sel && want && sel.value !== want) {
+        sel.value = want;
+    }
+    setTxt($('#probeAddr'), pingRing.target || '');
 
     /* A target that has never answered is a fact about the TARGET — most game
        servers drop ICMP outright — and saying so is very different from
@@ -723,16 +741,13 @@ function setProbe(sel, ip) {
         .then(function (j) {
             probeBusy = false;
             if (!j || !j.ok) {
-                /* leave the field open and populated: the address was rejected,
-                   and the next thing you want is to correct it */
                 OS.toast((j && j.error) || 'could not change the probe target', 'bad');
-                if (pingRing.sel) $('#probeSel').value = pingRing.sel;
+                paintProbe();
                 return;
             }
-            showCustom(false);
             /* Said out loud because it is not obvious: the five minutes on
                screen measured a different path and cannot be carried over. */
-            OS.toast('Now probing ' + (ip || sel === 'gw' ? (ip || 'the gateway') : sel) +
+            OS.toast('Now probing ' + (ip || (sel === 'gw' ? 'the gateway' : sel)) +
                      ' — the five-minute history starts again', 'ok');
         })
         .catch(function () {
@@ -1598,31 +1613,21 @@ OS.tp.start();
    jump when the ribbon appears ~2s later (it needs two samples for a delta) */
 drawRibbon();
 drawProbe();
+loadProbeTargets();
 $('#probeSel').addEventListener('change', function () {
-    /* Custom needs an address before it means anything, so the select alone
-       does not commit — it reveals the field and waits. */
-    if (this.value === 'custom') {
-        showCustom(true);
-        $('#probeIp').focus();
-        $('#probeIp').select();
+    /* The last entry is a destination, not a target: adding and removing saved
+       addresses belongs on the Settings page, where a list can be shown and
+       edited, rather than in a control that has to stay one line tall. */
+    if (this.value === 'manage') {
+        paintProbe();                       /* put the control back first */
+        location.href = '/settings/#ping';
         return;
     }
-    showCustom(false);
+    if (this.value.indexOf('ip:') === 0) {
+        setProbe('custom', this.value.slice(3));
+        return;
+    }
     setProbe(this.value, '');
-});
-$('#probeAddr').addEventListener('click', function () {
-    if (pingRing.sel !== 'custom') return;
-    showCustom(true);
-    $('#probeIp').value = pingRing.target || '';
-    $('#probeIp').focus();
-    $('#probeIp').select();
-});
-$('#probeGo').addEventListener('click', function () {
-    var ip = $('#probeIp').value.replace(/\s+/g, '');
-    if (ip) setProbe('custom', ip);
-});
-$('#probeIp').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { e.preventDefault(); $('#probeGo').click(); }
 });
 ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) {
     document.addEventListener(ev, fastStart, { passive: true });

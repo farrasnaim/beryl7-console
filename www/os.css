@@ -642,15 +642,10 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
     margin-bottom:var(--s2)}
 .metricrow .n{font-size:12px}
 .metricrow .inline{align-items:baseline;gap:9px;min-width:0}
-/* .input and .select are full-width by default, which is right in a form and
-   wrong beside a label. */
-.select--inline{width:auto;min-height:24px;padding:2px 22px 2px 7px;font-size:11.5px;
-    background-position:right 5px center}
-.input--inline{width:auto;max-width:150px;min-height:26px;padding:4px 8px;font-size:11.5px;
-    font-family:var(--mono)}
-.probecustom{margin:-2px 0 var(--s2);gap:7px}
-.probeaddr--edit{cursor:pointer;border-bottom:1px dashed var(--rule-3)}
-.probeaddr--edit:hover{color:var(--ink-2);border-bottom-color:var(--ink-4)}
+/* .select is full-width by default, which is right in a form and wrong beside
+   a label. */
+.select--inline{width:auto;max-width:170px;min-height:24px;padding:2px 22px 2px 7px;
+    font-size:11.5px;background-position:right 5px center}
 .probenote{margin:-2px 0 var(--s2)}
 .stack{display:flex;flex-direction:column;gap:var(--s3)}
 .inline{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
