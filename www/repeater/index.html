@@ -52,11 +52,14 @@
          passwords you have not saved is noise on the page you use at home. -->
     <div class="face" id="knownFace" hidden>
       <section class="panel">
-        <div class="panel__h">
+        <div class="panel__h" id="knownHead">
           <span class="panel__t">Remembered networks</span>
-          <div class="panel__aside"><span class="row__cap" id="knownMeta"></span></div>
+          <div class="panel__aside">
+            <span class="row__cap" id="knownMeta"></span>
+            <i id="knownCaret"></i>
+          </div>
         </div>
-        <div class="panel__b panel__b--flush" id="known"></div>
+        <div class="panel__b panel__b--flush" id="known" hidden></div>
       </section>
     </div>
 
@@ -86,6 +89,11 @@ var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
 OS.buildShell('/repeater/');
 
 var scanResults = null, scanAt = 0, scanning = false, last = null;
+/* Collapsed by default: this is a list of every place you have stayed, and it
+   has no business being the first thing on screen — least of all with someone
+   looking over your shoulder in a lobby. The count stays on the header so you
+   can see there ARE saved networks without opening it. Survives polls. */
+var knownOpen = false;
 
 $('#scanBtn').appendChild(OS.icon('search'));
 $('#scanBtn').appendChild(document.createTextNode('Scan'));
@@ -403,7 +411,7 @@ $('#scanBtn').addEventListener('click', function () {
    browser. Forgetting is the only write it can do. */
 function renderKnown(d) {
     var names = (d.known || []).slice();
-    var face = $('#knownFace'), box = $('#known');
+    var face = $('#knownFace'), box = $('#known'), head = $('#knownHead');
     face.hidden = !names.length;
     /* Emptied, not just hidden. `hidden` only stops it being painted — the rows
        would still be sitting in the DOM holding the names of places you have
@@ -411,6 +419,34 @@ function renderKnown(d) {
        network has to actually remove them. */
     if (!names.length) { clear(box); return; }
     setTxt($('#knownMeta'), names.length === 1 ? '1 password kept' : names.length + ' passwords kept');
+
+    /* Wired once. renderKnown runs on every 8s poll, and adding a listener per
+       render is how a click ends up firing four times and toggling back to
+       where it started. */
+    if (!head._wired) {
+        head._wired = 1;
+        head.setAttribute('role', 'button');
+        head.setAttribute('tabindex', '0');
+        head.style.cursor = 'pointer';
+        head.style.userSelect = 'none';
+        var toggle = function () { knownOpen = !knownOpen; renderKnown(last || {}); };
+        head.addEventListener('click', toggle);
+        head.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+    }
+    head.setAttribute('aria-expanded', knownOpen ? 'true' : 'false');
+    /* Same caret as the radio groups on the Overview, drawn the same way, so a
+       disclosure looks like a disclosure everywhere in the console. */
+    var car = $('#knownCaret');
+    car.style.cssText = 'width:5px;height:5px;flex:none;margin-left:2px;display:inline-block;' +
+        'border-right:1.5px solid var(--ink-4);border-bottom:1.5px solid var(--ink-4);' +
+        'transition:transform 150ms var(--ease);' +
+        'transform:rotate(' + (knownOpen ? '225deg' : '45deg') + ')';
+    box.hidden = !knownOpen;
+    /* Build the rows only while open. Closed, the names must not be sitting in
+       the DOM at all — that is the entire reason for collapsing it. */
+    if (!knownOpen) { clear(box); return; }
     clear(box);
     names.forEach(function (s) {
         var r = el('div', 'row');
