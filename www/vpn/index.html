@@ -242,8 +242,15 @@ function renderMap(d) {
            the rows AND mid means it joins correctly for any device count,
            including one (where the row and the centre differ by 10px). */
         var busX = colRouter - 14;
+        /* Centre the block of device rows on the lane, so the router box ends
+           up BETWEEN the names rather than level with the last one. Pinning
+           the rows to a fixed y+14 while the box tracked the lane centre is
+           what made the box look like it had sagged once a tunnel carried two
+           devices. Both now share one axis: rows centred on mid, box centred
+           on mid. */
+        var rowTop = y + (laneH - (L.macs.length - 1) * 22) / 2;
         L.macs.forEach(function (m, i) {
-            var ty = y + 14 + i * 22;
+            var ty = rowTop + i * 22;
             s2.appendChild(svtext(colDev, ty + 4, nameOf(m), 't1'));
             s2.appendChild(sv('path', { 'class': 'link ' + cls,
                 d: 'M' + (colDev + 236) + ' ' + ty + ' H' + busX }));
@@ -251,8 +258,8 @@ function renderMap(d) {
                 d: 'M' + (colDev + 236) + ' ' + ty + ' H' + busX }));
         });
 
-        var busTop = Math.min(y + 14, mid);
-        var busBot = Math.max(y + 14 + (L.macs.length - 1) * 22, mid);
+        var busTop = Math.min(rowTop, mid);
+        var busBot = Math.max(rowTop + (L.macs.length - 1) * 22, mid);
         if (busBot > busTop) {
             s2.appendChild(sv('path', { 'class': 'link ' + cls,
                 d: 'M' + busX + ' ' + busTop + ' V' + busBot }));
