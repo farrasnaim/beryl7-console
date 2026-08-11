@@ -1281,7 +1281,13 @@ function detailFor(box, v, d) {
     kv('Reachability', v.neigh ? (v.neigh === 'REACHABLE' ? 'reachable'
         : v.neigh === 'FAILED' ? 'not answering ARP' : v.neigh.toLowerCase()) : null);
     kv('Internet route', v.vpn ? v.vpn + '  ·  VPN' : 'Direct  ·  normal uplink');
-    if (v.traffic) kv('Today', '↓ ' + OS.bytes(v.traffic.dn) + '   ↑ ' + OS.bytes(v.traffic.up));
+    /* No "Today" row. The same figure is on the collapsed row above as a
+       combined total, and the Traffic panel further down gives the identical
+       down/up split ranked against every other device — which is the version
+       worth having, because a byte count only means something next to the
+       other byte counts. This row was the third copy and the only one you had
+       to expand something to reach. Everything else in this panel is a fact
+       about the DEVICE that appears nowhere else. */
     box.appendChild(dl);
 
     /* per-link radio detail */
