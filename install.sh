@@ -75,14 +75,15 @@ cp -r $S/www/legacy /www/
 cp    $S/www/cgi-bin/*-api /www/cgi-bin/
 
 # Helper daemons and the nftables generator.
-cp $S/usr/sbin/dashmon $S/usr/sbin/apwatch $S/usr/sbin/vpnwatch $S/usr/sbin/beryl-vpndns /usr/sbin/
+cp $S/usr/sbin/dashmon $S/usr/sbin/apwatch $S/usr/sbin/vpnwatch $S/usr/sbin/beryl-vpndns \
+   $S/usr/sbin/pingmon /usr/sbin/
 
 # Hotplug automation and system tunables.
 mkdir -p /etc/hotplug.d/iface /etc/hotplug.d/net /etc/hotplug.d/usb /etc/sysctl.d
 cp $S/etc/hotplug.d/iface/* /etc/hotplug.d/iface/
 cp $S/etc/hotplug.d/net/30-tethering /etc/hotplug.d/net/
 cp $S/etc/hotplug.d/usb/40-usbmuxd /etc/hotplug.d/usb/
-cp $S/etc/init.d/cpugovernor /etc/init.d/
+cp $S/etc/init.d/cpugovernor $S/etc/init.d/pingmon /etc/init.d/
 cp $S/etc/sysctl.d/99-local.conf /etc/sysctl.d/
 
 # cp does not carry the exec bit reliably across filesystems; CGI that is not
@@ -93,7 +94,7 @@ chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api 
           /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
           /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
           /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
-          /etc/init.d/cpugovernor
+          /etc/init.d/cpugovernor /usr/sbin/pingmon /etc/init.d/pingmon
 echo "  . files installed"
 
 # Device name/class map: seed it once, never overwrite an edited one.
@@ -115,6 +116,14 @@ done
 /etc/init.d/cron restart >/dev/null 2>&1 || true
 echo "  . cron entries present"
 
+# The one always-running piece: a 1-second probe whose 5-minute ring is what
+# makes the Overview ping / loss / jitter history survive the dashboard being
+# closed. procd rather than cron, because cron floors at a minute and a
+# five-minute chart needs seconds. See the header of /usr/sbin/pingmon.
+/etc/init.d/pingmon enable  >/dev/null 2>&1 || true
+/etc/init.d/pingmon restart >/dev/null 2>&1 || true
+echo "  . pingmon running"
+
 # Keep everything across a sysupgrade.
 touch /etc/sysupgrade.conf
 for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/vpn \
@@ -125,7 +134,8 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/dashboard /etc/crontabs/root \
          /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
-         /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf; do
+         /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
+         /usr/sbin/pingmon /etc/init.d/pingmon; do
     grep -qxF "$p" /etc/sysupgrade.conf || echo "$p" >> /etc/sysupgrade.conf
 done
 echo "  . sysupgrade.conf updated"

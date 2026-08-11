@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=cc13c1bb">
+<link rel="stylesheet" href="/os.css?v=02c68675">
 </head>
 <body>
 <div class="shell">
@@ -55,19 +55,27 @@
           <div class="panel__b">
             <div id="ribbon"></div>
             <div class="cap"><span id="ribL"></span><span>UL above · DL below</span><span id="ribR"></span></div>
+
+            <!-- Ping, loss and jitter are three readings of ONE measurement:
+                 pingmon's 1-second probe, five minutes of which the router
+                 keeps whether or not anything is watching. That is the point —
+                 alt-tab out of a match, open this, and the bad minute is still
+                 on screen. A browser-side ring could never do it, because the
+                 console does not poll a hidden tab. -->
             <div class="rowsep"></div>
+            <div class="metricrow"><span class="ro__k">Ping</span><span class="n" id="pingNow"></span></div>
             <div id="spark"></div>
-            <div class="cap"><span id="spkL"></span><span id="spkM">round-trip to 1.1.1.1 · 4h</span><span id="spkR"></span></div>
-            <!-- Packet loss. The 4h figure was already being collected by
-                 dashmon and carried in the payload, and the page threw it
-                 away; the live figure is the same probes the trace above is
-                 drawn from, counted rather than plotted. -->
+            <div class="cap"><span id="spkL"></span><span id="spkM"></span><span id="spkR"></span></div>
+
             <div class="rowsep"></div>
-            <div class="lossrow">
-              <span class="ro__k">Packet loss</span>
-              <span id="lossState"></span>
-            </div>
+            <div class="metricrow"><span class="ro__k">Packet loss</span><span id="lossState"></span></div>
+            <div id="lossChart"></div>
             <div class="cap"><span id="lossL"></span><span id="lossM"></span><span id="lossR"></span></div>
+
+            <div class="rowsep"></div>
+            <div class="metricrow"><span class="ro__k">Jitter</span><span id="jitState"></span></div>
+            <div id="jitChart"></div>
+            <div class="cap"><span id="jitL"></span><span id="jitM"></span><span id="jitR"></span></div>
           </div>
         </section>
         <section class="panel">
@@ -94,7 +102,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=78b158c2"></script>
+<script src="/os.js?v=4168268c"></script>
 <script>
 (function () {
 'use strict';
@@ -364,24 +372,27 @@ var RATE_API = '/cgi-bin/rate-api';
 var FAST_MS = 1000;          /* sample period while the session is active */
 var FAST_WINDOW = 300000;    /* 5 minutes, renewed by any interaction     */
 var RING_MAX = 300;          /* 5 min at 1s, and the ribbon is 300px wide */
-var ring = { t: [], dn: [], up: [], ms: [] };
+var ring = { t: [], dn: [], up: [] };
 var rPrev = null, fastTimer = null, fastBusy = false, activeUntil = 0;
 /* Explicit "the 1s sampler is running" flag. It cannot be inferred from
    fastTimer/fastBusy: pushSample runs from inside the fetch callback, at the
    one moment when fastBusy is already false and fastTimer is not yet
    rescheduled — so both read false while sampling is very much alive. */
 var fastOn = false;
-var lastLat = [];        /* dashmon's 4h ring, used whenever fast mode is off */
+var lastLat = [];        /* dashmon's 4h ring: [t, avg_ms, loss_pct, jitter_ms] */
+/* pingmon's 5-minute ring, on a fixed 1s pitch: v[i] is the second at
+   t - (n-1-i). Positive is a round-trip, -1 was probed and got no reply, -2 is
+   a second before the prober was running. Unlike the throughput ring above,
+   this one is NOT built here — it arrives already five minutes long, which is
+   the whole reason it lives on the router. */
+var pingRing = { t: 0, n: 0, v: [] };
 
-function pushSample(dn, up, ms) {
+function pushSample(dn, up) {
     ring.dn.push(dn); ring.up.push(up); ring.t.push(Date.now());
-    ring.ms.push(ms == null ? null : ms);
     if (ring.dn.length > RING_MAX) {
-        ring.dn.shift(); ring.up.shift(); ring.t.shift(); ring.ms.shift();
+        ring.dn.shift(); ring.up.shift(); ring.t.shift();
     }
     drawRibbon();
-    drawLatency();
-    drawLoss();
 }
 
 /* Eased vertical scales for the two charts.
@@ -392,7 +403,7 @@ function pushSample(dn, up, ms) {
    falling is slow, because that is the case that produced the jump.
    A null resets, so switching between the 1s and 5s sources does not drag one
    window's scale into the other's. */
-var scaleY = { peak: null, lo: null, hi: null };
+var scaleY = { peak: null, lo: null, hi: null, lossHi: null, jitHi: null };
 function ease(cur, target, upRate, downRate) {
     if (cur == null || !isFinite(cur)) return target;
     var k = target > cur ? upRate : downRate;
@@ -433,52 +444,116 @@ function drawRibbon() {
     setTxt($('#tpNow'), '↓ ' + cur[0] + ' ' + cur[1] + '   ↑ ' + cu[0] + ' ' + cu[1]);
 }
 
-/* Latency is the same measurement at two rates — dashmon's 1-minute samples
-   over 4h, and rate-api's 1s samples while the session is live. One chart,
-   switched by which data is current, exactly like the ribbon above it. The
-   caption always names the window so the two are never confused. */
-function drawLatency() {
+/* ----------------------------------------- ping · packet loss · jitter --
+   Three readings of ONE measurement. pingmon probes 1.1.1.1 once a second and
+   the router keeps the last five minutes, so all three charts are already five
+   minutes long the moment the page opens — which is the point. The old design
+   built the latency trace in the browser, and a browser ring is empty exactly
+   when it is wanted: the console does not poll a hidden tab, so alt-tabbing out
+   of a game and back destroyed the very window worth looking at.
+
+   HONEST LIMITS, because a gamer will draw conclusions from this: these are
+   ICMP probes from the ROUTER to 1.1.1.1. They are not the path to a Valorant
+   or CS2 server, and some networks deprioritise ICMP, so a clean reading here
+   does not prove a clean game. The reverse IS proven — if this shows loss or
+   jitter, it is at or beyond the uplink, and nothing on the PC will fix it. */
+
+/* Loss and jitter are properties of a STRETCH of samples, not of one: a single
+   second is either lost or it isn't, and jitter needs two replies to exist at
+   all. 15s is short enough to place a burst on the timeline and long enough
+   that one packet does not spike the whole trace. */
+var ROLL = 15;
+function rollSeries(v, fn) {
+    var out = [], i;
+    for (i = 0; i < v.length; i++) out.push(i < ROLL - 1 ? null : fn(v, i - ROLL + 1, i));
+    return out;
+}
+/* -2 is a second that was never probed (before the prober started, or after it
+   died). It is NOT loss, and counting it as loss would report a freshly booted
+   router as 100% down. */
+function winLoss(v, a, b) {
+    var probed = 0, lost = 0, i;
+    for (i = a; i <= b; i++) {
+        if (v[i] === -2) continue;
+        probed++;
+        if (v[i] < 0) lost++;
+    }
+    return probed ? lost * 100 / probed : null;
+}
+/* Mean absolute change between CONSECUTIVE replies. A loss breaks the chain
+   rather than being spanned, so a gap cannot masquerade as one huge swing. */
+function winJitter(v, a, b) {
+    var prev = -1, s = 0, n = 0, i, x;
+    for (i = a; i <= b; i++) {
+        x = v[i];
+        if (x < 0) { prev = -1; continue; }
+        if (prev >= 0) { s += Math.abs(x - prev); n++; }
+        prev = x;
+    }
+    return n ? s / n : null;
+}
+function mean(a) {
+    if (!a.length) return null;
+    var s = 0, i;
+    for (i = 0; i < a.length; i++) s += a[i];
+    return s / a.length;
+}
+/* One decimal below 10, whole numbers above — at 34% the tenth is noise. */
+function fine(p) { return p >= 10 ? Math.round(p) : Math.round(p * 10) / 10; }
+/* Loss and jitter are pinned to zero at the bottom rather than floating their
+   own baseline: a clean trace drawn halfway up the box reads as "some loss" at
+   a glance. But zero exactly ON the floor reads as a divider rule, not as a
+   measurement — so the axis gets a little headroom underneath and a flat zero
+   sits just above the edge, visibly plotted. */
+function floorRange(hi) { return [-hi * 0.08, hi]; }
+
+/* 1% is where a tick-based shooter starts to feel loss. Below that but non-zero
+   still earns a word, because the useful signal is "it stopped being zero".
+   `any` is a COUNT, not the percentage: 1 lost packet in 3000 rounds to 0.0% and
+   must still not read CLEAN. The percentage passed in is the one already rounded
+   for display, so the word can never disagree with the number beside it. */
+function lossTone(shownPct, any) {
+    if (!any) return ['CLEAN', 'ok'];
+    if (shownPct < 1) return ['PATCHY', 'warn'];
+    return ['LOSSY', 'bad'];
+}
+/* Jitter is what causes the rubber-banding you feel before you ever see a loss
+   figure. Under ~5ms is invisible; past ~15ms a 64-tick server is reordering
+   your inputs. */
+function jitTone(ms) {
+    if (ms <= 5)  return ['STEADY',  'ok'];
+    if (ms <= 15) return ['UNEVEN',  'warn'];
+    return ['ERRATIC', 'bad'];
+}
+
+/* The 4h context line under each chart, from dashmon's per-minute ring. Since
+   dashmon now aggregates the same 1s prober, a minute here is 60 probes rather
+   than the 3 it used to be — which is what makes a 4h loss figure meaningful
+   below 33%. */
+function hist4h() {
+    var pings = [], losses = [], jits = [], badMin = 0, lastBad = 0, i, r;
+    for (i = 0; i < lastLat.length; i++) {
+        r = lastLat[i];
+        if (+r[1] >= 0) pings.push(+r[1]);
+        if (isFinite(+r[2])) {
+            losses.push(+r[2]);
+            if (+r[2] > 0) { badMin++; lastBad = +r[0]; }
+        }
+        if (+r[3] >= 0) jits.push(+r[3]);
+    }
+    return { ping: mean(pings), loss: mean(losses), jit: mean(jits),
+             badMin: badMin, lastBad: lastBad, mins: losses.length };
+}
+
+function drawPing() {
     var sp = $('#spark'); if (!sp) return;
-    /* Live only while the 1s sampler is actually running. Keying this off the
-       ring contents instead let an expired session keep showing a frozen trace
-       under a "last Nm" label that went on growing. */
-    var first = -1, lost = 0, got = 0, i;
-    for (i = 0; i < ring.ms.length; i++) {
-        if (ring.ms[i] == null) { if (first >= 0) lost++; }
-        else { if (first < 0) first = i; got++; }
-    }
-    var live = fastOn && got > 1;
-    var vals, leftTxt, midTxt;
-
-    if (live) {
-        vals = ring.ms.slice(first);
-        /* span measured from the first live sample, not the first sample of
-           the ring — the throughput ring can be much older than this trace */
-        var span = (ring.t[ring.t.length - 1] - ring.t[first]) / 1000;
-        leftTxt = 'last ' + OS.dur(span);
-    } else {
-        vals = lastLat.map(function (r) { return +r[1]; });
-        leftTxt = lastLat.length ? OS.clock(lastLat[0][0]) : '';
-    }
-
-    /* A failed probe is stored as -1 by dashmon and as null by the 1s sampler,
-       so both have to be excluded — averaging them in would quietly drag the
-       figure down every time the link blinked. */
-    var ok = vals.filter(function (v) { return v != null && v >= 0; });
-
-    /* The caption used to read "round-trip to 1.1.1.1", which never changed and
-       so told you nothing on a graph that updates every second. It now carries
-       the live figure, with the range replaced by the mean — a min-max span
-       reports the two least representative samples in the window, and one
-       outlier widened it for the whole 4h. The target moves to the tooltip
-       rather than being lost. */
-    midTxt = ok.length ? (Math.round(ok[ok.length - 1] * 10) / 10) + ' ms' : 'unreachable';
-    if (lost) midTxt += '  ·  ' + lost + ' lost';
+    var v = pingRing.v, H = hist4h();
+    var ok = [], i;
+    for (i = 0; i < v.length; i++) if (v[i] > 0) ok.push(v[i]);
 
     clear(sp);
-    /* Same easing as the ribbon, on both ends of the range. Latency sits in a
-       narrow band, so an outlier arriving or leaving used to re-scale the whole
-       trace and make a flat line look like it lurched. */
+    /* Eased on both ends. Latency sits in a narrow band, so an outlier arriving
+       or leaving used to re-scale the whole trace and make a flat line lurch. */
     if (ok.length > 1) {
         var lo = Math.min.apply(null, ok), hi = Math.max.apply(null, ok);
         if (hi - lo < 4) { var c = (hi + lo) / 2; lo = c - 2; hi = c + 2; }
@@ -487,104 +562,87 @@ function drawLatency() {
     } else {
         scaleY.lo = scaleY.hi = null;
     }
-    var g = OS.spark(vals, 46,
-        (scaleY.lo != null && scaleY.hi != null) ? [scaleY.lo, scaleY.hi] : null);
-    sp.appendChild(g);
-    setTxt($('#spkL'), leftTxt);
-    var mEl = $('#spkM');
-    setTxt(mEl, midTxt);
-    mEl.title = 'round-trip to 1.1.1.1' + (live ? '' : '  ·  4h');
+    sp.appendChild(OS.spark(v, 46,
+        (scaleY.lo != null && scaleY.hi != null) ? [scaleY.lo, scaleY.hi] : null));
+    sp.title = 'round-trip to 1.1.1.1, once a second';
+
+    setTxt($('#spkL'), ok.length ? 'last ' + OS.dur(v.length) : 'collecting…');
+    setTxt($('#spkM'), '');
     setTxt($('#spkR'), ok.length
-        ? 'avg ' + Math.round(ok.reduce(function (a, b) { return a + b; }, 0) / ok.length) + ' ms'
+        ? 'avg ' + fine(mean(ok)) + ' ms' + (H.ping != null ? '  ·  4h ' + fine(H.ping) + ' ms' : '')
         : '');
+    /* the headline number only falls back to the ring when the 1s sampler is
+       idle; while it runs, fastTick writes a fresher one every second */
+    if (!fastOn) setTxt($('#pingNow'), ok.length ? fine(ok[ok.length - 1]) + ' ms' : '—');
 }
 
-/* ---------------------------------------------------------- packet loss --
-   Loss is what a game notices first — a 2% loss with a flat 16ms trace ruins a
-   round, and the latency chart above cannot show it, because a lost probe has
-   no value to plot. So it is counted instead.
-
-   Two windows, from two sources that were both already there:
-     live  — the 1s probes rate-api runs; a lost one arrives as null.
-     4h    — dashmon's per-minute probe, which has recorded a loss column since
-             it was written and which this page simply never read.
-
-   HONEST LIMITS, because a gamer reading this will draw conclusions from it:
-   these are ICMP probes from the ROUTER to 1.1.1.1. They are not the path to a
-   Valorant or CS2 server, and some networks deprioritise ICMP, so a clean
-   reading here does not prove a clean game. What it does prove is the reverse —
-   if this shows loss, the problem is at or beyond the uplink, and nothing you
-   change on the PC will fix it. */
-/* 1% is where a tick-based shooter starts to feel it. Below that but non-zero
-   still earns a word, because the useful signal is "it stopped being zero", not
-   the exact figure.
-   `any` is a COUNT, not the percentage: 1 lost packet in 3000 rounds to 0.0% and
-   must still not read CLEAN. And the percentage passed in is the one already
-   rounded for display, so the word can never disagree with the number printed
-   beside it — 0.99% shows as "1.0%" and is called LOSSY, not PATCHY. */
-function lossTone(shownPct, any) {
-    if (!any) return ['CLEAN', 'ok'];
-    if (shownPct < 1) return ['PATCHY', 'warn'];
-    return ['LOSSY', 'bad'];
-}
-/* One decimal below 10%, whole numbers above — at 34% the tenth is noise. */
-function lossPct(p) { return p >= 10 ? Math.round(p) : Math.round(p * 10) / 10; }
 function drawLoss() {
-    var st = $('#lossState'); if (!st) return;
-
-    /* live: same null-after-first-real rule drawLatency uses, so a 5s-poll
-       sample (which carries no ping at all) is never miscounted as a loss */
-    var first = -1, lost = 0, got = 0, i;
-    for (i = 0; i < ring.ms.length; i++) {
-        if (ring.ms[i] == null) { if (first >= 0) lost++; }
-        else { if (first < 0) first = i; got++; }
+    var st = $('#lossState'), box = $('#lossChart'); if (!st || !box) return;
+    var v = pingRing.v, H = hist4h();
+    var probed = 0, lost = 0, i;
+    for (i = 0; i < v.length; i++) {
+        if (v[i] === -2) continue;
+        probed++;
+        if (v[i] < 0) lost++;
     }
-    var live = fastOn && (got + lost) > 0;
-    var livePct = live ? (lost * 100 / (got + lost)) : null;
+    var pct = probed ? lost * 100 / probed : null;
 
-    /* 4h: [t, avg_ms, loss_pct] per minute, three probes each */
-    var mins = 0, lossSum = 0, badMin = 0, lastBad = 0;
-    for (i = 0; i < lastLat.length; i++) {
-        var L = +lastLat[i][2];
-        if (!isFinite(L)) continue;
-        mins++; lossSum += L;
-        if (L > 0) { badMin++; lastBad = +lastLat[i][0]; }
-    }
-    var histPct = mins ? lossSum / mins : null;
-
-    /* The state word reports NOW. Live probes when the session is active,
-       otherwise the last few minutes of dashmon — a single minute is only three
-       probes, so one lost packet reads as 33% and would cry wolf on its own. */
-    var nowPct = livePct, nowAny = lost;
-    if (nowPct == null && mins) {
-        var n = 0, s = 0;
-        for (i = Math.max(0, lastLat.length - 5); i < lastLat.length; i++) {
-            var v = +lastLat[i][2];
-            if (isFinite(v)) { s += v; n++; }
-        }
-        nowPct = n ? s / n : null;
-        nowAny = s;
-    }
     clear(st);
-    if (nowPct == null) {
+    if (pct == null) {
         st.appendChild(OS.stateWord('NO DATA', 'idle'));
     } else {
-        var w = lossTone(lossPct(nowPct), nowAny);
+        var w = lossTone(fine(pct), lost);
         st.appendChild(OS.stateWord(w[0], w[1]));
     }
 
-    setTxt($('#lossL'), live
-        ? 'live  ' + lost + ' of ' + (got + lost)
-        : (mins ? 'from the 1-minute probe' : ''));
-    /* A percentage alone hides the shape of the problem: 0.4% could be one bad
-       minute or a steady drizzle across four hours. The minute count says which. */
-    setTxt($('#lossM'), (live && lost) ? lossPct(livePct) + '% now' : '');
-    setTxt($('#lossR'), mins
-        ? '4h  ' + lossPct(histPct) + '%' +
-          (badMin ? '  ·  ' + badMin + (badMin === 1 ? ' minute' : ' minutes') +
-                    ', last ' + OS.ago(lastBad) : '')
+    var series = rollSeries(v, winLoss);
+    var peak = 0;
+    for (i = 0; i < series.length; i++) if (series[i] > peak) peak = series[i];
+    /* Pinned to zero at the bottom, unlike the ping chart: a loss trace that
+       floats its own baseline would draw a perfectly clean line halfway up the
+       box, which reads as "some loss" at a glance. */
+    scaleY.lossHi = ease(scaleY.lossHi, Math.max(peak, 5), 0.9, 0.06);
+    clear(box);
+    box.appendChild(OS.spark(series, 34, floorRange(scaleY.lossHi)));
+    box.title = 'share of the last ' + ROLL + ' probes that got no reply';
+
+    setTxt($('#lossL'), probed ? lost + ' of ' + probed + ' probes' : '');
+    setTxt($('#lossM'), lost ? fine(pct) + '% over 5 min' : '');
+    setTxt($('#lossR'), H.mins
+        ? '4h  ' + fine(H.loss) + '%' +
+          (H.badMin ? '  ·  ' + H.badMin + (H.badMin === 1 ? ' minute' : ' minutes') +
+                      ', last ' + OS.ago(H.lastBad) : '')
         : '');
 }
+
+function drawJitter() {
+    var st = $('#jitState'), box = $('#jitChart'); if (!st || !box) return;
+    var v = pingRing.v, H = hist4h();
+    var now = winJitter(v, 0, v.length - 1);
+
+    clear(st);
+    if (now == null) {
+        st.appendChild(OS.stateWord('NO DATA', 'idle'));
+    } else {
+        var w = jitTone(now);
+        st.appendChild(OS.stateWord(w[0], w[1]));
+    }
+
+    var series = rollSeries(v, winJitter);
+    var peak = 0, i;
+    for (i = 0; i < series.length; i++) if (series[i] > peak) peak = series[i];
+    scaleY.jitHi = ease(scaleY.jitHi, Math.max(peak, 2), 0.9, 0.06);
+    clear(box);
+    box.appendChild(OS.spark(series, 34, floorRange(scaleY.jitHi)));
+    box.title = 'mean change between consecutive replies, over ' + ROLL + ' probes';
+
+    setTxt($('#jitL'), now != null ? fine(now) + ' ms over 5 min' : '');
+    setTxt($('#jitM'), '');
+    setTxt($('#jitR'), (peak ? 'peak ' + fine(peak) + ' ms' : '') +
+        (H.jit != null ? (peak ? '  ·  ' : '') + '4h ' + fine(H.jit) + ' ms' : ''));
+}
+
+function drawProbe() { drawPing(); drawLoss(); drawJitter(); }
 
 function fastTick() {
     fastTimer = null;
@@ -603,9 +661,14 @@ function fastTick() {
                 if (rPrev && rPrev.dev === j.dev && j.up > rPrev.up &&
                     j.rx >= rPrev.rx && j.tx >= rPrev.tx) {
                     var s = j.up - rPrev.up;
-                    pushSample((j.rx - rPrev.rx) / s, (j.tx - rPrev.tx) / s, j.ping);
+                    pushSample((j.rx - rPrev.rx) / s, (j.tx - rPrev.tx) / s);
                 }
                 rPrev = j;
+                /* the headline ping, once a second. rate-api reads it off
+                   pingmon's ring rather than probing, so this is the same
+                   measurement the chart below is drawn from — and every open
+                   tab now reads the identical number. */
+                setTxt($('#pingNow'), j.ping == null ? 'no reply' : fine(j.ping) + ' ms');
                 if (lastSys && j.load != null) {
                     lastSys.load = j.load;
                     lastSys.temp = j.temp;
@@ -638,11 +701,11 @@ function fastStart() {
 }
 function fastStop() {
     clearTimeout(fastTimer); fastTimer = null; rPrev = null; fastOn = false;
-    scaleY.peak = scaleY.lo = scaleY.hi = null;
-    /* drop the live latency trace but keep array parity with the throughput
-       ring, so a resumed session starts a fresh trace instead of stitching
-       one across the gap */
-    for (var i = 0; i < ring.ms.length; i++) ring.ms[i] = null;
+    /* only the throughput scale resets. The probe charts are the router's
+       five minutes, not this session's, and they neither start nor stop with
+       the sampler — which is exactly why they survive a closed tab. */
+    scaleY.peak = null;
+    drawProbe();
 }
 
 function renderCharts(d) {
@@ -650,11 +713,11 @@ function renderCharts(d) {
        the 5s poll keeps it advancing on the server-side rate, so the chart
        never freezes — it just gets coarser, which the span label shows. */
     if (!fastOn) {
-        pushSample((d.wan && d.wan.rx_rate) || 0, (d.wan && d.wan.tx_rate) || 0, null);
+        pushSample((d.wan && d.wan.rx_rate) || 0, (d.wan && d.wan.tx_rate) || 0);
     }
     lastLat = d.wanlat || [];
-    drawLatency();
-    drawLoss();
+    if (d.ping && d.ping.v) pingRing = d.ping;
+    drawProbe();
 }
 
 /* System is fed by whichever source is currently fresher: the 1s sampler while
@@ -1393,8 +1456,7 @@ OS.tp.start();
 /* draw the placeholder before the first sample lands, so the panel does not
    jump when the ribbon appears ~2s later (it needs two samples for a delta) */
 drawRibbon();
-drawLatency();
-drawLoss();
+drawProbe();
 ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) {
     document.addEventListener(ev, fastStart, { passive: true });
 });

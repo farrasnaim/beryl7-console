@@ -552,8 +552,44 @@ OUIJ=$(awk -F'|' '/^#/||NF<2{next}{
 OUIJ="{$OUIJ}"
 
 # ---- WAN latency ring buffer (written by /usr/sbin/dashmon each minute) ----
-WLJ=$(awk 'NF>=3 && $1~/^[0-9]+$/ {printf "%s[%d,%s,%d]", (c++?",":""), $1, $2, $3+0}' /tmp/.wanlat 2>/dev/null)
+# [t, avg_ms, loss_pct, jitter_ms]. The 4th column arrived later than the other
+# three, so a row that predates it (or a fallback row, where the 3-packet probe
+# cannot measure jitter) reports -1 rather than a plausible-looking zero.
+WLJ=$(awk 'NF>=3 && $1~/^[0-9]+$/ {printf "%s[%d,%s,%d,%s]", (c++?",":""), $1, $2, $3+0, (NF>=4 ? $4 : -1)}' /tmp/.wanlat 2>/dev/null)
 WLJ="[$WLJ]"
+
+# ---- pingmon's 5-minute, 1-second ring --------------------------------------
+# Sent as a dense array on a fixed 1s pitch, so no timestamp per sample is
+# needed: v[i] is the second at t - (n-1-i). A round-trip is a positive number,
+# -1 is a second that was probed and got no reply, -2 is a second before the
+# prober was running. Keeping "lost" and "never measured" distinct matters —
+# collapsing them would report a freshly started prober as 100% loss.
+#
+# The ring is ADVANCED TO NOW rather than sent as found. If the prober stopped
+# writing — crashed, or was stopped by hand — the file keeps its last five
+# minutes and would otherwise be drawn as if it ended this second, so a
+# dashboard opened an hour later would show an hour-old trace as live. Padding
+# the elapsed seconds with "never measured" keeps index-to-time exact: the real
+# samples stay where they belong, the silence is visible as silence, and it does
+# not count as loss. A live prober pads 0-2 samples, which is just the age of
+# the newest sample.
+PINGJ='{"t":0,"n":0,"v":[]}'
+if [ -f /tmp/.pingring ]; then
+    _pj=$(awk -v now="$(date +%s)" '
+        NR==1 { if (NF < 2) exit 1; t = $1 + 0; n = $2 + 0; next }
+        { v[++i] = $1 + 0 }
+        END {
+            if (i == 0) exit 1
+            pad = now - t
+            if (pad < 0) pad = 0
+            if (pad > i) pad = i
+            printf "{\"t\":%d,\"n\":%d,\"v\":[", now, n
+            for (k = pad + 1; k <= i; k++) printf "%s%s", (c++?",":""), v[k]
+            for (k = 0; k < pad; k++)     printf "%s-2", (c++?",":"")
+            printf "]}"
+        }' /tmp/.pingring 2>/dev/null)
+    case "$_pj" in *']}') PINGJ="$_pj" ;; esac
+fi
 
 # ---- join/leave events (dashmon), names joined from the classmap ----
 EVJ=$(tail -n 12 /tmp/.presence 2>/dev/null | awk -F'|' '
@@ -723,6 +759,7 @@ fi
 printf '"uplink":{"active":"%s","dev":"%s"},' "$UPACT" "$(esc "$ACTDEV")"
 printf '"air":%s,"sta":%s,"neigh":%s,"oui":%s,"wired":%s,"wanlat":%s,"events":%s,"nlbw":%s,' \
     "$AIRJ" "$STAJ" "$NBJ" "$OUIJ" "$WIREDJ" "$WLJ" "$EVJ" "$NLJ"
+printf '"ping":%s,' "$PINGJ"
 printf '"nlbw_period":%s,"nlbw_daily":%s,' \
     "$( [ -n "$NLPER" ] && printf '"%s"' "$NLPER" || echo null )" "$NLDAILY"
 printf '"classmap":%s,' "$CMJ"

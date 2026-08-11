@@ -41,15 +41,26 @@ case "$TX" in ''|*[!0-9]*) TX=0 ;; esac
 UP=$(awk '{printf "%.2f", $1; exit}' /proc/uptime 2>/dev/null)
 case "$UP" in ''|*[!0-9.]*) UP=0 ;; esac
 
-# Latency, same target as dashmon's 1-minute ring so the live trace and the 4h
-# history are the same measurement and can share one chart. Costs no CPU worth
-# counting — ping sleeps waiting for the reply rather than computing — and it
-# only runs while someone is actually watching, because this endpoint is polled
-# at 1s only while the Overview is open and the session is active.
-# -W1 bounds the worst case at one second; a lost packet reports null and the
-# client draws a gap instead of inventing a value.
-PING=$(ping -c1 -W1 1.1.1.1 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -1)
-case "$PING" in ''|*[!0-9.]*) PING=null ;; esac
+# Latency: the newest sample from pingmon's ring, NOT a probe of our own.
+#
+# This used to fork its own `ping -c1 -W1`, which made the endpoint's worst case
+# a full second of waiting on a round-trip, and meant the probe rate scaled with
+# the number of open tabs — two dashboards were two probes a second, measuring
+# different instants and reporting different numbers for the same router. One
+# prober, one answer, and reading the last line of a file costs nothing.
+#
+# Falls back to a probe if pingmon is not running, so the live figure survives
+# the service being stopped. -1 in the ring means the second was probed and got
+# no reply; null tells the client to draw a gap rather than invent a value.
+PING=null
+if [ -f /tmp/.pingring ]; then
+    PING=$(tail -1 /tmp/.pingring 2>/dev/null)
+    case "$PING" in ''|*[!0-9.-]*) PING=null ;; esac
+    case "$PING" in -*) PING=null ;; esac
+else
+    PING=$(ping -c1 -W1 1.1.1.1 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -1)
+    case "$PING" in ''|*[!0-9.]*) PING=null ;; esac
+fi
 
 # System vitals, in the SAME units dashboard-api uses (temp in millidegrees,
 # memory in kB) so the client can merge them without converting. Read with

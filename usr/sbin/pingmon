@@ -1,0 +1,120 @@
+#!/bin/sh
+# /usr/sbin/pingmon — one continuous 1-second probe, five minutes of it kept.
+#
+# WHY THIS EXISTS AT ALL, given that the rule on this router is "boring is a
+# feature" and the 2026-08-11 cleanup deleted every custom daemon it could:
+#
+# The Overview's ping / loss / jitter history has to survive the dashboard being
+# closed. The whole point is to alt-tab out of a match, open the console, and
+# see the last five minutes — including the part that happened while nothing was
+# watching. A browser cannot do that: the console does not poll a hidden tab by
+# design, so a client-side ring is empty exactly when it is wanted. Cron cannot
+# do it either; its floor is one minute, and a five-minute chart needs seconds.
+#
+# So the measurement moves to the router, and it is deliberately the ONLY thing
+# this process does. It supervises nothing, restarts nothing, and writes no
+# config — the failure mode that produced the 2026-08-10 incident. If it dies,
+# the dashboard shows less history and nothing else changes.
+#
+# It also does not ADD a probe so much as move one. rate-api used to fork a ping
+# on every call, so an open dashboard was already one probe per second — two
+# with a second tab open, which is why two browsers never agreed on the number.
+# Now there is exactly one prober, every reader sees the same samples, and
+# rate-api no longer blocks up to a second waiting for a round-trip.
+#
+# COST: one process, one ICMP echo per second, ~1.8 KB rewritten in /tmp (RAM,
+# no flash wear) per second. Measured idle CPU below the resolution of top.
+#
+# Stop with: /etc/init.d/pingmon stop   (the dashboard falls back to dashmon's
+# own 1-minute probe, which keeps its own 4-hour ring either way.)
+
+RING=/tmp/.pingring
+TARGET=${PINGMON_TARGET:-1.1.1.1}
+WINDOW=300                      # seconds of history == 5 minutes
+
+# Clear a ping left behind by a previous instance.
+#
+# Needed because ping does NOT die when awk does — measured, not assumed: after
+# awk was killed its ping child was still running two minutes later. Left alone
+# it is harmless to the data (only awk writes the ring) but every restart would
+# add another probe, so the router would quietly drift towards several ICMP
+# packets a second with no supervisor aware of any of them.
+#
+# Matched on /proc/<pid>/comm — the EXECUTABLE — and then on the exact argv.
+# NOT on a `pgrep -f` command-line pattern, which on this router also matches
+# any shell that merely mentions the string, including the one running this
+# script. That specific mistake has already cost time here twice.
+reap_strays() {
+    for _d in /proc/[0-9]*; do
+        [ "$(cat "$_d/comm" 2>/dev/null)" = "ping" ] || continue
+        case "$(tr '\0' ' ' < "$_d/cmdline" 2>/dev/null)" in
+            "ping -W 1 $TARGET "*) kill "${_d#/proc/}" 2>/dev/null ;;
+        esac
+    done
+}
+[ "$1" = "reap" ] && { reap_strays; exit 0; }
+reap_strays
+
+# EXACTLY ONE long-lived process, and awk spawns ping itself rather than being
+# the right-hand side of a `while ...; done | awk` pipeline.
+#
+# The pipeline version was written first and was WRONG in a way this router has
+# already been bitten by once. procd signals the pid it tracks; the members of a
+# pipeline are that shell's children, so `/etc/init.d/pingmon stop` killed the
+# wrapper and left the loop, the awk and the ping running as orphans — invisible
+# to procd, still writing to the ring, and about to be joined by a second copy
+# of themselves on the next `start`. Verified by ps, not assumed.
+#
+# With awk as the only process, procd has one thing to kill and ping dies with
+# it: the moment awk is gone, ping's next write hits a closed pipe. awk also
+# keeps its in-memory ring across ping restarts, which is what the loop was for
+# — busybox ping EXITS when the route goes away, which is precisely the event
+# most worth having a record of.
+exec awk -v out="$RING" -v win="$WINDOW" -v target="$TARGET" '
+    # Time is the only index. A second with a reply holds its round-trip; a
+    # second between two replies that produced none is a loss; a second before
+    # the prober started is unmeasured. Deriving loss from elapsed time rather
+    # than from ICMP sequence numbers means a restarted ping — new sequence
+    # counter, same second — cannot fake a gap or hide one.
+    function flush(   t, s) {
+        s = ""
+        for (t = last - win + 1; t <= last; t++) {
+            s = s ((t in v) ? v[t] : NODATA) "\n"
+        }
+        printf "%d %d\n%s", last, win, s > tmp
+        close(tmp)
+        # rename rather than rewrite in place: the readers are a 5s CGI poll and
+        # a 1s one, and a truncate-then-write would hand them a torn file
+        # roughly once an hour. One fork a second is the cheaper mistake.
+        system("mv " tmp " " out)
+    }
+    function sample(line,   i, n, rtt, now, t) {
+        rtt = ""
+        n = split(line, f, " ")
+        for (i = 1; i <= n; i++) if (substr(f[i], 1, 5) == "time=") rtt = substr(f[i], 6)
+        if (rtt == "" || rtt + 0 <= 0) return
+        now = systime()
+        if (last == 0) last = now - 1
+        # NTP stepping the clock backwards would otherwise strand the ring in
+        # the future; treat it as a restart rather than emitting a huge gap.
+        if (now < last) { delete v; last = now - 1 }
+        for (t = last + 1; t < now; t++) v[t] = LOST
+        v[now] = rtt + 0
+        last = now
+        for (t in v) if (t < last - win) delete v[t]
+        flush()
+    }
+    BEGIN {
+        LOST = -1; NODATA = -2; tmp = out ".tmp"; last = 0
+        cmd = "ping -W 1 " target " 2>/dev/null"
+        while (1) {
+            while ((cmd | getline line) > 0) if (line ~ /time=/) sample(line)
+            # ping gave up — no route, most likely. Close the pipe, wait, and
+            # start it again. The ring is untouched: the seconds spent without
+            # a reply are filled in as LOST by the next sample that arrives, so
+            # an outage records itself instead of erasing the record.
+            close(cmd)
+            system("sleep 1")
+        }
+    }
+'

@@ -267,33 +267,58 @@ function note(text, kind, ic) {
 /* rangeHint: as with ribbon()'s peakHint, an eased [min,max] from the caller so
    the trace does not re-scale vertically the instant an outlier leaves the
    window. _rawRange always reports what this window actually contains. */
+/* GAPS ARE POSITIONS, NOT ABSENCES. A null or negative entry means that slot
+   was measured and produced nothing (a lost probe) or was never measured at
+   all. This used to filter them out and space the survivors evenly, which meant
+   a 30-second outage did not merely disappear from the trace — it dragged
+   everything after it leftwards, so the remaining data pointed at the wrong
+   time. On a chart whose whole job is "when did this happen", that is worse
+   than drawing nothing. x now comes from the slot's own index, and the line
+   breaks across a hole instead of bridging it. */
 function spark(vals, h, rangeHint) {
     h = h || 46;
-    var W = 300, P = 3, s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    var W = 300, P = 3, i, v;
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     s.setAttribute('viewBox', '0 0 ' + W + ' ' + h);
     s.setAttribute('preserveAspectRatio', 'none');
     s.setAttribute('class', 'chart');
     s.style.height = h + 'px';
     s.setAttribute('aria-hidden', 'true');
-    var pts = vals.filter(function (v) { return v != null && v >= 0; });
-    if (pts.length < 2) return s;
+    var n = vals.length;
+    var pts = vals.filter(function (x) { return x != null && x >= 0; });
+    if (pts.length < 2 || n < 2) return s;
     var mn = Math.min.apply(null, pts), mx = Math.max.apply(null, pts);
     if (mx - mn < 4) { var mid = (mx + mn) / 2; mn = mid - 2; mx = mid + 2; }
     s._rawRange = [mn, mx];
     if (rangeHint && rangeHint.length === 2 && rangeHint[1] > rangeHint[0]) {
         mn = rangeHint[0]; mx = rangeHint[1];
     }
-    var d = pts.map(function (v, i) {
-        var x = (i / (pts.length - 1)) * (W - 2 * P) + P;
-        var y = h - P - ((v - mn) / (mx - mn)) * (h - 2 * P);
-        return x.toFixed(1) + ',' + y.toFixed(1);
-    }).join(' ');
-    var poly = document.createElementNS(s.namespaceURI, 'polygon');
+    function X(k) { return ((k / (n - 1)) * (W - 2 * P) + P).toFixed(1); }
+    function Y(y) { return (h - P - ((y - mn) / (mx - mn)) * (h - 2 * P)).toFixed(1); }
+
+    var segs = [], cur = null;
+    for (i = 0; i < n; i++) {
+        v = vals[i];
+        if (v == null || v < 0) { cur = null; continue; }
+        if (!cur) { cur = { a: i, pts: [] }; segs.push(cur); }
+        cur.b = i;
+        cur.pts.push(X(i) + ',' + Y(v));
+    }
+    var base = (h - P).toFixed(1), dTrace = '', dFill = '';
+    segs.forEach(function (g) {
+        if (g.pts.length < 2) return;   /* a lone sample has no line to draw */
+        var body = g.pts.join(' L');
+        dTrace += (dTrace ? ' ' : '') + 'M' + body;
+        dFill  += (dFill ? ' ' : '') + 'M' + X(g.a) + ',' + base +
+                  ' L' + body + ' L' + X(g.b) + ',' + base + ' Z';
+    });
+    if (!dTrace) return s;
+    var poly = document.createElementNS(s.namespaceURI, 'path');
     poly.setAttribute('class', 'fill');
-    poly.setAttribute('points', P + ',' + (h - P) + ' ' + d + ' ' + (W - P) + ',' + (h - P));
-    var line = document.createElementNS(s.namespaceURI, 'polyline');
+    poly.setAttribute('d', dFill);
+    var line = document.createElementNS(s.namespaceURI, 'path');
     line.setAttribute('class', 'trace');
-    line.setAttribute('points', d);
+    line.setAttribute('d', dTrace);
     s.appendChild(poly); s.appendChild(line);
     s._range = [mn, mx];
     return s;
