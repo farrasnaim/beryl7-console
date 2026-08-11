@@ -100,7 +100,29 @@ if [ "$ACTION" = "ifdown" ]; then
     # Only a genuine departure, never the bounce our own reload causes.
     U=$(uci -q get wireless.uplink)
     D=$(uci -q get wireless.uplink.disabled)
-    { [ -z "$U" ] || [ "$D" = "1" ]; } && restore
+    if [ -z "$U" ] || [ "$D" = "1" ]; then
+        # WAIT FOR THE STATION TO ACTUALLY GO. Removing an uplink deletes the
+        # section, commits, raises this ifdown, and only THEN reloads the radio
+        # to tear the netdev down — so at this instant the station is usually
+        # still there, restore() sees it holding the channel and defers. That
+        # was correct in itself and wrong overall, because no further event is
+        # coming: the radio is already back on its home channel and nothing
+        # else calls us. Measured after a real trip: the uplink was gone, the
+        # width state file still said radio1 EHT160, and radio1 sat at EHT80 at
+        # home until someone noticed half their 5 GHz was missing.
+        #
+        # Detached and bounded, for the reasons in 32-pbr-uplink: a handler that
+        # waits must not be one that blocks netifd's queue.
+        (
+            trap - EXIT INT TERM
+            i=0
+            while [ "$i" -lt 20 ]; do          # ~60s ceiling
+                sta_present || { restore; exit 0; }
+                sleep 3
+                i=$((i + 1))
+            done
+        ) >/dev/null 2>&1 &
+    fi
     exit 0
 fi
 
