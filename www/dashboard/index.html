@@ -54,7 +54,7 @@
           </div>
           <div class="panel__b">
             <div id="ribbon"></div>
-            <div class="cap"><span id="ribL"></span><span>up above · down below</span><span id="ribR"></span></div>
+            <div class="cap"><span id="ribL"></span><span>UL above · DL below</span><span id="ribR"></span></div>
             <div class="rowsep"></div>
             <div id="spark"></div>
             <div class="cap"><span id="spkL"></span><span id="spkM">round-trip to 1.1.1.1 · 4h</span><span id="spkR"></span></div>
@@ -407,20 +407,35 @@ function drawLatency() {
            the ring — the throughput ring can be much older than this trace */
         var span = (ring.t[ring.t.length - 1] - ring.t[first]) / 1000;
         leftTxt = 'last ' + OS.dur(span);
-        midTxt = 'round-trip to 1.1.1.1' + (lost ? '  ·  ' + lost + ' lost' : '');
     } else {
         vals = lastLat.map(function (r) { return +r[1]; });
         leftTxt = lastLat.length ? OS.clock(lastLat[0][0]) : '';
-        midTxt = 'round-trip to 1.1.1.1  ·  4h';
     }
+
+    /* A failed probe is stored as -1 by dashmon and as null by the 1s sampler,
+       so both have to be excluded — averaging them in would quietly drag the
+       figure down every time the link blinked. */
+    var ok = vals.filter(function (v) { return v != null && v >= 0; });
+
+    /* The caption used to read "round-trip to 1.1.1.1", which never changed and
+       so told you nothing on a graph that updates every second. It now carries
+       the live figure, with the range replaced by the mean — a min-max span
+       reports the two least representative samples in the window, and one
+       outlier widened it for the whole 4h. The target moves to the tooltip
+       rather than being lost. */
+    midTxt = ok.length ? (Math.round(ok[ok.length - 1] * 10) / 10) + ' ms' : 'unreachable';
+    if (lost) midTxt += '  ·  ' + lost + ' lost';
 
     clear(sp);
     var g = OS.spark(vals, 46);
     sp.appendChild(g);
     setTxt($('#spkL'), leftTxt);
-    setTxt($('#spkM'), midTxt);
-    setTxt($('#spkR'), g._range
-        ? Math.round(g._range[0]) + '–' + Math.round(g._range[1]) + ' ms' : '');
+    var mEl = $('#spkM');
+    setTxt(mEl, midTxt);
+    mEl.title = 'round-trip to 1.1.1.1' + (live ? '' : '  ·  4h');
+    setTxt($('#spkR'), ok.length
+        ? 'avg ' + Math.round(ok.reduce(function (a, b) { return a + b; }, 0) / ok.length) + ' ms'
+        : '');
 }
 
 function fastTick() {
