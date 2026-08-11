@@ -64,14 +64,47 @@ live() {
 
 CUR=$(uci -q get pbr.config.uplink_interface)
 
-WANT=""
-for c in $CANDIDATES; do
-    live "$c" && { WANT="$c"; break; }
+# Everything below runs detached. Two reasons: a hotplug handler must not block
+# netifd while it waits, and the wait is the whole point — see the retry.
+(
+# The inherited EXIT trap belongs to the parent; taking it here would let this
+# subshell remove a lock a later event legitimately owns.
+trap - EXIT INT TERM
+
+# WHY THIS RETRIES INSTEAD OF SAMPLING ONCE.
+#
+# The interface behind an ifup event is not necessarily routable at the instant
+# the event fires — netifd marks it up and installs its route around the same
+# moment, and the ordering is not ours to rely on. One sample that lands on the
+# wrong side of that is indistinguishable from "no uplink exists".
+#
+# On a normal failover that is harmless, because more events follow. At BOOT
+# there are none: measured on a cold start with the WAN absent, tethering's ifup
+# fired at 01:56:36, this script found no usable candidate and exited, and
+# nothing else ever happened — so pbr started against a dead pin at 01:56:44,
+# spent 56s failing, and the routed device sat unprotected for ~66 seconds. The
+# same script, handed that exact state by a later event, repointed correctly in
+# 12 seconds. The logic was right; taking one sample and giving up silently was
+# not.
+#
+# So: keep looking while the current pin is unusable. Stop early the moment the
+# pin turns out to be fine on its own (the interface finished coming up), and
+# give up after ~30s rather than lingering forever.
+tries=0
+while : ; do
+    WANT=""
+    for c in $CANDIDATES; do
+        live "$c" && { WANT="$c"; break; }
+    done
+    [ -n "$WANT" ] && break
+    # Nothing usable yet. If the pin itself is healthy there is nothing to do —
+    # this was an event about some other interface settling.
+    live "$CUR" && exit 0
+    tries=$((tries + 1))
+    [ "$tries" -ge 15 ] && exit 0
+    sleep 2
 done
 
-# Nothing is up. Leave the pin alone: pointing it at another dead interface
-# gains nothing, and the router has no internet to route anyway.
-[ -n "$WANT" ] || exit 0
 [ "$WANT" = "$CUR" ] && exit 0
 
 # A single failover raises several ifup/ifdown events, and a pbr reload takes
@@ -116,23 +149,22 @@ fi
 # jumped to. An earlier version used the reference count and deleted three live
 # chains pbr had just written.
 #
-# Backgrounded: this has to wait for pbr's reload to finish rewriting the file,
-# and a hotplug handler should not sit blocking netifd for that long.
+# Inline, not backgrounded again: this whole script already runs detached, so
+# the wait costs netifd nothing, and keeping it here means the lock is still
+# held while we tidy up — a concurrent run cannot renumber underneath us.
 GEN=/usr/share/nftables.d/ruleset-post/30-pbr.nft
-(
-    # Drop the inherited EXIT trap FIRST. This subshell outlives the parent by
-    # ~20s, and without this it would rmdir the lock on its way out — quite
-    # possibly a lock a later failover event had legitimately just taken.
-    trap - EXIT INT TERM
-    sleep 20
-    # No file, or an unreadable one, means we cannot tell orphan from live —
-    # so delete nothing.
-    [ -s "$GEN" ] || exit 0
+sleep 20
+# No file, or an unreadable one, means we cannot tell orphan from live — so
+# delete nothing.
+if [ -s "$GEN" ]; then
     keep=$(grep -oE 'pbr_mark_0x[0-9a-f]+' "$GEN" 2>/dev/null | sort -u)
-    [ -n "$keep" ] || exit 0
-    for ch in $(nft list ruleset 2>/dev/null | grep -oE 'pbr_mark_0x[0-9a-f]+' | sort -u); do
-        printf '%s\n' "$keep" | grep -qx "$ch" && continue
-        nft delete chain inet fw4 "$ch" 2>/dev/null &&
-            $LOG "removed stale mark chain $ch left by the renumbering"
-    done
+    if [ -n "$keep" ]; then
+        for ch in $(nft list ruleset 2>/dev/null | grep -oE 'pbr_mark_0x[0-9a-f]+' | sort -u); do
+            printf '%s\n' "$keep" | grep -qx "$ch" && continue
+            nft delete chain inet fw4 "$ch" 2>/dev/null &&
+                $LOG "removed stale mark chain $ch left by the renumbering"
+        done
+    fi
+fi
+
 ) >/dev/null 2>&1 &

@@ -70,19 +70,35 @@ fi
 
 # Idempotent: only touch dnsmasq if the desired state differs from the current
 # file. Prevents a restart storm from repeated ifupdate events.
+#
+# THE RESTARTS BELOW ARE DETACHED, and that is not a style choice. netifd runs
+# every /etc/hotplug.d/iface handler for an event in sequence, so anything slow
+# here stalls the ones numbered after it: 20-firewall, 30-nlbwmon,
+# 31-tethering-clash, 32-pbr-uplink. A dnsmasq restart is slow at boot, when it
+# is competing with everything else starting at once. Measured on a cold boot
+# with the USB tether as the only uplink:
+#
+#     02:08:21  travel-dns: plaintext DNS fallback enabled   <- restart begins
+#     02:09:16  firewall: Reloading firewall due to ifup of tethering
+#
+# 55 seconds, during which the firewall was not reloaded for the new uplink, the
+# subnet-clash guard had not run (a colliding tether would have been carrying
+# traffic that whole time), and pbr was still pinned to a dead WAN with a routed
+# device unprotected. Detaching drops that to about a second: this handler only
+# needs to have WRITTEN the config, not to have finished applying it.
 if [ -n "$FALLBACK" ]; then
     NEW="# travel-dns: plaintext fallback while on '$active_travel_iface' (captive-portal support)
 $FALLBACK"
     if [ ! -f "$CONF" ] || [ "$(cat "$CONF")" != "$NEW" ]; then
         printf '%s' "$NEW" > "$CONF"
         logger -t travel-dns "travel uplink '$active_travel_iface' active -> plaintext DNS fallback enabled for captive-portal sign-in"
-        /etc/init.d/dnsmasq restart >/dev/null 2>&1
+        ( /etc/init.d/dnsmasq restart ) >/dev/null 2>&1 &
     fi
 else
     if [ -f "$CONF" ]; then
         rm -f "$CONF"
         logger -t travel-dns "home/Ethernet WAN active -> strict DoH restored"
-        /etc/init.d/dnsmasq restart >/dev/null 2>&1
+        ( /etc/init.d/dnsmasq restart ) >/dev/null 2>&1 &
     fi
 fi
 exit 0
