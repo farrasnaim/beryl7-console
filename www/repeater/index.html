@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Wi-Fi uplink — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=9ce5e881">
+<link rel="stylesheet" href="/os.css?v=eee9d3e3">
 </head>
 <body>
 <div class="shell">
@@ -45,6 +45,18 @@
           <div class="panel__aside"><span class="row__cap" id="scanMeta"></span></div>
         </div>
         <div class="panel__b panel__b--flush" id="scan"></div>
+      </section>
+    </div>
+
+    <!-- Only rendered when something is remembered: an empty panel about
+         passwords you have not saved is noise on the page you use at home. -->
+    <div class="face" id="knownFace" hidden>
+      <section class="panel">
+        <div class="panel__h">
+          <span class="panel__t">Remembered networks</span>
+          <div class="panel__aside"><span class="row__cap" id="knownMeta"></span></div>
+        </div>
+        <div class="panel__b panel__b--flush" id="known"></div>
       </section>
     </div>
 
@@ -289,6 +301,11 @@ function renderScan(d) {
         if (isMine || hidden) nm.style.color = 'var(--ink-3)';
         top.appendChild(nm);
         if (isCur) top.appendChild(OS.chip('saved', 'on'));
+        /* Deliberately not "saved" — that word is taken above and means "this is
+           the uplink you are configured to use". This one means "we still have
+           the password", which is the difference between one tap and typing a
+           passphrase into a phone in a hotel lobby. */
+        else if (isKnown(n.ssid)) top.appendChild(OS.chip('remembered', 'flat'));
         if (isMine) top.appendChild(OS.chip('this router', 'flat'));
         if (!(n.encryption && n.encryption.enabled)) top.appendChild(OS.chip('open', 'warn'));
         txt.appendChild(top);
@@ -322,13 +339,24 @@ function renderScan(d) {
     });
 }
 
+function isKnown(ssid) {
+    return ((last && last.known) || []).indexOf(ssid) > -1;
+}
+
 function join(n, band) {
     var open = !(n.encryption && n.encryption.enabled);
+    /* Somewhere you have stayed before should be one tap. The router kept the
+       passphrase from the last successful join, so asking for it again is
+       friction at the exact moment it is hardest to answer — a phone keyboard,
+       in a hotel, with no other way online. */
+    var saved = !open && isKnown(n.ssid);
     var body = 'The router will join this network on ' + band + ' GHz and use it for internet access. ' +
         'Your own Wi-Fi keeps running unchanged — devices stay connected to it.' +
-        (open ? ' This network is unencrypted; anyone nearby can see traffic that is not already secured.' : '');
+        (open ? ' This network is unencrypted; anyone nearby can see traffic that is not already secured.' : '') +
+        (saved ? ' You have connected to this one before, so the saved password is used — no need to type it ' +
+                 'again. If it has changed, forget the network first and rejoin.' : '');
     var opts = { title: 'Join “' + n.ssid + '”', body: body, okText: 'Join' };
-    if (!open) {
+    if (!open && !saved) {
         opts.field = { label: 'Network password', type: 'password',
                        placeholder: 'password for ' + n.ssid,
                        emptyMsg: 'This network needs a password.' };
@@ -336,7 +364,10 @@ function join(n, band) {
     OS.dialog(opts).then(function (v) {
         if (v == null) return;
         OS.toast('Joining ' + n.ssid + '…');
-        OS.post(API, { action: 'add', ssid: n.ssid, key: open ? '' : v,
+        /* An empty key with a remembered SSID makes the API fall back to what it
+           stored; that lookup lives on the router so the passphrase never has to
+           come back to the browser to be sent again. */
+        OS.post(API, { action: 'add', ssid: n.ssid, key: (open || saved) ? '' : v,
                        enc: open ? 'none' : 'psk', band: band === '5' ? '5' : '2' })
           .then(function (j) {
             if (j && j.ok) {
@@ -367,6 +398,53 @@ $('#scanBtn').addEventListener('click', function () {
     });
 });
 
+/* The passwords themselves never come back from the router — only the names —
+   so this list can say what is remembered without ever holding a secret in the
+   browser. Forgetting is the only write it can do. */
+function renderKnown(d) {
+    var names = (d.known || []).slice();
+    var face = $('#knownFace'), box = $('#known');
+    face.hidden = !names.length;
+    /* Emptied, not just hidden. `hidden` only stops it being painted — the rows
+       would still be sitting in the DOM holding the names of places you have
+       stayed, readable by anything that walks the page. Forgetting the last
+       network has to actually remove them. */
+    if (!names.length) { clear(box); return; }
+    setTxt($('#knownMeta'), names.length === 1 ? '1 password kept' : names.length + ' passwords kept');
+    clear(box);
+    names.forEach(function (s) {
+        var r = el('div', 'row');
+        r.style.gridTemplateColumns = 'minmax(0,1fr) auto';
+        var id = el('div', 'row__id');
+        var txt = el('div'); txt.style.minWidth = '0';
+        var top = el('div', 'row__title');
+        top.appendChild(el('div', 'row__nm', s));
+        if (d.uplink && d.uplink.ssid === s) top.appendChild(OS.chip('in use', 'on'));
+        txt.appendChild(top);
+        txt.appendChild(el('div', 'row__sub', 'Rejoining this network will not ask for the password.'));
+        id.appendChild(txt);
+        r.appendChild(id);
+        var b = el('button', 'btn btn--ghost btn--sm', 'Forget');
+        b.addEventListener('click', function () {
+            OS.dialog({ title: 'Forget “' + s + '”?',
+                        body: 'The saved password is deleted from the router. The network stays ' +
+                              'visible when you scan, and rejoining will ask for the password again. ' +
+                              'This does not disconnect anything.',
+                        okText: 'Forget', danger: true }).then(function (ok) {
+                if (ok == null) return;
+                b.disabled = true;
+                OS.post(API, { action: 'forget', ssid: s }).then(function (j) {
+                    b.disabled = false;
+                    if (j && j.ok) { OS.toast('Forgot ' + s + '.', 'ok'); OS.tp.refresh(400); }
+                    else OS.toast('Could not forget: ' + ((j && j.error) || 'unknown'), 'bad');
+                });
+            });
+        });
+        r.appendChild(b);
+        box.appendChild(r);
+    });
+}
+
 function render(d) {
     if (!d || !d.ok) return;
     last = d;
@@ -375,6 +453,7 @@ function render(d) {
     OS.failoverControl($('#priority'), ups, function () { OS.tp.refresh(1200); });
     renderUplink(d);
     renderScan(d);
+    renderKnown(d);
 }
 
 OS.tp = new OS.Transport(API, render, { interval: 8000 });

@@ -8,3 +8,12 @@ Thumbs.db
 backups/
 *.tar.gz
 *.packages
+
+# Runtime state that holds secrets, in case a copy is ever pulled off the router
+# into this tree for inspection. repeater-known stores the passphrases of every
+# Wi-Fi uplink that has been joined; classmap and the vpndns ruleset carry device
+# names and tunnel resolvers. Only the .example files belong here.
+etc/dashboard/repeater-known
+etc/dashboard/classmap
+etc/dashboard/vpn-*
+etc/nftables.d/

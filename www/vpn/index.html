@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>VPN — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=9ce5e881">
+<link rel="stylesheet" href="/os.css?v=eee9d3e3">
 </head>
 <body>
 <div class="shell">
@@ -574,10 +574,28 @@ function renderDevices(d) {
         box.appendChild(sk);
         return;
     }
-    var pol = {};
-    (d.policies || []).forEach(function (p) { if (p.enabled) pol[p.mac.toUpperCase()] = p.iface; });
-    var n = Object.keys(pol).length;
-    setTxt($('#polCount'), n ? n + ' routed through a tunnel' : 'all direct');
+    /* A device the router released under "keep it online" still HAS its rule —
+       it is coming back the moment the tunnel answers. Showing it as plain
+       Direct made an automatic, temporary thing look like a lost setting, and
+       the reasonable response to that is to set it again by hand, which is
+       exactly what happened. So paused rules keep their tunnel on the row and
+       say what is going on; only genuinely-Direct devices read as Direct. */
+    var pol = {}, paused = {};
+    (d.policies || []).forEach(function (p) {
+        var m = p.mac.toUpperCase();
+        if (p.enabled) pol[m] = p.iface;
+        else if (p.auto_paused) paused[m] = p.iface;
+    });
+    var n = Object.keys(pol).length, np = Object.keys(paused).length;
+    setTxt($('#polCount'), n ? n + ' routed through a tunnel' + (np ? ', ' + np + ' waiting' : '')
+                             : np ? np + ' waiting for a tunnel' : 'all direct');
+    /* Both maps mean "this device has a rule", one carrying and one temporarily
+       released. Every question of the form "is there a rule here" has to ask
+       both, or a released device falls out of the list that is the only place
+       its rule can be edited. */
+    var assigned = {};
+    Object.keys(pol).forEach(function (m) { assigned[m] = pol[m]; });
+    Object.keys(paused).forEach(function (m) { assigned[m] = paused[m]; });
 
     var tuns = (d.tunnels || []).slice().sort(function (a, b) {
         return (a.label || a.name).localeCompare(b.label || b.name);
@@ -586,7 +604,7 @@ function renderDevices(d) {
        is not here. The exception is a device that still HOLDS a policy — hiding
        that would strand a rule with no way to clear it. */
     var routable = devices.filter(function (v) {
-        return v.how !== 'Not connected' || pol[v.mac];
+        return v.how !== 'Not connected' || assigned[v.mac];
     });
     /* …and that exception has to cover the case where the device is not in the
        list at all. A policy outlives every trace of the device: no association,
@@ -599,7 +617,7 @@ function renderDevices(d) {
        with the policy gone, and nothing generates the row. */
     var known = {};
     devices.forEach(function (v) { known[v.mac] = 1; });
-    Object.keys(pol).forEach(function (m) {
+    Object.keys(assigned).forEach(function (m) {
         if (known[m]) return;
         routable.push({ mac: m, name: nameOf(m), how: 'Not connected',
                         cls: (cmap[m] && cmap[m].class) || 'default', ip: '' });
@@ -617,7 +635,7 @@ function renderDevices(d) {
         return;
     }
     routable.forEach(function (v) {
-        var cur = pol[v.mac] || '';
+        var cur = assigned[v.mac] || '';
         var curT = tuns.filter(function (t) { return t.iface === cur; })[0];
         var r = el('div', 'row row--route');
         /* only a disclosure control on mobile; on desktop the select is resident
@@ -633,11 +651,31 @@ function renderDevices(d) {
         if (cur) { ic.style.borderColor = 'var(--ac-line)'; ic.style.color = 'var(--ac-fg)'; }
         id.appendChild(ic);
         var txt = el('div'); txt.style.minWidth = '0';
-        txt.appendChild(el('div', 'row__nm', v.name));
+        var isPaused = !!paused[v.mac];
+        /* The chip is the only signal that survives on DESKTOP: .routeline is
+           display:none above 640px, where the selector stands in for it — and a
+           selector showing the tunnel says nothing about the tunnel not
+           currently carrying anything. Wrapped only when paused, so the common
+           row keeps exactly the markup it had. */
+        if (isPaused) {
+            var nmw = el('div');
+            nmw.style.cssText = 'display:flex;align-items:center;gap:6px;min-width:0';
+            nmw.appendChild(el('div', 'row__nm', v.name));
+            var chip = el('span', 'chip chip--warn', 'waiting');
+            chip.title = 'The tunnel stopped answering, so this device went back to the normal ' +
+                         'uplink to keep it working. Its rule is still here — it returns to the ' +
+                         'tunnel within a few seconds of the tunnel coming back. Nothing to do.';
+            nmw.appendChild(chip);
+            txt.appendChild(nmw);
+        } else {
+            txt.appendChild(el('div', 'row__nm', v.name));
+        }
         txt.appendChild(el('div', 'row__sub', (v.ip || v.mac) + '  ·  ' + v.how));
         /* the current route is always on the row; the selector is summoned */
-        txt.appendChild(el('div', 'routeline' + (curT ? ' routeline--vpn' : ''),
-            curT ? (curT.label || curT.name) + ' · VPN' : 'Direct · normal uplink'));
+        txt.appendChild(el('div', 'routeline' +
+            (curT ? (isPaused ? ' routeline--paused' : ' routeline--vpn') : ''),
+            curT ? (curT.label || curT.name) + (isPaused ? ' · waiting for the tunnel' : ' · VPN')
+                 : 'Direct · normal uplink'));
         id.appendChild(txt);
         r.appendChild(id);
         r.appendChild(el('i', 'rcaret'));

@@ -628,6 +628,9 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .row--route .routeline{display:none;font-family:var(--mono);font-size:11px;
     color:var(--ink-4);margin-top:2px}
 .row--route .routeline--vpn{color:var(--sig-fg)}
+/* The rule is intact but not carrying: caution, not fault. A released device is
+   working — just not privately — so it must not read as broken. */
+.row--route .routeline--paused{color:var(--warn-fg)}
 .row--route .rcaret{display:none}
 .row--route .select{width:auto;min-width:190px;max-width:240px}
 @media (max-width:640px){

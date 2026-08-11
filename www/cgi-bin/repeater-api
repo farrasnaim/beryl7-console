@@ -91,6 +91,55 @@ wan_has_carrier() {
     [ "$(cat /sys/class/net/$_dev/carrier 2>/dev/null)" = "1" ]
 }
 
+# ---------- remembered networks ----------
+# Removing an uplink deletes the wifi-iface section, and the passphrase goes
+# with it — so returning to the same hotel meant typing it again from a phone
+# keyboard, which is exactly when you least want to. Keep what we have joined.
+#
+# THIS FILE HOLDS PLAINTEXT WI-FI PASSWORDS. Same class of secret as the restore
+# bundles: 0600, never in the repository, never in a paste. It is no worse than
+# wireless.uplink.key, which already stores the current one in the clear — this
+# just keeps the previous ones too.
+#
+# TAB-delimited because an SSID may contain spaces, colons and pipes; a tab is
+# the one printable-ASCII byte a WPA passphrase cannot hold, and SSIDs carrying
+# one are vanishingly rare. Anything with a control character is refused rather
+# than silently mangled.
+KNOWN=/etc/dashboard/repeater-known
+KNOWN_MAX=16
+
+known_recall() {   # $1=ssid -> prints saved key, empty if unknown
+    [ -s "$KNOWN" ] || return 0
+    awk -F'\t' -v s="$1" '$1==s {print $3; exit}' "$KNOWN" 2>/dev/null
+}
+known_enc() {      # $1=ssid -> prints saved encryption
+    [ -s "$KNOWN" ] || return 0
+    awk -F'\t' -v s="$1" '$1==s {print $2; exit}' "$KNOWN" 2>/dev/null
+}
+known_forget() {   # $1=ssid
+    [ -s "$KNOWN" ] || return 0
+    awk -F'\t' -v s="$1" '$1!=s' "$KNOWN" > "$KNOWN.n" 2>/dev/null && mv "$KNOWN.n" "$KNOWN"
+    chmod 600 "$KNOWN" 2>/dev/null
+}
+known_remember() { # $1=ssid $2=enc $3=key
+    case "$1$3" in *"$(printf '\t')"*|*"$(printf '\r')"*) return 0 ;; esac
+    [ -n "$1" ] || return 0
+    mkdir -p "$(dirname "$KNOWN")"
+    [ -f "$KNOWN" ] || { : > "$KNOWN"; chmod 600 "$KNOWN"; }
+    # Newest first, one entry per SSID, oldest beyond the cap dropped. Rewriting
+    # rather than appending keeps a re-join from stacking duplicates.
+    { printf '%s\t%s\t%s\n' "$1" "$2" "$3"
+      awk -F'\t' -v s="$1" '$1!=s' "$KNOWN" 2>/dev/null
+    } | head -n "$KNOWN_MAX" > "$KNOWN.n" 2>/dev/null && mv "$KNOWN.n" "$KNOWN"
+    chmod 600 "$KNOWN" 2>/dev/null
+}
+known_json() {     # ssids only — the keys never leave the router
+    [ -s "$KNOWN" ] || { printf '[]'; return 0; }
+    awk -F'\t' '{ s=$1; gsub(/\\/,"\\\\",s); gsub(/"/,"\\\"",s)
+                  printf "%s\"%s\"", (NR>1?",":""), s }
+                END{ }' "$KNOWN" 2>/dev/null | sed 's/^/[/; s/$/]/'
+}
+
 # `wifi reload` with no argument restarts EVERY radio, not just the one the
 # uplink lives on. Joining a 5 GHz uplink therefore knocked every 2.4 GHz client
 # off as well, and vice versa — measured during a travel rehearsal, where the
@@ -126,6 +175,13 @@ uplink_watchdog() {
     while [ "$_i" -lt "$CONNECT_TIMEOUT" ]; do
         if ubus call network.interface.wwan status 2>/dev/null | grep -q '"up": true'; then
             rm -f "$TRYMARK" "$FAILMARK"
+            # Remember only what actually carried traffic. Saving at request
+            # time would fill the store with passphrases that were mistyped —
+            # a wrong one never reaches here, because association without a
+            # lease is what this watchdog exists to catch.
+            known_remember "$(uci -q get wireless.uplink.ssid)" \
+                           "$(uci -q get wireless.uplink.encryption)" \
+                           "$(uci -q get wireless.uplink.key)"
             return 0
         fi
         _i=$((_i+1)); sleep 1
@@ -322,9 +378,23 @@ if [ "$ACTION" = "add" ]; then
     [ -n "$SSID" ] || { printf '{"ok":false,"error":"ssid required"}'; exit 0; }
     case "$BAND" in 5) RADIO=$(radio_for_band 5g) ;; 6) RADIO=$(radio_for_band 6g) ;; *) RADIO=$(radio_for_band 2g) ;; esac
     [ -n "$RADIO" ] || { printf '{"ok":false,"error":"no radio available"}'; exit 0; }
+    # No password typed? If we have joined this network before, use what we
+    # already know. This is the whole point of remembering: arriving back at a
+    # place you have stayed should be one tap, not a passphrase typed on a
+    # phone. An explicitly supplied key always wins, so correcting a changed
+    # password still works.
+    USED_SAVED=false
+    if [ -z "$KEY" ]; then
+        SAVED_KEY=$(known_recall "$SSID")
+        if [ -n "$SAVED_KEY" ]; then
+            KEY="$SAVED_KEY"
+            USED_SAVED=true
+            [ -n "$ENC" ] || ENC=$(known_enc "$SSID")
+        fi
+    fi
     case "$ENC" in
         none) ENCV='none' ;;
-        psk)  ENCV='psk2' ;;
+        psk|psk2) ENCV='psk2' ;;
         *)    ENCV=$([ -n "$KEY" ] && echo 'psk2' || echo 'none') ;;
     esac
     [ "$ENCV" != "none" ] && [ -z "$KEY" ] && { printf '{"ok":false,"error":"password required for encrypted network"}'; exit 0; }
@@ -348,8 +418,8 @@ if [ "$ACTION" = "add" ]; then
     date +%s > "$TRYMARK"; rm -f "$FAILMARK"
     ( reload_uplink_radio "$RADIO" >/dev/null 2>&1; sleep 8; ifup wwan >/dev/null 2>&1
       uplink_watchdog "$SSID" ) >/dev/null 2>&1 &
-    printf '{"ok":true,"action":"add","ssid":"%s","radio":"%s","encryption":"%s","timeout":%s}' \
-        "$(esc "$SSID")" "$RADIO" "$ENCV" "$CONNECT_TIMEOUT"
+    printf '{"ok":true,"action":"add","ssid":"%s","radio":"%s","encryption":"%s","timeout":%s,"used_saved":%s}' \
+        "$(esc "$SSID")" "$RADIO" "$ENCV" "$CONNECT_TIMEOUT" "$USED_SAVED"
     exit 0
 fi
 
@@ -366,6 +436,18 @@ if [ "$ACTION" = "del" ]; then
     rm -f "$TRYMARK" "$FAILMARK"
     ( reload_uplink_radio "$URADIO" >/dev/null 2>&1; restore_wan ) >/dev/null 2>&1 &
     printf '{"ok":true,"action":"del"}'
+    exit 0
+fi
+
+# ============================ FORGET A SAVED NETWORK ============================
+# Separate from `del`: dropping the uplink you are on is a routing decision,
+# forgetting a password is a privacy one, and someone handing the router to a
+# friend wants the second without the first.
+if [ "$ACTION" = "forget" ]; then
+    F_SSID=$(qs_get_dec ssid)
+    [ -n "$F_SSID" ] || { printf '{"ok":false,"error":"ssid required"}'; exit 0; }
+    known_forget "$F_SSID"
+    printf '{"ok":true,"action":"forget","ssid":"%s","known":%s}' "$(esc "$F_SSID")" "$(known_json)"
     exit 0
 fi
 
@@ -515,5 +597,6 @@ if [ -n "$IOTSEC" ]; then
 else
     printf '"iot_ssid":null,'
 fi
+printf '"known":%s,' "$(known_json)"
 printf '"scan_note":"Scans both bands via iw (iwinfo cannot scope a scan to the 5 GHz radio on this multi-radio PHY)."'
 printf '}'

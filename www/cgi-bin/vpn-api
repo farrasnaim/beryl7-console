@@ -589,9 +589,18 @@ while :; do
         *)                    carry=false ;;
     esac
     [ "$en" = "0" ] && carry=false
+    # Disabled BY THE ROUTER (fail-open released it) or disabled by the owner?
+    # The page has to tell these apart: one is temporary and about to undo
+    # itself, the other is a deliberate choice. Reported per policy rather than
+    # as a bare count, because the count cannot say WHICH device is affected —
+    # so the row for a released device looked identical to one set to Direct,
+    # and the obvious reaction is to set it back by hand.
+    pnm=$(uci -q get pbr.@policy[$idx].name)
+    apaused=false
+    [ "$en" = "0" ] && grep -qxF "$pnm" /etc/dashboard/vpn-autopaused 2>/dev/null && apaused=true
     case "$sa" in
         [0-9A-Fa-f][0-9A-Fa-f]:*)
-            POLS="$POLS${POLS:+,}{\"mac\":\"$(esc "$sa")\",\"iface\":\"$(esc "$inf")\",\"enabled\":$( [ "$en" = "0" ] && echo false || echo true ),\"carrying\":$carry}" ;;
+            POLS="$POLS${POLS:+,}{\"mac\":\"$(esc "$sa")\",\"iface\":\"$(esc "$inf")\",\"enabled\":$( [ "$en" = "0" ] && echo false || echo true ),\"carrying\":$carry,\"auto_paused\":$apaused}" ;;
     esac
     idx=$((idx+1))
     [ "$idx" -gt 64 ] && break
