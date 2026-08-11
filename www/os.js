@@ -27,6 +27,16 @@ function frag() { return document.createDocumentFragment(); }
 
 /* Parse a trusted static icon string into nodes. Only ever called with the
    literal SVG constants below — never with data from the router. */
+/* Phase for the marching-dash flow animation.
+   Every poll replaces the whole SVG, and a freshly created element starts its
+   animation at zero — so the dashes snapped back to the start every 5 seconds
+   and the diagram looked like it was stuttering rather than flowing. Offsetting
+   each new path by where the wall clock currently sits in the cycle means the
+   replacement picks up exactly where the old one left off. Every flow path
+   derives from the same clock, so they also stay in step with each other.
+   FLOW_CYCLE must match the animation-duration of .topo .flow in os.css. */
+var FLOW_CYCLE = 1700;
+function flowPhase() { return '-' + ((Date.now() % FLOW_CYCLE) / 1000).toFixed(3) + 's'; }
 function svg(markup) {
     var d = document.createElement('div');
     d.innerHTML = markup;
@@ -894,6 +904,12 @@ var NS = 'http://www.w3.org/2000/svg';
 function sv(tag, attrs) {
     var n = document.createElementNS(NS, tag);
     for (var k in attrs) if (attrs[k] != null) n.setAttribute(k, attrs[k]);
+    /* Every flow path in the console is built here, so phase-aligning at the
+       factory covers all of them — the topology, the VPN map, and anything
+       added later — instead of relying on ten call sites remembering to. */
+    if (attrs && (' ' + (attrs['class'] || '') + ' ').indexOf(' flow ') >= 0) {
+        n.style.animationDelay = flowPhase();
+    }
     return n;
 }
 function svtext(x, y, str, cls, anchor) {
@@ -1031,15 +1047,18 @@ function topologyV(m) {
     var cx = LX + 20, y = 0;
 
     function block(cap, capOn, t1, t2, cls) {
-        /* A one-line node centres its text in the box; a two-line node keeps
-           the 14/27 pair, which is already balanced around the middle. Both
-           lines used to start at 14 regardless, so single-line nodes — most of
-           them — sat visibly high in their box. */
-        var yc = t2 ? y + 14 : y + 21;
+        /* The caption is ALWAYS on the box's centre line, whatever the value
+           column holds beside it. The value column centres too: one line sits
+           on the same centre, two lines straddle it at 14/27 (midpoint 20.5).
+           Previously the caption inherited the value's first baseline, so on a
+           two-line node it rode up level with the top line and read as
+           top-aligned next to the single-line nodes above and below it. */
+        var yc = y + 21;
+        var yv = t2 ? y + 14 : yc;
         s.appendChild(sv('rect', { 'class': 'nodebox ' + (cls || ''),
             x: LX, y: y, width: NW, height: BH, rx: 2 }));
         s.appendChild(svtext(LX + 12, yc, cap, 'cap' + (capOn ? ' capon' : '')));
-        s.appendChild(svtext(LX + LBL, yc, t1, 't1'));
+        s.appendChild(svtext(LX + LBL, yv, t1, 't1'));
         if (t2) s.appendChild(svtext(LX + LBL, y + 27, t2, 't2'));
         var out = { top: y, mid: y + BH / 2, bot: y + BH };
         y += BH;
