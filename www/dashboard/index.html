@@ -44,15 +44,6 @@
       </section>
     </div>
 
-    <!-- Radios: an open instrument band. Lanes separated by air, not borders. -->
-    <div class="face--open">
-      <div class="sect">
-        <span class="sect__t">Radios</span>
-        <span class="sect__m" id="radioAside"></span>
-      </div>
-      <div id="radios"></div>
-    </div>
-
     <!-- Diagnostics: quieter, contained, lower on the page. -->
     <div class="face">
       <div class="grid g-2-1">
@@ -106,6 +97,7 @@ OS.buildShell('/dashboard/');
 var MQM = matchMedia('(max-width: 640px)');
 if (MQM.addEventListener) MQM.addEventListener('change', function () { if (last) render(last); });
 var expanded = {};      /* mac -> true, survives the poll re-render */
+var radioOpen = {};     /* group key -> true, same idea for radio headings */
 var advOpen  = {};      /* mac|band -> true, per-link radio fold     */
 var last = null;
 
@@ -599,12 +591,35 @@ function renderClients(d, M) {
     ['eth', '5', '2.4', 'iot', 'blocked'].forEach(function (key) {
         var list = groups[key];
         if (!list || !list.length) return;
+        /* A heading that names a radio can open to show that radio. Ethernet
+           and Blocked have no radio behind them and stay inert. */
+        var ap = apForGroup(key, M.aps);
         var g = el('div', 'tbl__group');
+        if (ap) {
+            g.setAttribute('role', 'button');
+            g.setAttribute('tabindex', '0');
+            g.setAttribute('aria-expanded', radioOpen[key] ? 'true' : 'false');
+            g.style.cursor = 'pointer';
+        }
         if (MEDIA[key].ico) g.appendChild(OS.icon(MEDIA[key].ico));
         g.appendChild(el('span', 'tbl__gk', MEDIA[key].k));
         if (MEDIA[key].note) { var nn = el('span', 'row__sub', MEDIA[key].note); g.appendChild(nn); }
         g.appendChild(el('span', 'tbl__gn', String(list.length)));
+        if (ap) {
+            var caret = el('div'); caret.style.cssText =
+                'width:5px;height:5px;flex:none;margin-left:2px;' +
+                'border-right:1.5px solid var(--ink-4);border-bottom:1.5px solid var(--ink-4);' +
+                'transform:rotate(' + (radioOpen[key] ? '225deg' : '45deg') + ');' +
+                'transition:transform 150ms';
+            g.appendChild(caret);
+            var toggleRadio = function () { radioOpen[key] = !radioOpen[key]; render(last); };
+            g.addEventListener('click', toggleRadio);
+            g.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRadio(); }
+            });
+        }
         box.appendChild(g);
+        if (ap && radioOpen[key]) box.appendChild(radioDetail(ap, d));
         /* The per-row zone chip is suppressed under the IoT heading — it would
            repeat "iot" on every row of a group that already says so. */
         list.forEach(function (v) {
@@ -870,75 +885,82 @@ function rename(v) {
 }
 
 /* ---------------------------------------------------------------- radios - */
-function renderRadios(d, M) {
-    var box = $('#radios'); clear(box);
-    if (!M.aps.length) {
-        box.appendChild(OS.emptyState('No radio is up', 'Both radios are down or turned off.', 'wifi'));
-        return;
+/* Which AP a Clients heading is showing. Ethernet and Blocked have none. The
+   two band groups mean the LAN AP on that band; a zone group (iot) means the
+   AP serving that network, matched on the network name rather than a literal,
+   so a second isolated SSID would work the same way. */
+function apForGroup(key, aps) {
+    aps = aps || [];
+    if (key === 'eth' || key === 'blocked' || key === 'idle') return null;
+    if (key === '5' || key === '2.4') {
+        var b = key === '5' ? '5g' : '2g';
+        return aps.filter(function (a) { return a.band === b && a.network === LANNET; })[0] || null;
     }
-    /* one lane per radio: identity + true spectrum position, divided by air */
-    var wrap = el('div', 'radioband');
-    M.aps.forEach(function (ap, i) {
-        var inf = ap.info || {}, n = ((ap.assoc && ap.assoc.results) || []).length;
-        var lane = el('div', 'lane');
+    return aps.filter(function (a) { return a.network === key; })[0] || null;
+}
 
-        var top = el('div'); top.style.cssText = 'display:flex;align-items:baseline;gap:8px;min-width:0';
-        var nm = el('span', null, inf.ssid || ap.section);
-        nm.style.cssText = 'font-size:14.5px;font-weight:600;letter-spacing:-.015em;' +
-            'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-        top.appendChild(nm);
-        if (ap.network !== 'lan') top.appendChild(OS.chip(ap.network, 'flat'));
-        if (ap.macfilter === 'deny' && (ap.maclist || []).length)
-            top.appendChild(OS.chip((ap.maclist || []).length + ' blocked', 'warn'));
-        var cnt = el('span', 'row__cap'); cnt.style.marginLeft = 'auto';
-        cnt.textContent = n + (n === 1 ? ' client' : ' clients');
-        top.appendChild(cnt);
-        lane.appendChild(top);
+/* Everything the standalone Radios section used to show, for one radio: its
+   SSID and chips, the band/generation/channel/power line, where it actually
+   sits in the spectrum, and airtime. Folded in here so the page states each
+   fact once — the heading above already gives the band and the client count,
+   so those are not repeated. */
+function radioDetail(ap, d) {
+    var box = el('div', 'det');
+    var inf = ap.info || {};
 
-        var meta = el('div', 'row__sub');
-        var gen = { be: 'Wi-Fi 7', ax: 'Wi-Fi 6', ac: 'Wi-Fi 5' }[inf.hwmode] || '';
-        meta.textContent = [(ap.band === '5g' ? '5 GHz' : '2.4 GHz'), gen,
-            'ch ' + (inf.channel || '?'),
-            inf.txpower != null ? 'tx ' + inf.txpower + ' dBm' : '']
-            .filter(Boolean).join('  ·  ');
-        meta.style.marginTop = '2px';
-        lane.appendChild(meta);
+    var top = el('div');
+    top.style.cssText = 'display:flex;align-items:baseline;gap:8px;min-width:0';
+    var nm = el('span', null, inf.ssid || ap.section);
+    nm.style.cssText = 'font-size:13.5px;font-weight:600;letter-spacing:-.015em;' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    top.appendChild(nm);
+    if (ap.network !== LANNET) top.appendChild(OS.chip(ap.network, 'flat'));
+    if (ap.macfilter === 'deny' && (ap.maclist || []).length)
+        top.appendChild(OS.chip((ap.maclist || []).length + ' blocked', 'warn'));
+    box.appendChild(top);
 
-        /* the instrument: where this radio actually sits in its band */
-        var mhz = parseInt(String(inf.htmode || '').replace(/[A-Z]+/, ''), 10) || 20;
-        var specEl = OS.spectrum(ap.band, inf.channel || 1, inf.center_chan1 || inf.channel, mhz, 44);
-        specEl.style.marginTop = '10px';
-        lane.appendChild(specEl);
+    var meta = el('div', 'row__sub');
+    var gen = { be: 'Wi-Fi 7', ax: 'Wi-Fi 6', ac: 'Wi-Fi 5' }[inf.hwmode] || '';
+    meta.textContent = [gen, 'ch ' + (inf.channel || '?'),
+        inf.txpower != null ? 'tx ' + inf.txpower + ' dBm' : '']
+        .filter(Boolean).join('  ·  ');
+    meta.style.marginTop = '2px';
+    box.appendChild(meta);
 
-        /* airtime under the spectrum, on a calibrated 0-100 with a tick at the
-           70% congestion threshold */
-        var air = d.air || {};
-        var g = ap.band === '5g' ? air.g5 : air.g24;
-        if (g && g.active && ap.network === 'lan') {
-            var pct = airPct(ap.band, g);
-            if (pct != null) {
-                var row = el('div');
-                row.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:10px';
-                var lab = el('span', 'row__cap', 'airtime');
-                lab.style.width = '48px'; lab.style.flex = 'none';
-                row.appendChild(lab);
-                var sc = OS.scale(pct, 0, 100, [70], pct > 70 ? 'warn' : null, true);
-                sc.style.flex = '1';
-                row.appendChild(sc);
-                var v = el('span', 'n', pct + '%');
-                v.style.cssText = 'font-size:11px;width:36px;text-align:right;flex:none';
-                row.appendChild(v);
-                var word = pct > 70 ? OS.stateWord('CONGESTED', 'warn')
-                         : pct > 30 ? OS.stateWord('BUSY', null)
-                         : OS.stateWord('CLEAR', 'ok');
-                word.style.marginLeft = '6px';
-                row.appendChild(word);
-                lane.appendChild(row);
-            }
+    /* the instrument: where this radio actually sits in its band */
+    var mhz = parseInt(String(inf.htmode || '').replace(/[A-Z]+/, ''), 10) || 20;
+    var specEl = OS.spectrum(ap.band, inf.channel || 1, inf.center_chan1 || inf.channel, mhz, 44);
+    specEl.style.marginTop = '10px';
+    box.appendChild(specEl);
+
+    /* airtime under the spectrum, on a calibrated 0-100 with a tick at the
+       70% congestion threshold. Only the LAN AP reports it: the counters are
+       per-radio, so an isolated SSID sharing a radio would double-count. */
+    var air = d.air || {};
+    var g = ap.band === '5g' ? air.g5 : air.g24;
+    if (g && g.active && ap.network === LANNET) {
+        var pct = airPct(ap.band, g);
+        if (pct != null) {
+            var row = el('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:10px';
+            var lab = el('span', 'row__cap', 'airtime');
+            lab.style.width = '48px'; lab.style.flex = 'none';
+            row.appendChild(lab);
+            var sc = OS.scale(pct, 0, 100, [70], pct > 70 ? 'warn' : null, true);
+            sc.style.flex = '1';
+            row.appendChild(sc);
+            var v = el('span', 'n', pct + '%');
+            v.style.cssText = 'font-size:11px;width:36px;text-align:right;flex:none';
+            row.appendChild(v);
+            var word = pct > 70 ? OS.stateWord('CONGESTED', 'warn')
+                     : pct > 30 ? OS.stateWord('BUSY', null)
+                     : OS.stateWord('CLEAR', 'ok');
+            word.style.marginLeft = '6px';
+            row.appendChild(word);
+            box.appendChild(row);
         }
-        wrap.appendChild(lane);
-    });
-    box.appendChild(wrap);
+    }
+    return box;
 }
 
 /* busy%% as a delta between polls (true "right now"); first sample falls back
@@ -1031,7 +1053,6 @@ function render(d) {
     renderCharts(d);
     renderSys(d);
     renderClients(d, M);
-    renderRadios(d, M);
     renderTraffic(d, M);
 }
 

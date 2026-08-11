@@ -630,9 +630,6 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 }
 
 /* ---- open radio band ---------------------------------------------------- */
-.radioband{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
-    gap:var(--s5) var(--s6)}
-.radioband .lane{min-width:0}
 
 /* ---- misc --------------------------------------------------------------- */
 .mut{color:var(--ink-2)} .dim{color:var(--ink-4)}
@@ -777,8 +774,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
   .face + .face--open{margin-top:var(--s3)}
   .face--open .sect{padding-left:0;padding-right:0}
   .sect{padding:var(--s4) var(--s4) var(--s2)}
-  .radioband{gap:var(--s4)}
-  .empty{padding:var(--s4) var(--s4) var(--s5)}
+    .empty{padding:var(--s4) var(--s4) var(--s5)}
   .empty__i{width:30px;height:30px;margin-bottom:var(--s2)}
   .det{padding:var(--s3) var(--s4) var(--s4)}
   .det__wifi{padding:10px 12px}
