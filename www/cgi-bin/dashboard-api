@@ -722,26 +722,10 @@ OVLT=${OVL%% *}; OVLU=${OVL##* }
 case "$OVLT" in ''|*[!0-9]*) OVLT=0 ;; esac
 case "$OVLU" in ''|*[!0-9]*) OVLU=0 ;; esac
 
-# Tracked connections. A router's real capacity limit, and invisible everywhere
-# else: nothing about load average or free memory hints at it, and running out
-# looks like random connection failures rather than like a full table.
-#
-# awk and not the shell's own `read`, which is what rate-api uses on
-# /proc/loadavg. /proc/sys entries are not seq_files and do not survive being
-# read a byte at a time: `read -r X < …nf_conntrack_count` returns "1" for 162
-# and "3" for 31232 — the FIRST CHARACTER, with no error and no empty string,
-# so every guard below still passes and the panel just shows a wrong number.
-CONN=$(awk '{printf "%d ", $1}' /proc/sys/net/netfilter/nf_conntrack_count \
-                                /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
-set -- $CONN
-CTC=${1:-0}; CTM=${2:-0}
-case "$CTC" in ''|*[!0-9]*) CTC=0 ;; esac
-case "$CTM" in ''|*[!0-9]*) CTM=0 ;; esac
-
 printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_total":%s,"mem_avail":%s,"v6_loss":%s,' \
     "$(esc "$HOST")" "$UP" "$TEMP" "$FAN" "$(esc "$LOAD")" "$(jnum "$MEMT")" "$(jnum "$MEMA")" "$V6LOSS"
-printf '"ovl_total":%s,"ovl_used":%s,"conn":%s,"conn_max":%s,"wan_uptime":%s},' \
-    "$OVLT" "$OVLU" "$CTC" "$CTM" "${UPSECS:--1}"
+printf '"ovl_total":%s,"ovl_used":%s,"wan_uptime":%s},' \
+    "$OVLT" "$OVLU" "${UPSECS:--1}"
 # ---- per-lane byte counters -------------------------------------------------
 # Every lane drawn on the topology is exactly one netdev: each AP has its own
 # wireless interface, and the wired lane is the LAN bridge's non-wireless port(s). One

@@ -106,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=4168268c"></script>
+<script src="/os.js?v=498d14f5"></script>
 <script>
 (function () {
 'use strict';
@@ -467,9 +467,19 @@ function drawRibbon() {
    all. 15s is short enough to place a burst on the timeline and long enough
    that one packet does not spike the whole trace. */
 var ROLL = 15;
+/* The first few windows are SHORT rather than absent. Refusing to report until
+   a full 15 samples existed left the loss and jitter traces starting 5% in,
+   visibly narrower than the throughput and ping charts above them on the same
+   grid. A partial window is a real measurement of a real stretch — it just
+   averages fewer samples — so the only thing worth suppressing is the very
+   start, where one or two samples would make the left edge spike between 0 and
+   100% on a single lost packet. */
+var ROLL_MIN = 5;
 function rollSeries(v, fn) {
     var out = [], i;
-    for (i = 0; i < v.length; i++) out.push(i < ROLL - 1 ? null : fn(v, i - ROLL + 1, i));
+    for (i = 0; i < v.length; i++) {
+        out.push(i < ROLL_MIN - 1 ? null : fn(v, Math.max(0, i - ROLL + 1), i));
+    }
     return out;
 }
 /* -2 is a second that was never probed (before the prober started, or after it
@@ -587,8 +597,12 @@ function drawLoss() {
     box.appendChild(OS.spark(series, 34, floorRange(scaleY.lossHi)));
     box.title = 'share of the last ' + ROLL + ' probes that got no reply';
 
-    setTxt($('#lossL'), probed ? lost + ' of ' + probed + ' probes' : '');
-    setTxt($('#lossM'), '');
+    /* "now" is the rightmost point of the chart above, not a separate figure —
+       the same trailing window, so the number and the end of the trace can
+       never disagree. */
+    var nowPct = winLoss(v, Math.max(0, v.length - ROLL), v.length - 1);
+    setTxt($('#lossL'), nowPct == null ? '' : 'now ' + fine(nowPct) + '%');
+    setTxt($('#lossM'), probed ? lost + ' of ' + probed + ' probes' : '');
     setTxt($('#lossR'), probed ? fine(pct) + '% over 5 min' : '');
 }
 
@@ -613,8 +627,12 @@ function drawJitter() {
     box.appendChild(OS.spark(series, 34, floorRange(scaleY.jitHi)));
     box.title = 'mean change between consecutive replies, over ' + ROLL + ' probes';
 
-    setTxt($('#jitL'), now != null ? fine(now) + ' ms over 5 min' : '');
-    setTxt($('#jitM'), '');
+    /* Same trailing window as the right-hand end of the trace, so the live
+       figure and the chart cannot tell different stories. The 5-minute mean
+       moves to the middle: it is the context, not the reading. */
+    var nowJit = winJitter(v, Math.max(0, v.length - ROLL), v.length - 1);
+    setTxt($('#jitL'), nowJit == null ? '' : 'now ' + fine(nowJit) + ' ms');
+    setTxt($('#jitM'), now != null ? 'avg ' + fine(now) + ' ms' : '');
     setTxt($('#jitR'), peak ? 'peak ' + fine(peak) + ' ms' : '');
 }
 
@@ -795,13 +813,6 @@ function paintSys(sys) {
                           : 'no drop since the router booted'
     ).hidden = !wuOk;
 
-    /* The capacity limit nothing else here hints at: not load, not free memory.
-       Running out looks like random connection failures rather than like a full
-       table, which is exactly the kind of thing worth one quiet line. */
-    var connPct = sys.conn_max ? (sys.conn || 0) / sys.conn_max : 0;
-    row('conn', 'Connections', String(sys.conn || 0),
-        sys.conn_max ? 'of ' + sys.conn_max + ' the router can track' : ''
-    ).hidden = !sys.conn_max;
 
     /* After a storm clears, keep one quiet line pointing at what happened —
        the 2026-08-10 loop wrapped the log ring in 42s, so by the time anyone
@@ -830,9 +841,9 @@ function paintSys(sys) {
        with a cold CPU and free memory, and those are precisely the failures that
        present as something else entirely. */
     var worst = (t > 85 || memPct > 0.9 || load > cores || v6 >= 100 ||
-                 ovlPct > 0.9 || connPct > 0.9) ? ['DEGRADED', 'bad']
+                 ovlPct > 0.9) ? ['DEGRADED', 'bad']
               : (t > 75 || memPct > 0.75 || load > cores * 0.7 ||
-                 ovlPct > 0.75 || connPct > 0.75) ? ['WARM', 'warn']
+                 ovlPct > 0.75) ? ['WARM', 'warn']
               : ['NOMINAL', 'ok'];
     chipBox.appendChild(OS.stateWord(worst[0], worst[1]));
 }

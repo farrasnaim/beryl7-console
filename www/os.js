@@ -293,7 +293,12 @@ function spark(vals, h, rangeHint) {
     if (rangeHint && rangeHint.length === 2 && rangeHint[1] > rangeHint[0]) {
         mn = rangeHint[0]; mx = rangeHint[1];
     }
-    function X(k) { return ((k / (n - 1)) * (W - 2 * P) + P).toFixed(1); }
+    /* Full width horizontally, like ribbon() — the padding is vertical only.
+       Insetting x by P put these traces 1% short at each end, which is
+       invisible alone but obvious once a spark sits directly under a ribbon on
+       the same panel and the two are meant to share a time axis. Half a stroke
+       clips at the extreme edges; ribbon() has always done the same. */
+    function X(k) { return ((k / (n - 1)) * W).toFixed(1); }
     function Y(y) { return (h - P - ((y - mn) / (mx - mn)) * (h - 2 * P)).toFixed(1); }
 
     var segs = [], cur = null;
