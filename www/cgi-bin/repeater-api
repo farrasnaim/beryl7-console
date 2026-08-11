@@ -91,6 +91,20 @@ wan_has_carrier() {
     [ "$(cat /sys/class/net/$_dev/carrier 2>/dev/null)" = "1" ]
 }
 
+# `wifi reload` with no argument restarts EVERY radio, not just the one the
+# uplink lives on. Joining a 5 GHz uplink therefore knocked every 2.4 GHz client
+# off as well, and vice versa — measured during a travel rehearsal, where the
+# iPad and the PC being used to drive the join both dropped at the moment of
+# joining, on a band the uplink was not even using. settings-api has always
+# scoped its reloads; this file never did.
+#
+# Falls back to reloading everything when the radio cannot be determined, which
+# is the old behaviour and still correct, just broader than necessary.
+reload_uplink_radio() {
+    _r="${1:-$(uci -q get wireless.uplink.device 2>/dev/null)}"
+    if [ -n "$_r" ]; then wifi reload "$_r"; else wifi reload; fi
+}
+
 restore_wan() {
     ip route show default 2>/dev/null | grep -q . && return 0
     # No cable => nothing to fall back to. Don't spend 10s retrying or log a
@@ -120,7 +134,7 @@ uplink_watchdog() {
     ifdown wwan >/dev/null 2>&1
     uci set wireless.uplink.disabled='1'
     uci commit wireless
-    wifi reload >/dev/null 2>&1
+    reload_uplink_radio >/dev/null 2>&1
     restore_wan
     rm -f "$TRYMARK"
     # Tailor the message to where you actually are. Telling someone in a hotel
@@ -332,7 +346,7 @@ if [ "$ACTION" = "add" ]; then
     # and the uplink silently stays dead. An explicit ifup after the radios
     # settle is what actually revives it.
     date +%s > "$TRYMARK"; rm -f "$FAILMARK"
-    ( wifi reload >/dev/null 2>&1; sleep 8; ifup wwan >/dev/null 2>&1
+    ( reload_uplink_radio "$RADIO" >/dev/null 2>&1; sleep 8; ifup wwan >/dev/null 2>&1
       uplink_watchdog "$SSID" ) >/dev/null 2>&1 &
     printf '{"ok":true,"action":"add","ssid":"%s","radio":"%s","encryption":"%s","timeout":%s}' \
         "$(esc "$SSID")" "$RADIO" "$ENCV" "$CONNECT_TIMEOUT"
@@ -344,11 +358,13 @@ if [ "$ACTION" = "del" ]; then
     # Also unauthenticated: removing an uplink just falls back to the ethernet
     # WAN, and re-adding it is a two-click operation.
     [ -n "$(uci -q get wireless.uplink)" ] || { printf '{"ok":false,"error":"no uplink configured"}'; exit 0; }
+    # Read the radio before deleting the section that names it.
+    URADIO=$(uci -q get wireless.uplink.device)
     uci -q delete wireless.uplink
     uci commit wireless
     ifdown wwan >/dev/null 2>&1
     rm -f "$TRYMARK" "$FAILMARK"
-    ( wifi reload >/dev/null 2>&1; restore_wan ) >/dev/null 2>&1 &
+    ( reload_uplink_radio "$URADIO" >/dev/null 2>&1; restore_wan ) >/dev/null 2>&1 &
     printf '{"ok":true,"action":"del"}'
     exit 0
 fi
@@ -368,11 +384,11 @@ if [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ]; then
     if [ "$ACTION" = "down" ]; then
         ifdown wwan >/dev/null 2>&1
         rm -f "$TRYMARK" "$FAILMARK"
-        ( wifi reload >/dev/null 2>&1; restore_wan ) >/dev/null 2>&1 &
+        ( reload_uplink_radio >/dev/null 2>&1; restore_wan ) >/dev/null 2>&1 &
     else
         # see the note in `add`: netifd will not re-create the STA on its own
         date +%s > "$TRYMARK"; rm -f "$FAILMARK"
-        ( wifi reload >/dev/null 2>&1; sleep 8; ifup wwan >/dev/null 2>&1
+        ( reload_uplink_radio >/dev/null 2>&1; sleep 8; ifup wwan >/dev/null 2>&1
           uplink_watchdog "$(uci -q get wireless.uplink.ssid)" ) >/dev/null 2>&1 &
     fi
     printf '{"ok":true,"action":"%s"}' "$ACTION"
