@@ -601,8 +601,8 @@ function drawLoss() {
        the same trailing window, so the number and the end of the trace can
        never disagree. */
     var nowPct = winLoss(v, Math.max(0, v.length - ROLL), v.length - 1);
-    setTxt($('#lossL'), nowPct == null ? '' : 'now ' + fine(nowPct) + '%');
-    setTxt($('#lossM'), probed ? lost + ' of ' + probed + ' probes' : '');
+    setTxt($('#lossL'), probed ? lost + ' of ' + probed + ' probes' : '');
+    setTxt($('#lossM'), nowPct == null ? '' : 'now ' + fine(nowPct) + '%');
     setTxt($('#lossR'), probed ? fine(pct) + '% over 5 min' : '');
 }
 
@@ -631,8 +631,8 @@ function drawJitter() {
        figure and the chart cannot tell different stories. The 5-minute mean
        moves to the middle: it is the context, not the reading. */
     var nowJit = winJitter(v, Math.max(0, v.length - ROLL), v.length - 1);
-    setTxt($('#jitL'), nowJit == null ? '' : 'now ' + fine(nowJit) + ' ms');
-    setTxt($('#jitM'), now != null ? 'avg ' + fine(now) + ' ms' : '');
+    setTxt($('#jitL'), now != null ? 'avg ' + fine(now) + ' ms' : '');
+    setTxt($('#jitM'), nowJit == null ? '' : 'now ' + fine(nowJit) + ' ms');
     setTxt($('#jitR'), peak ? 'peak ' + fine(peak) + ' ms' : '');
 }
 
@@ -767,8 +767,7 @@ function paintSys(sys) {
         bar('Storage', Math.round((sys.ovl_used || 0) / 1024) + ' / ' +
                        Math.round(sys.ovl_total / 1024) + ' MB',
             ovlPct, ovlPct > 0.9 ? 'bad' : ovlPct > 0.75 ? 'warn' : null,
-            Math.round((sys.ovl_total - (sys.ovl_used || 0)) / 1024) +
-            ' MB free for settings and packages');
+            Math.round((sys.ovl_total - (sys.ovl_used || 0)) / 1024) + ' MB free');
     }
 
     /* Plain label/value rows, built once and then updated in place like the
