@@ -198,11 +198,25 @@ while :; do
         RING="$RING $RTT"; MISS=0; EVER=1; STATE=ok
         if [ "$UNREACH" = 1 ]; then UNREACH=0; BACKOFF=30; NOTE=""; fi
     else
-        RING="$RING $LOST"; MISS=$((MISS + 1))
-        # A target that has NEVER answered is a property of the target, not a
-        # verdict on the connection — most game servers drop ICMP outright.
-        # Saying "not answering" is true; saying "lossy" would not be.
-        [ "$EVER" = 0 ] && [ "$UNREACH" = 0 ] && STATE=silent
+        MISS=$((MISS + 1))
+        # Silence BEFORE the first ever reply is not loss, and must not be
+        # recorded as any. Nothing has yet shown that a reply was possible, so
+        # there is no baseline to have lost against. Two cases, both real:
+        #
+        #   boot   — this starts at S95, a few seconds before the WAN has a
+        #            route, which was putting five contiguous "losses" at the
+        #            head of the ring and a red LOSSY on the panel for the
+        #            first five minutes after every reboot.
+        #   custom — a game server that drops ICMP outright would otherwise
+        #            read 100% loss, which says something false about the line.
+        #
+        # Once a reply has arrived, silence means something and is counted.
+        if [ "$EVER" = 1 ]; then
+            RING="$RING $LOST"
+        else
+            RING="$RING $NODATA"
+            [ "$UNREACH" = 0 ] && STATE=silent
+        fi
     fi
 
     # ---- failover ---------------------------------------------------------
