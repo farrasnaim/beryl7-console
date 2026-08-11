@@ -1112,6 +1112,10 @@ function renderSoft(d) {
    not continuously, and re-reading it under the cursor would move the line you
    were in the middle of. */
 var logLevel = 'all';
+/* Buffer depth, cached. -1 means "ask the router for it on the next fetch";
+   computing it costs a full read of the ring, so it is not something to
+   redo every four seconds. */
+var logTotal = -1;
 var LOG_LEVELS = [['all', 'All'], ['warn', 'Warnings'], ['err', 'Errors']];
 
 function renderLog() {
@@ -1125,6 +1129,7 @@ function renderLog() {
             b.addEventListener('click', function () {
                 if (logLevel === o[0]) return;
                 logLevel = o[0];
+                logTotal = -1;   /* different filter, re-read the depth once */
                 var all = seg.querySelectorAll('.btn');
                 for (var i = 0; i < all.length; i++) {
                     all[i].setAttribute('aria-pressed',
@@ -1173,13 +1178,24 @@ function loadLog(quiet) {
         var sk = el('div', 'sk'); sk.style.width = '55%';
         box.appendChild(sk);
     }
-    fetch(API + '?action=logs&level=' + logLevel + '&n=150', { cache: 'no-store' })
+    /* The buffer depth costs the router a full read of the ring, so ask for it
+       only when we do not already have one — on open, and after a level change
+       that rebuilds the panel. The four-second refreshes reuse it: how many
+       lines exist in total does not change meaningfully between them, and it is
+       not worth re-reading a megabyte to find out. */
+    fetch(API + '?action=logs&level=' + logLevel + '&n=150' + (logTotal < 0 ? '&total=1' : ''),
+          { cache: 'no-store' })
         .then(function (r) { return r.json(); })
         .then(paintLog, function () { paintLog(null); });
 }
 
 function paintLog(j) {
     var box = $('#b-log'); clear(box);
+    /* Keep whatever depth the router did send. Without this the cache never
+       fills, so every four-second refresh would keep asking for the expensive
+       count and the footer would keep reporting the window size as the total —
+       both of the things the cache exists to avoid. */
+    if (j && j.ok && typeof j.total === 'number' && j.total >= 0) logTotal = j.total;
     if (!j || !j.ok) {
         box.appendChild(OS.emptyState('The log could not be read',
             'The router answered, but not with a log.', 'alert'));
@@ -1211,7 +1227,8 @@ function paintLog(j) {
     var foot = el('div', 'inline');
     foot.style.cssText = 'margin-top:10px;flex-wrap:wrap;gap:8px';
     foot.appendChild(el('span', 'row__cap',
-        j.lines.length + ' of ' + j.total + ' lines, newest first'));
+        j.lines.length + ' of ' + (logTotal >= 0 ? logTotal : j.lines.length) +
+        ' lines, newest first'));
     var live = el('span', 'row__cap', '');
     live.id = 'logFoot';
     live.style.color = 'var(--sig-fg)';
