@@ -304,7 +304,20 @@ if [ -f "$STATE" ]; then
 fi
 printf '%s %s %s %s\n' "$NOW" "$RXB" "$TXB" "$WANIF" > "$STATE" 2>/dev/null
 
-WANIP=$(ubus call network.interface.wan status 2>/dev/null | awk -F'"' '/"address":/{print $4; exit}')
+# The address of the interface actually carrying the default route — not
+# whatever network.wan happens to hold. This was pinned to network.interface.wan
+# for the same reason WANIF above once was, and it had the same failure: fail the
+# Ethernet over to the Wi-Fi uplink and `wan` goes down with an empty address, so
+# the Overview drew "Uplink / Wi-Fi / no address" while the very same payload said
+# "Online via the Wi-Fi uplink" and streamed live throughput off that device. The
+# address was never missing; it was 192.168.1.114, on the interface we were
+# already reading counters from. Deriving it from $WANIF means the address and
+# the throughput can never disagree about which uplink they describe.
+WANIP=$(ip -4 addr show dev "$WANIF" 2>/dev/null | awk '/inet /{split($2,a,"/"); print a[1]; exit}')
+# No default route at all (genuinely offline) leaves WANIF empty and the lookup
+# blank; fall back to the logical interface so a wan that is up but not yet
+# carrying the default route still reports its address rather than nothing.
+[ -n "$WANIP" ] || WANIP=$(ubus call network.interface.wan status 2>/dev/null | awk -F'"' '/"address":/{print $4; exit}')
 
 # ---- classmap -> json ----
 CMJ="{}"
