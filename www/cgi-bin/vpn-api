@@ -419,7 +419,17 @@ if [ "$ACTION" = "del" ]; then
         uci -q delete pbr.$r
     done
     uci commit network; uci commit firewall; uci commit pbr
-    ( /etc/init.d/firewall reload >/dev/null 2>&1; sync_pbr ) >/dev/null 2>&1 &
+    # Same order as `route` below, and for the same reasons. Deleting a tunnel
+    # deletes the policies above, and the DNS redirect is generated FROM those
+    # policies — so it has to be regenerated here or the rules for every device
+    # that was routed through this tunnel survive the tunnel itself. They would
+    # not merely linger: the firewall reload re-reads the file and re-installs
+    # them, and fw4 includes it again on every boot, so an affected device keeps
+    # its DNS pointed inside a tunnel that no longer exists (and keeps all of its
+    # IPv6 rejected) permanently. sync_pbr first, because rebuild_vpn_dns reads
+    # the enabled flags it settles; the reload last, so it installs the file
+    # rebuild_vpn_dns has just written rather than the stale one.
+    ( sync_pbr; rebuild_vpn_dns; /etc/init.d/firewall reload >/dev/null 2>&1 ) >/dev/null 2>&1 &
     printf '{"ok":true,"action":"del","name":"%s"}' "$(esc "$NAME")"
     exit 0
 fi
