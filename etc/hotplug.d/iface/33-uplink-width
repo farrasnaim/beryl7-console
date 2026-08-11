@@ -1,0 +1,145 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/33-uplink-width
+#
+# Follow a Wi-Fi uplink down to a channel width it can actually use, and go back
+# up when you are home.
+#
+# THE FAULT THIS PREVENTS. A station and an AP on the same radio must share a
+# channel, so joining an upstream network drags your own AP to wherever that
+# network lives. If your AP is configured wider than the new channel allows,
+# hostapd cannot start it at all — your own Wi-Fi does not merely get slower, it
+# disappears. Measured joining an ONT's 5 GHz on ch149 with radio1 set to
+# EHT160:
+#
+#     radio1 configured:  ch48, EHT160
+#     uplink forced it to: ch149
+#     ch149 capability:    "Channel widths: 20MHz HT40+ VHT80"   (no 160 up there)
+#     hostapd:             "Failed to set beacon parameters", repeating
+#     phy0.1-ap0:          <NO-CARRIER> state DOWN, 0 clients
+#
+# Every device was pushed onto 2.4 GHz, in a hotel, with no obvious cause. The
+# upper 5 GHz block (149-161) is only 80 MHz wide, so any router carrying a
+# 160 MHz config hits this the moment it joins an upstream AP up there.
+#
+# WHAT IT DOES. On joining, read the channel the station actually landed on, ask
+# the PHY what widths that channel supports, and if the AP is configured wider,
+# narrow it to fit — keeping the generation (EHT160 -> EHT80, not VHT80). The
+# original is saved so it can be put back. Widths are only ever LOWERED: the
+# configured value is the ceiling and this never raises it.
+#
+# WHY RESTORE IS TRIGGERED BY wan/tethering COMING UP, NOT BY wwan GOING DOWN.
+# Narrowing the width requires reloading the radio, which drops the station,
+# which raises an `ifdown wwan` — and restoring on that would widen, reload,
+# drop, narrow, forever. So the restore condition is the one the owner actually
+# means: a real uplink is back (home Ethernet or the phone), or the Wi-Fi uplink
+# has been removed from the config entirely.
+
+case "$ACTION" in ifup|ifdown) ;; *) exit 0 ;; esac
+case "$INTERFACE" in wwan|wan|tethering) ;; *) exit 0 ;; esac
+
+STATE=/etc/dashboard/uplink-width-orig   # persistent: must survive a reboot
+                                         # spent on the road, or the original
+                                         # width is lost for good
+LOCK=/tmp/.uplink-width.lock
+LOG="logger -t uplink-width"
+
+# Is a station still holding a radio on whatever channel it joined?
+sta_present() {
+    for _s in $(iw dev 2>/dev/null | awk '/Interface/{print $2}'); do
+        [ "$(iw dev "$_s" info 2>/dev/null | awk '/type/{print $2}')" = "managed" ] && return 0
+    done
+    return 1
+}
+
+# Persisting the original in a file rather than a uci option keeps it out of the
+# wireless config that gets shown, diffed and backed up as the user's own.
+restore() {
+    [ -s "$STATE" ] || return 0
+    read -r _r _h < "$STATE" 2>/dev/null
+    [ -n "$_r" ] && [ -n "$_h" ] || { rm -f "$STATE"; return 0; }
+    if [ "$(uci -q get wireless.$_r.htmode)" = "$_h" ]; then rm -f "$STATE"; return 0; fi
+    # Plugging the Ethernet back in does NOT release the radio: if the station
+    # is still associated, it is still pinning the channel, and widening now
+    # would kill the AP exactly as the original fault did. Wait for the station
+    # to actually go away — removing the uplink raises an ifdown that lands
+    # here again, and by then the netdev is gone.
+    if sta_present; then
+        $LOG "a better uplink is up, but the Wi-Fi uplink still holds $_r on its channel — staying narrow until it is removed"
+        return 0
+    fi
+    uci set wireless.$_r.htmode="$_h"
+    uci commit wireless
+    rm -f "$STATE"
+    $LOG "off the Wi-Fi uplink -> $_r restored to $_h"
+    ( wifi reload "$_r" ) >/dev/null 2>&1 &
+}
+
+# The widest width this channel offers, read from the PHY rather than assumed
+# from the band — regulatory domain decides this and it differs per channel.
+maxw_for_freq() {
+    iw phy "$1" channels 2>/dev/null | awk -v f="$2" '
+        $0 ~ ("\\* " f " MHz")        { inblk = 1; next }
+        inblk && /\* [0-9]+ MHz/      { inblk = 0 }
+        inblk && /Channel widths:/ {
+            if      ($0 ~ /160/) print 160
+            else if ($0 ~ /80/)  print 80
+            else if ($0 ~ /40/)  print 40
+            else                 print 20
+            exit
+        }'
+}
+
+if [ "$INTERFACE" = "wan" ] || [ "$INTERFACE" = "tethering" ]; then
+    [ "$ACTION" = "ifup" ] || exit 0
+    restore
+    exit 0
+fi
+
+# ---- wwan from here ----
+if [ "$ACTION" = "ifdown" ]; then
+    # Only a genuine departure, never the bounce our own reload causes.
+    U=$(uci -q get wireless.uplink)
+    D=$(uci -q get wireless.uplink.disabled)
+    { [ -z "$U" ] || [ "$D" = "1" ]; } && restore
+    exit 0
+fi
+
+RADIO=$(uci -q get wireless.uplink.device)
+[ -n "$RADIO" ] || exit 0
+
+# One reload at a time; the radio bounce this causes re-enters here.
+mkdir "$LOCK" 2>/dev/null || exit 0
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
+# The station interface on this radio, found by mode rather than by name.
+STA=""
+for _i in $(iw dev 2>/dev/null | awk '/Interface/{print $2}'); do
+    [ "$(iw dev "$_i" info 2>/dev/null | awk '/type/{print $2}')" = "managed" ] || continue
+    STA="$_i"; break
+done
+[ -n "$STA" ] || exit 0
+
+FREQ=$(iw dev "$STA" info 2>/dev/null | sed -n 's/.*channel [0-9]* (\([0-9]*\) MHz.*/\1/p')
+PHYN=$(iw dev "$STA" info 2>/dev/null | awk '/wiphy/{print $2; exit}')
+[ -n "$FREQ" ] && [ -n "$PHYN" ] || exit 0
+
+MAXW=$(maxw_for_freq "phy$PHYN" "$FREQ")
+case "$MAXW" in ''|*[!0-9]*) exit 0 ;; esac
+
+HT=$(uci -q get wireless.$RADIO.htmode)
+GEN=$(printf '%s' "$HT" | sed 's/[0-9]*$//')
+W=$(printf '%s' "$HT" | sed 's/^[A-Z]*//')
+case "$W" in ''|*[!0-9]*) exit 0 ;; esac
+
+# Only ever narrow. If it already fits there is nothing to do — which is also
+# what makes the reload-induced re-entry harmless.
+[ "$W" -le "$MAXW" ] && exit 0
+
+# Record the width the owner chose, once. A second narrowing (hotel A then
+# hotel B) must not overwrite it with an already-narrowed value.
+[ -s "$STATE" ] || { mkdir -p "$(dirname "$STATE")"; printf '%s %s\n' "$RADIO" "$HT" > "$STATE"; }
+
+uci set wireless.$RADIO.htmode="$GEN$MAXW"
+uci commit wireless
+$LOG "uplink on ch$FREQ MHz allows $MAXW MHz -> $RADIO $HT to $GEN$MAXW so the AP can still run"
+( wifi reload "$RADIO" ) >/dev/null 2>&1 &
