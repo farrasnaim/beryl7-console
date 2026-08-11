@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=51a34b03">
+<link rel="stylesheet" href="/os.css?v=cc13c1bb">
 </head>
 <body>
 <div class="shell">
@@ -58,6 +58,16 @@
             <div class="rowsep"></div>
             <div id="spark"></div>
             <div class="cap"><span id="spkL"></span><span id="spkM">round-trip to 1.1.1.1 · 4h</span><span id="spkR"></span></div>
+            <!-- Packet loss. The 4h figure was already being collected by
+                 dashmon and carried in the payload, and the page threw it
+                 away; the live figure is the same probes the trace above is
+                 drawn from, counted rather than plotted. -->
+            <div class="rowsep"></div>
+            <div class="lossrow">
+              <span class="ro__k">Packet loss</span>
+              <span id="lossState"></span>
+            </div>
+            <div class="cap"><span id="lossL"></span><span id="lossM"></span><span id="lossR"></span></div>
           </div>
         </section>
         <section class="panel">
@@ -159,6 +169,9 @@ function model(d) {
         var dv = ensure(w.mac);
         if (!dv.ip && w.ip) dv.ip = w.ip;
         dv.wiredLink = w.link;
+        dv.port = w.port || '';
+        dv.portSpeed = +w.speed || 0;
+        dv.portDuplex = w.duplex || '';
     });
 
     var out = [];
@@ -209,6 +222,14 @@ function model(d) {
                  : (dv.zone && dv.zone !== LANNET) ? 'iot'
                  : dv.medium;
     });
+    /* How many hosts sit behind each wired bridge port. One means the port's
+       negotiated speed IS that host's link. More than one means a switch is in
+       between, and the figure is the trunk — reported as such rather than
+       presented as the device's own. */
+    var portN = {};
+    out.forEach(function (dv) { if (dv.port) portN[dv.port] = (portN[dv.port] || 0) + 1; });
+    out.forEach(function (dv) { if (dv.port) dv.portPeers = portN[dv.port]; });
+
     /* within a band: newest Wi-Fi generation first, then name A-Z */
     var order = { eth: 0, '5': 1, '2.4': 2, iot: 3, blocked: 4, idle: 5 };
     out.sort(function (a, b) {
@@ -360,6 +381,7 @@ function pushSample(dn, up, ms) {
     }
     drawRibbon();
     drawLatency();
+    drawLoss();
 }
 
 /* Eased vertical scales for the two charts.
@@ -477,6 +499,93 @@ function drawLatency() {
         : '');
 }
 
+/* ---------------------------------------------------------- packet loss --
+   Loss is what a game notices first — a 2% loss with a flat 16ms trace ruins a
+   round, and the latency chart above cannot show it, because a lost probe has
+   no value to plot. So it is counted instead.
+
+   Two windows, from two sources that were both already there:
+     live  — the 1s probes rate-api runs; a lost one arrives as null.
+     4h    — dashmon's per-minute probe, which has recorded a loss column since
+             it was written and which this page simply never read.
+
+   HONEST LIMITS, because a gamer reading this will draw conclusions from it:
+   these are ICMP probes from the ROUTER to 1.1.1.1. They are not the path to a
+   Valorant or CS2 server, and some networks deprioritise ICMP, so a clean
+   reading here does not prove a clean game. What it does prove is the reverse —
+   if this shows loss, the problem is at or beyond the uplink, and nothing you
+   change on the PC will fix it. */
+/* 1% is where a tick-based shooter starts to feel it. Below that but non-zero
+   still earns a word, because the useful signal is "it stopped being zero", not
+   the exact figure.
+   `any` is a COUNT, not the percentage: 1 lost packet in 3000 rounds to 0.0% and
+   must still not read CLEAN. And the percentage passed in is the one already
+   rounded for display, so the word can never disagree with the number printed
+   beside it — 0.99% shows as "1.0%" and is called LOSSY, not PATCHY. */
+function lossTone(shownPct, any) {
+    if (!any) return ['CLEAN', 'ok'];
+    if (shownPct < 1) return ['PATCHY', 'warn'];
+    return ['LOSSY', 'bad'];
+}
+/* One decimal below 10%, whole numbers above — at 34% the tenth is noise. */
+function lossPct(p) { return p >= 10 ? Math.round(p) : Math.round(p * 10) / 10; }
+function drawLoss() {
+    var st = $('#lossState'); if (!st) return;
+
+    /* live: same null-after-first-real rule drawLatency uses, so a 5s-poll
+       sample (which carries no ping at all) is never miscounted as a loss */
+    var first = -1, lost = 0, got = 0, i;
+    for (i = 0; i < ring.ms.length; i++) {
+        if (ring.ms[i] == null) { if (first >= 0) lost++; }
+        else { if (first < 0) first = i; got++; }
+    }
+    var live = fastOn && (got + lost) > 0;
+    var livePct = live ? (lost * 100 / (got + lost)) : null;
+
+    /* 4h: [t, avg_ms, loss_pct] per minute, three probes each */
+    var mins = 0, lossSum = 0, badMin = 0, lastBad = 0;
+    for (i = 0; i < lastLat.length; i++) {
+        var L = +lastLat[i][2];
+        if (!isFinite(L)) continue;
+        mins++; lossSum += L;
+        if (L > 0) { badMin++; lastBad = +lastLat[i][0]; }
+    }
+    var histPct = mins ? lossSum / mins : null;
+
+    /* The state word reports NOW. Live probes when the session is active,
+       otherwise the last few minutes of dashmon — a single minute is only three
+       probes, so one lost packet reads as 33% and would cry wolf on its own. */
+    var nowPct = livePct, nowAny = lost;
+    if (nowPct == null && mins) {
+        var n = 0, s = 0;
+        for (i = Math.max(0, lastLat.length - 5); i < lastLat.length; i++) {
+            var v = +lastLat[i][2];
+            if (isFinite(v)) { s += v; n++; }
+        }
+        nowPct = n ? s / n : null;
+        nowAny = s;
+    }
+    clear(st);
+    if (nowPct == null) {
+        st.appendChild(OS.stateWord('NO DATA', 'idle'));
+    } else {
+        var w = lossTone(lossPct(nowPct), nowAny);
+        st.appendChild(OS.stateWord(w[0], w[1]));
+    }
+
+    setTxt($('#lossL'), live
+        ? 'live  ' + lost + ' of ' + (got + lost)
+        : (mins ? 'from the 1-minute probe' : ''));
+    /* A percentage alone hides the shape of the problem: 0.4% could be one bad
+       minute or a steady drizzle across four hours. The minute count says which. */
+    setTxt($('#lossM'), (live && lost) ? lossPct(livePct) + '% now' : '');
+    setTxt($('#lossR'), mins
+        ? '4h  ' + lossPct(histPct) + '%' +
+          (badMin ? '  ·  ' + badMin + (badMin === 1 ? ' minute' : ' minutes') +
+                    ', last ' + OS.ago(lastBad) : '')
+        : '');
+}
+
 function fastTick() {
     fastTimer = null;
     if (document.visibilityState !== 'visible' || Date.now() > activeUntil) { fastStop(); return; }
@@ -545,6 +654,7 @@ function renderCharts(d) {
     }
     lastLat = d.wanlat || [];
     drawLatency();
+    drawLoss();
 }
 
 /* System is fed by whichever source is currently fresher: the 1s sampler while
@@ -644,6 +754,17 @@ function paintSys(sys) {
    explained an isolation rule that belongs on the Settings page, not on a
    heading that repeats on every poll. Blocked and Not connected keep theirs,
    because those genuinely say something the label does not. */
+/* Ethernet link rates are the handful of values autonegotiation can settle on,
+   so they read better as the name people use for them than as a raw megabit
+   count — 2.5 Gb/s, not 2500 Mb/s. */
+function ethSpeed(mbit) {
+    if (mbit >= 1000) {
+        var g = mbit / 1000;
+        return (g === Math.round(g) ? g : g.toFixed(1)) + ' Gb/s';
+    }
+    return mbit + ' Mb/s';
+}
+
 var MEDIA = {
     eth:     { k: 'Ethernet',  ico: 'eth',  note: '' },
     '5':     { k: '5 GHz',     ico: 'wifi', note: '' },
@@ -902,6 +1023,19 @@ function detailFor(box, v, d) {
     if (v.ip) kv('IPv4', v.ip);
     v.ip6.forEach(function (a, i) { kv(i ? '' : 'IPv6', a); });
     if (v.host && v.host !== v.name) kv('Hostname', v.host);
+    /* What the cable actually negotiated. Read from the router's port, so it is
+       this device's own link only when the device is the only thing on that
+       port — otherwise a switch is in between and the number is the trunk. The
+       two cases get different labels rather than one optimistic reading. */
+    if (v.medium === 'eth' && v.portSpeed) {
+        var lk = ethSpeed(v.portSpeed) +
+                 (v.portDuplex ? '  ·  ' + v.portDuplex + ' duplex' : '');
+        if (v.portPeers > 1) {
+            kv('Router port', lk + '  ·  ' + v.portPeers + ' devices behind it');
+        } else {
+            kv('Link', lk);
+        }
+    }
     kv('Zone', v.zone || 'lan');
     kv('Reachability', v.neigh ? (v.neigh === 'REACHABLE' ? 'reachable'
         : v.neigh === 'FAILED' ? 'not answering ARP' : v.neigh.toLowerCase()) : null);
@@ -1260,6 +1394,7 @@ OS.tp.start();
    jump when the ribbon appears ~2s later (it needs two samples for a delta) */
 drawRibbon();
 drawLatency();
+drawLoss();
 ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) {
     document.addEventListener(ev, fastStart, { passive: true });
 });

@@ -634,6 +634,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 /* ---- misc --------------------------------------------------------------- */
 .mut{color:var(--ink-2)} .dim{color:var(--ink-4)}
 .rowsep{height:1px;background:var(--rule);margin:var(--s3) 0}
+.lossrow{display:flex;justify-content:space-between;align-items:baseline;gap:var(--s2)}
 .stack{display:flex;flex-direction:column;gap:var(--s3)}
 .inline{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
 .push{margin-left:auto}

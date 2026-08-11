@@ -485,17 +485,42 @@ WIFIMACS=$(for _i in $WLIFS; do
            done)
 FDBWIRED=$(bridge fdb show 2>/dev/null | awk -v wl="$WLIFS" '
     BEGIN { n=split(wl, a, "\n"); for (i=1; i<=n; i++) if (a[i] != "") WL[a[i]]=1 }
-    $3 != "" && !($3 in WL) && !/permanent|self/ { print toupper($1) }' | sort -u)
+    $3 != "" && !($3 in WL) && !/permanent|self/ { print toupper($1), $3 }' | sort -u)
+# What each wired bridge port actually negotiated. This is the ROUTER's end of
+# the cable: it is the client's own link speed when the client is plugged
+# straight in, and the trunk speed when a switch sits between them. The client
+# can tell the two apart — more than one MAC on one port means a switch — so it
+# labels the reading rather than overstating it.
+#
+# speed reads -1 and duplex "unknown" while a port is down, hence the guards;
+# both are plain sysfs, no ethtool on the router.
+PORTLINK=$(for _bp in /sys/class/net/$LANDEV/brif/*; do
+    _bn=$(basename "$_bp" 2>/dev/null)
+    [ "$_bn" = '*' ] && continue
+    case " $(echo $WLIFS) " in *" $_bn "*) continue ;; esac
+    _sp=$(cat "/sys/class/net/$_bn/speed" 2>/dev/null)
+    _dx=$(cat "/sys/class/net/$_bn/duplex" 2>/dev/null)
+    case "$_sp" in ''|*[!0-9]*) _sp=0 ;; esac
+    case "$_dx" in full|half) : ;; *) _dx='' ;; esac
+    echo "$_bn $_sp $_dx"
+done)
 LANPFX=$(uci -q get network.lan.ipaddr 2>/dev/null | cut -d. -f1-3)
 WIREDJ=""
 if [ -n "$LANPFX" ]; then
 WIREDJ=$( {
     ip -4 neigh show dev "$LANDEV" 2>/dev/null | awk '/lladdr/{print toupper($3), $1}'
     awk '{print toupper($2), $3}' /tmp/dhcp.leases 2>/dev/null
-  } | awk -v wifi="$WIFIMACS" -v wired="$FDBWIRED" -v pfx="$LANPFX." '
+  } | awk -v wifi="$WIFIMACS" -v wired="$FDBWIRED" -v plink="$PORTLINK" -v pfx="$LANPFX." '
       BEGIN {
         n=split(wifi,  w, "\n"); for (i=1; i<=n; i++) if (w[i] != "") W[w[i]]=1
-        m=split(wired, e, "\n"); for (i=1; i<=m; i++) if (e[i] != "") E[e[i]]=1
+        m=split(wired, e, "\n"); for (i=1; i<=m; i++) {
+          if (e[i] == "") continue
+          split(e[i], f, " "); if (f[1] != "") E[f[1]]=f[2]
+        }
+        p=split(plink, g, "\n"); for (i=1; i<=p; i++) {
+          if (g[i] == "") continue
+          split(g[i], h, " "); if (h[1] != "") { SP[h[1]]=h[2]+0; DX[h[1]]=h[3] }
+        }
       }
       {
         mac=$1; ip=$2
@@ -504,8 +529,15 @@ WIREDJ=$( {
         if (mac in W) next                # associated on Wi-Fi -> already listed
         if (mac in seen) next
         seen[mac]=1
-        printf "%s{\"mac\":\"%s\",\"ip\":\"%s\",\"link\":\"%s\"}", \
-               (c++?",":""), mac, ip, ((mac in E) ? "wired" : "idle")
+        port = (mac in E) ? E[mac] : ""
+        printf "%s{\"mac\":\"%s\",\"ip\":\"%s\",\"link\":\"%s\"", \
+               (c++?",":""), mac, ip, (port != "" ? "wired" : "idle")
+        if (port != "") {
+          printf ",\"port\":\"%s\"", port
+          if (SP[port] > 0)  printf ",\"speed\":%d", SP[port]
+          if (DX[port] != "") printf ",\"duplex\":\"%s\"", DX[port]
+        }
+        printf "}"
       }')
 fi
 WIREDJ="[$WIREDJ]"
