@@ -241,6 +241,38 @@ function renderAlerts(d) {
         n2.style.marginBottom = '12px';
         a.appendChild(n2);
     }
+    /* Home, on a better uplink, and still running a narrowed radio. Worth
+       saying out loud because nothing else on the router would ever mention it:
+       the AP is up, the internet works, and the only symptom is that your own
+       5 GHz is quietly half the width you configured. The cause is a saved
+       uplink — which rejoins itself on every boot — so it does not go away by
+       waiting, and plugging the Ethernet in does not fix it either. While the
+       uplink is actually CARRYING, the narrowing is the necessary trade and
+       gets no comment. */
+    var wd = d.width;
+    var carryingWifi = d.default_route_dev && /^(phy|wlan|wwan)/.test(d.default_route_dev);
+    if (wd && wd.original && wd.current && wd.original !== wd.current && !carryingWifi) {
+        /* Two different situations end up here and they need different
+           sentences. With an uplink still joined, the radio is genuinely held
+           and removing it is the fix. With NO uplink, nothing is holding the
+           radio and this is simply a restore that did not happen — blaming an
+           uplink that is not there would send someone looking for a control
+           that does not exist. */
+        var band = OS.bandLabel(wd.band) || wd.radio;
+        var was = wd.original.replace(/^[A-Z]+/, ''), now = wd.current.replace(/^[A-Z]+/, '');
+        var wn = OS.note('Your ' + band + ' network is running at ' + now + ' MHz instead of ' +
+            was + ' MHz. ' + ((d.uplink && d.uplink.configured)
+                ? 'The Wi-Fi uplink below is still joined and holds that radio on its channel. ' +
+                  'Something else is carrying the internet now, so removing the uplink restores ' +
+                  'the full width — the saved password is kept either way, so rejoining later ' +
+                  'stays one tap.'
+                : 'It was narrowed to fit a Wi-Fi uplink that is no longer joined, and never put ' +
+                  'back. Nothing is holding the radio now: set the width to ' + wd.original +
+                  ' under Settings, or join and remove an uplink once, and it returns.'),
+            'warn');
+        wn.style.marginBottom = '12px';
+        a.appendChild(wn);
+    }
     OS.flagTab('/repeater/', !!d.last_error);
 
     /* the rail's Uplink row, straight from the uplinks[] this page now serves —

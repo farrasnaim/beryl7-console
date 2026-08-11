@@ -597,6 +597,21 @@ if [ -n "$IOTSEC" ]; then
 else
     printf '"iot_ssid":null,'
 fi
+# Has 33-uplink-width narrowed a radio to fit the uplink's channel? While you are
+# travelling that is the necessary trade and needs no comment. Once a better
+# uplink is carrying and this is STILL set, the owner is at home running half
+# their 5 GHz with nothing on screen to say why — and the cause (a saved uplink
+# that rejoins itself on every boot) is not something anyone would guess.
+WSTATE=/etc/dashboard/uplink-width-orig
+if [ -s "$WSTATE" ]; then
+    read -r _wr _wh < "$WSTATE" 2>/dev/null
+    printf '"width":{"radio":"%s","original":"%s","current":"%s","band":"%s"},' \
+        "$(esc "$_wr")" "$(esc "$_wh")" \
+        "$(esc "$(uci -q get wireless.$_wr.htmode)")" \
+        "$(esc "$(uci -q get wireless.$_wr.band)")"
+else
+    printf '"width":null,'
+fi
 printf '"known":%s,' "$(known_json)"
 printf '"scan_note":"Scans both bands via iw (iwinfo cannot scope a scan to the 5 GHz radio on this multi-radio PHY)."'
 printf '}'
