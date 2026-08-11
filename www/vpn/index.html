@@ -588,6 +588,25 @@ function renderDevices(d) {
     var routable = devices.filter(function (v) {
         return v.how !== 'Not connected' || pol[v.mac];
     });
+    /* …and that exception has to cover the case where the device is not in the
+       list at all. A policy outlives every trace of the device: no association,
+       no bridge entry, no DHCP lease, no ARP entry — at which point filtering
+       `devices` cannot keep something that was never in it, and the rule became
+       unreachable from this page. The map hides these; this list must not,
+       because this is the only place the rule can be cleared.
+       It is synthesised from the policy itself, so it disappears the moment the
+       device is set back to Direct — the refresh after that change re-renders
+       with the policy gone, and nothing generates the row. */
+    var known = {};
+    devices.forEach(function (v) { known[v.mac] = 1; });
+    Object.keys(pol).forEach(function (m) {
+        if (known[m]) return;
+        routable.push({ mac: m, name: nameOf(m), how: 'Not connected',
+                        cls: (cmap[m] && cmap[m].class) || 'default', ip: '' });
+    });
+    /* devices arrives sorted; the additions have to be merged into that order
+       rather than piled on the end. */
+    routable.sort(function (a, b) { return a.name.localeCompare(b.name); });
     renderDevices.shown = routable.length;
 
     if (!routable.length) {
