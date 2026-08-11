@@ -62,7 +62,19 @@ fi
 
 # Backgrounded: hotplug handlers should return promptly, and `wifi reload`
 # re-enters netifd (which is what invoked us).
-( sleep 1; wifi reload ) >/dev/null 2>&1 &
+#
+# Scoped to the radio the secondary SSID actually lives on. Unscoped, this
+# toggled one 2.4 GHz SSID by restarting every radio, so joining a 5 GHz uplink
+# knocked the main 2.4 GHz clients off for no reason — measured during a travel
+# rehearsal: six disconnects on the IoT AP, which is the point, and two more on
+# the main 2.4 GHz AP, which is not. Falls back to reloading everything if the
+# radio cannot be read, which is the previous behaviour.
+IOT_RADIO=$(uci -q get wireless.$IOT_SECTION.device 2>/dev/null)
+if [ -n "$IOT_RADIO" ]; then
+    ( sleep 1; wifi reload "$IOT_RADIO" ) >/dev/null 2>&1 &
+else
+    ( sleep 1; wifi reload ) >/dev/null 2>&1 &
+fi
 
 flock -u 9 2>/dev/null
 exit 0

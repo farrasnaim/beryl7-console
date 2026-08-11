@@ -248,6 +248,16 @@ if [ "$ACTION" = "aclset" ]; then
         /"section":/ { gsub(/[",]/,""); s=$2 }
         /"ifname":/  { gsub(/[",]/,""); if (s==want) { print $2; exit } }')
 
+    # Reload only the radio this SSID lives on. Unscoped, blocking a single
+    # device restarted every radio and dropped every wireless client on the
+    # router — a whole-house outage to ban one plug. Falls back to reloading
+    # everything only if the section names no device.
+    SECRADIO=$(uci -q get wireless.$SEC.device)
+    reload_sec() {
+        if [ -n "$SECRADIO" ]; then wifi reload "$SECRADIO" >/dev/null 2>&1 &
+        else wifi reload >/dev/null 2>&1 & fi
+    }
+
     if [ "$BLK" = "1" ]; then
         uci set wireless.$SEC.macfilter='deny'
         cur=$(uci -q get wireless.$SEC.maclist)
@@ -255,13 +265,13 @@ if [ "$ACTION" = "aclset" ]; then
         uci commit wireless
         [ -n "$IFACE" ] && ubus call hostapd.$IFACE del_client \
             "{\"addr\":\"$MAC\",\"deauth\":true,\"reason\":1,\"ban_time\":60000}" >/dev/null 2>&1
-        wifi reload >/dev/null 2>&1 &
+        reload_sec
         printf '{"ok":true,"action":"block","mac":"%s"}' "$(esc "$MAC")"
     else
         uci -q del_list wireless.$SEC.maclist="$MAC"
         [ -z "$(uci -q get wireless.$SEC.maclist)" ] && uci -q delete wireless.$SEC.macfilter
         uci commit wireless
-        wifi reload >/dev/null 2>&1 &
+        reload_sec
         printf '{"ok":true,"action":"unblock","mac":"%s"}' "$(esc "$MAC")"
     fi
     exit 0
