@@ -115,6 +115,11 @@ switch_to() {           # $1 sel  $2 ip  $3 name  $4 note
     # looking at. The boundary is marked instead, so nothing spans it.
     RING="$RING $SWITCHED"
     remember_sel "$1"
+    # A switch is rare and is the answer to "why is it on Google?" — but the
+    # note is cleared by the next manual selection, so without this the event
+    # leaves no trace at all. Same lesson as the 2026-08-10 loop, which wrapped
+    # the log ring in 42 seconds and left one line as the only evidence.
+    logger -t pingmon "target now $2: $4"
 }
 
 write_ring() {
@@ -233,6 +238,7 @@ while :; do
                     # instead of flapping between them every ten seconds.
                     UNREACH=1; STATE=down; BACKOFF=30; NEXTTRY=$((UPI + BACKOFF))
                     NOTE="neither $CF nor $GOOGLE is answering — the connection looks down"
+                    logger -t pingmon "no target reachable: neither $CF nor $GOOGLE replied"
                 fi
                 ;;
             custom)

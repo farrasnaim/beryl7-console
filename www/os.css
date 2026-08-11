@@ -151,6 +151,11 @@
 :root[data-theme="light"]{--sw-green:#0b8e7c; --sw-red:#a03a32; --sw-blue:#33568f; --sw-grey:#67676e}
 
 *,*::before,*::after{box-sizing:border-box}
+/* The `hidden` attribute is display:none from the UA sheet, which ANY author
+   rule that sets display silently beats — so `class="inline" hidden` renders.
+   That trap had already been patched twice by hand (.accent__pop, .det) before
+   it caught a third element, so it is fixed once here instead. */
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
     font-size:13.5px;line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -238,7 +243,6 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
     display:flex;flex-direction:column;gap:1px;
     background:var(--face-3);border:1px solid var(--rule-3);border-radius:var(--r2);
     bottom:calc(100% + 6px);right:var(--s4);left:auto}
-.accent__pop[hidden]{display:none}   /* needed: display:flex would beat [hidden] */
 .accent__opt{display:flex;align-items:center;gap:9px;width:100%;
     padding:7px 9px;background:none;border:0;border-radius:var(--r);
     font-size:12.5px;color:var(--ink-2);text-align:left;cursor:pointer}
@@ -481,7 +485,6 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
   .row--pick .select{width:100%;min-width:0;max-width:none}}
 .det{border-bottom:1px solid var(--rule);background:var(--face-2);
     padding:var(--s4) var(--s5) var(--s5)}
-.det[hidden]{display:none}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:5px var(--s4)}
 .kv dt{font-size:11.5px;color:var(--ink-4);white-space:nowrap}
 .kv dd{margin:0;font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;
@@ -646,6 +649,8 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .input--inline{width:auto;max-width:150px;min-height:26px;padding:4px 8px;font-size:11.5px;
     font-family:var(--mono)}
 .probecustom{margin:-2px 0 var(--s2);gap:7px}
+.probeaddr--edit{cursor:pointer;border-bottom:1px dashed var(--rule-3)}
+.probeaddr--edit:hover{color:var(--ink-2);border-bottom-color:var(--ink-4)}
 .probenote{margin:-2px 0 var(--s2)}
 .stack{display:flex;flex-direction:column;gap:var(--s3)}
 .inline{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}

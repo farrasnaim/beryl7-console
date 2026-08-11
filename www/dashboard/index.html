@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=e5186730">
+<link rel="stylesheet" href="/os.css?v=0fbff8d4">
 </head>
 <body>
 <div class="shell">
@@ -677,6 +677,13 @@ function drawJitter() {
    else would leave the control disagreeing with the chart under it. */
 var PROBE_API = '/cgi-bin/probe-api';
 var probeBusy = false;
+/* The address field is a step in choosing, not part of the readout: it opens
+   when you pick Custom and closes once an address is accepted. Kept as its own
+   flag rather than derived from the select's value, because "Custom is
+   selected" and "you are typing an address" are different states — after a
+   successful submit the first is still true and the second is not. */
+var customOpen = false;
+function showCustom(on) { customOpen = on; $('#probeCustom').hidden = !on; }
 
 function paintProbe() {
     var sel = $('#probeSel'); if (!sel) return;
@@ -684,8 +691,15 @@ function paintProbe() {
     if (!probeBusy && document.activeElement !== sel && pingRing.sel && sel.value !== pingRing.sel) {
         sel.value = pingRing.sel;
     }
-    setTxt($('#probeAddr'), pingRing.target || '');
-    $('#probeCustom').hidden = (sel.value !== 'custom');
+    var addr = $('#probeAddr');
+    setTxt(addr, pingRing.target || '');
+    /* On a custom target the address doubles as the way back to the field —
+       re-picking "Custom…" in the select fires no change event when it is
+       already selected, so without this there is no route to editing it. */
+    var editable = pingRing.sel === 'custom';
+    addr.className = 'ro__m' + (editable ? ' probeaddr--edit' : '');
+    addr.title = editable ? 'change the address' : '';
+    $('#probeCustom').hidden = !customOpen;
 
     /* A target that has never answered is a fact about the TARGET — most game
        servers drop ICMP outright — and saying so is very different from
@@ -709,10 +723,13 @@ function setProbe(sel, ip) {
         .then(function (j) {
             probeBusy = false;
             if (!j || !j.ok) {
+                /* leave the field open and populated: the address was rejected,
+                   and the next thing you want is to correct it */
                 OS.toast((j && j.error) || 'could not change the probe target', 'bad');
                 if (pingRing.sel) $('#probeSel').value = pingRing.sel;
                 return;
             }
+            showCustom(false);
             /* Said out loud because it is not obvious: the five minutes on
                screen measured a different path and cannot be carried over. */
             OS.toast('Now probing ' + (ip || sel === 'gw' ? (ip || 'the gateway') : sel) +
@@ -1585,12 +1602,20 @@ $('#probeSel').addEventListener('change', function () {
     /* Custom needs an address before it means anything, so the select alone
        does not commit — it reveals the field and waits. */
     if (this.value === 'custom') {
-        $('#probeCustom').hidden = false;
+        showCustom(true);
         $('#probeIp').focus();
+        $('#probeIp').select();
         return;
     }
-    $('#probeCustom').hidden = true;
+    showCustom(false);
     setProbe(this.value, '');
+});
+$('#probeAddr').addEventListener('click', function () {
+    if (pingRing.sel !== 'custom') return;
+    showCustom(true);
+    $('#probeIp').value = pingRing.target || '';
+    $('#probeIp').focus();
+    $('#probeIp').select();
 });
 $('#probeGo').addEventListener('click', function () {
     var ip = $('#probeIp').value.replace(/\s+/g, '');
