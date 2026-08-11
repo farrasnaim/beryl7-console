@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=12b5e6fb">
+<link rel="stylesheet" href="/os.css?v=35041bc6">
 </head>
 <body>
 <div class="shell">
@@ -80,6 +80,15 @@
               </span>
               <span class="n" id="pingNow"></span>
             </div>
+            <!-- "Custom…" is the one-off: type an address, look at it, move on.
+                 "Add Custom IP" is for one worth keeping, and goes to Settings.
+                 Two different intents, so two entries rather than one that
+                 tries to be both. -->
+            <div class="inline probecustom" id="probeCustom" hidden>
+              <input id="probeIp" class="input input--inline" type="text" inputmode="decimal"
+                     maxlength="15" spellcheck="false" autocomplete="off" placeholder="203.0.113.7">
+              <button id="probeGo" class="btn btn--sm" type="button">Use</button>
+            </div>
             <div class="ro__m probenote" id="probeNote" hidden></div>
             <div id="spark"></div>
             <div class="cap"><span id="spkL"></span><span id="spkM"></span><span id="spkR"></span></div>
@@ -123,7 +132,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=498d14f5"></script>
+<script src="/os.js?v=be3f6430"></script>
 <script>
 (function () {
 'use strict';
@@ -671,6 +680,11 @@ function drawJitter() {
 var PROBE_API = '/cgi-bin/probe-api';
 var probeBusy = false;
 var savedTargets = [];
+/* Its own flag rather than a function of the select's value: "Custom is
+   selected" and "you are typing an address" are different states, and after a
+   successful submit the first is still true while the second is not. */
+var customOpen = false;
+function showCustom(on) { customOpen = on; $('#probeCustom').hidden = !on; }
 
 /* Built once at load, because the saved list only changes on the Settings page
    and getting here means a full page load anyway.
@@ -688,7 +702,8 @@ function buildProbeOptions() {
     opt('gw', 'Gateway');
     savedTargets.slice().sort(function (a, b) { return a.name.localeCompare(b.name); })
         .forEach(function (t) { opt('ip:' + t.ip, t.name); });
-    opt('manage', 'Custom…');
+    opt('custom', 'Custom…');
+    opt('manage', 'Add Custom IP');
     if (keep) sel.value = keep;
 }
 
@@ -711,13 +726,18 @@ function paintProbe() {
         !sel.querySelector('option[value="' + want + '"]')) {
         var o = el('option', null, pingRing.target + '  (not saved)');
         o.value = want;
-        sel.insertBefore(o, sel.lastElementChild);
+        /* above "Custom…" and "Add Custom IP", which are actions and belong
+           under everything that is actually a target */
+        sel.insertBefore(o, sel.querySelector('option[value="custom"]'));
     }
-    /* never yank the control out from under someone who has it open */
-    if (!probeBusy && document.activeElement !== sel && want && sel.value !== want) {
+    /* never yank the control out from under someone who has it open, and never
+       while the address field is up waiting for one to be typed */
+    if (!probeBusy && !customOpen && document.activeElement !== sel &&
+        want && sel.value !== want) {
         sel.value = want;
     }
     setTxt($('#probeAddr'), pingRing.target || '');
+    $('#probeCustom').hidden = !customOpen;
 
     /* A target that has never answered is a fact about the TARGET — most game
        servers drop ICMP outright — and saying so is very different from
@@ -745,6 +765,7 @@ function setProbe(sel, ip) {
                 paintProbe();
                 return;
             }
+            showCustom(false);
             /* Said out loud because it is not obvious: the five minutes on
                screen measured a different path and cannot be carried over. */
             OS.toast('Now probing ' + (ip || (sel === 'gw' ? 'the gateway' : sel)) +
@@ -1619,15 +1640,32 @@ $('#probeSel').addEventListener('change', function () {
        addresses belongs on the Settings page, where a list can be shown and
        edited, rather than in a control that has to stay one line tall. */
     if (this.value === 'manage') {
+        showCustom(false);
         paintProbe();                       /* put the control back first */
         location.href = '/settings/#ping';
         return;
     }
+    if (this.value === 'custom') {
+        /* needs an address before it means anything, so the select alone does
+           not commit — it opens the field and waits */
+        showCustom(true);
+        $('#probeIp').focus();
+        $('#probeIp').select();
+        return;
+    }
+    showCustom(false);
     if (this.value.indexOf('ip:') === 0) {
         setProbe('custom', this.value.slice(3));
         return;
     }
     setProbe(this.value, '');
+});
+$('#probeGo').addEventListener('click', function () {
+    var ip = $('#probeIp').value.replace(/\s+/g, '');
+    if (ip) setProbe('custom', ip);
+});
+$('#probeIp').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); $('#probeGo').click(); }
 });
 ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) {
     document.addEventListener(ev, fastStart, { passive: true });

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>VPN — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=12b5e6fb">
+<link rel="stylesheet" href="/os.css?v=35041bc6">
 </head>
 <body>
 <div class="shell">
@@ -69,7 +69,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=498d14f5"></script>
+<script src="/os.js?v=be3f6430"></script>
 <script>
 (function () {
 'use strict';
@@ -79,6 +79,7 @@ var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
 OS.buildShell('/vpn/');
 
 var devices = [];        /* from dashboard-api, fetched rarely on purpose */
+var cmap = {};           /* mac -> classmap entry, for devices no longer present */
 var routeOpen = {};      /* mac -> selector expanded (mobile), survives polls */
 var devicesLoaded = false;
 var expanded = {};
@@ -114,7 +115,17 @@ function renderMapV(d) {
     }
     function nameOf(mac) {
         var v = devices.filter(function (x) { return x.mac === mac; })[0];
-        return v ? v.name : mac;
+        if (v) return v.name;
+        return (cmap[mac] && cmap[mac].name) || mac;
+    }
+    /* A ROUTING POLICY IS NOT A CONNECTION. The policy says "when this device
+       is here, send it through that tunnel" — it stays in place while the
+       device is asleep, taken out of the house, or gone for good. Drawing it
+       like a live one made this page claim traffic was flowing through a
+       tunnel for something that was not on the network at all. */
+    function presentOf(mac) {
+        var v = devices.filter(function (x) { return x.mac === mac; })[0];
+        return !!v && v.how !== 'Not connected';
     }
     var sv = OS.sv, svtext = OS.svtext;
     var W = 360, LX = 34, NW = W - LX - 14, cx = LX + 20;
@@ -128,15 +139,17 @@ function renderMapV(d) {
         var macs = byIface[t.iface];
         var up = !t.disabled && t.up && t.handshake && (now - t.handshake) <= 200;
         var cls = up ? 'on' : 'off';
+        var laneLive = up && macs.some(presentOf);
         /* The trunk has to start at the FIRST device's stub. It used to be
            derived as y-14 after the loop, which lands on the LAST stub, so
            every device above it hung unconnected — correct only while a tunnel
            carried exactly one device. */
         var trunkTop = y + 6;
         macs.forEach(function (m) {
-            s2.appendChild(sv('path', { 'class': 'link ' + cls,
+            var here = presentOf(m);
+            s2.appendChild(sv('path', { 'class': 'link ' + (here ? cls : 'off'),
                 d: 'M' + cx + ' ' + (y + 6) + ' H' + (cx + 16) }));
-            s2.appendChild(svtext(cx + 24, y + 10, nameOf(m), 't1'));
+            s2.appendChild(svtext(cx + 24, y + 10, nameOf(m) + (here ? '' : '  · not connected'), 't1'));
             y += 20;
         });
         /* The flow overlay is drawn in the SAME segments as the links, never as
@@ -148,13 +161,13 @@ function renderMapV(d) {
         y += 6;
         s2.appendChild(sv('path', { 'class': 'link ' + cls,
             d: 'M' + cx + ' ' + trunkTop + ' V' + y }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow',
+        if (laneLive) s2.appendChild(sv('path', { 'class': 'flow',
             d: 'M' + cx + ' ' + trunkTop + ' V' + y }));
         s2.appendChild(sv('rect', { 'class': 'nodebox on', x: LX, y: y, width: 110, height: 30, rx: 2 }));
         s2.appendChild(svtext(LX + 12, y + 19, 'Beryl 7', 't1'));
         y += 30;
         s2.appendChild(sv('path', { 'class': 'link ' + cls, d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow', d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
+        if (laneLive) s2.appendChild(sv('path', { 'class': 'flow', d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
         y += 14;
         s2.appendChild(sv('rect', { 'class': 'nodebox ' + (up ? 'on' : 'bad'),
             x: LX, y: y, width: NW, height: 44, rx: 2 }));
@@ -164,7 +177,7 @@ function renderMapV(d) {
                : (t.disabled ? 'off' : 'no handshake'), 't2'));
         y += 44;
         s2.appendChild(sv('path', { 'class': 'link ' + cls, d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow', d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
+        if (laneLive) s2.appendChild(sv('path', { 'class': 'flow', d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
         y += 14;
         var ep = (t.endpoint || '').split(':')[0];
         s2.appendChild(svtext(LX, y + 12, ep || 'endpoint', 't1'));
@@ -195,7 +208,17 @@ function renderMap(d) {
     }
     function nameOf(mac) {
         var v = devices.filter(function (x) { return x.mac === mac; })[0];
-        return v ? v.name : mac;
+        if (v) return v.name;
+        return (cmap[mac] && cmap[mac].name) || mac;
+    }
+    /* A ROUTING POLICY IS NOT A CONNECTION. The policy says "when this device
+       is here, send it through that tunnel" — it stays in place while the
+       device is asleep, taken out of the house, or gone for good. Drawing it
+       like a live one made this page claim traffic was flowing through a
+       tunnel for something that was not on the network at all. */
+    function presentOf(mac) {
+        var v = devices.filter(function (x) { return x.mac === mac; })[0];
+        return !!v && v.how !== 'Not connected';
     }
 
     var sv = OS.sv, svtext = OS.svtext;
@@ -225,6 +248,11 @@ function renderMap(d) {
            centre either exactly ON a row (even counts, so the row and the
            box-entry line are one straight line) or a clean 11px between rows
            (odd counts). */
+        /* The tunnel being up is not the same as anything using it. A lane
+           whose only device is off the network is idle end to end, so the
+           flow stops at every segment — while the tunnel box still reports
+           CONNECTED, because it is. */
+        var laneLive = up && L.macs.some(presentOf);
         var laneH = Math.max(rowH, L.macs.length * 22 + 28);
         var mid = y + laneH / 2;
         var cls = up ? 'on' : 'off';
@@ -251,10 +279,15 @@ function renderMap(d) {
         var rowTop = y + (laneH - (L.macs.length - 1) * 22) / 2;
         L.macs.forEach(function (m, i) {
             var ty = rowTop + i * 22;
-            s2.appendChild(svtext(colDev, ty + 4, nameOf(m), 't1'));
-            s2.appendChild(sv('path', { 'class': 'link ' + cls,
+            var here = presentOf(m);
+            s2.appendChild(svtext(colDev, ty + (here ? 4 : 0), nameOf(m), 't1'));
+            if (!here) s2.appendChild(svtext(colDev, ty + 12, 'not connected', 'cap'));
+            /* The lane stays — the policy is real and carries this device the
+               moment it comes back — but it is drawn as the idle thing it is,
+               and nothing flows along it. */
+            s2.appendChild(sv('path', { 'class': 'link ' + (here ? cls : 'off'),
                 d: 'M' + (colDev + 236) + ' ' + ty + ' H' + busX }));
-            if (up) s2.appendChild(sv('path', { 'class': 'flow',
+            if (up && here) s2.appendChild(sv('path', { 'class': 'flow',
                 d: 'M' + (colDev + 236) + ' ' + ty + ' H' + busX }));
         });
 
@@ -263,12 +296,12 @@ function renderMap(d) {
         if (busBot > busTop) {
             s2.appendChild(sv('path', { 'class': 'link ' + cls,
                 d: 'M' + busX + ' ' + busTop + ' V' + busBot }));
-            if (up) s2.appendChild(sv('path', { 'class': 'flow',
+            if (laneLive) s2.appendChild(sv('path', { 'class': 'flow',
                 d: 'M' + busX + ' ' + busTop + ' V' + busBot }));
         }
         s2.appendChild(sv('path', { 'class': 'link ' + cls,
             d: 'M' + busX + ' ' + mid + ' H' + colRouter }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow',
+        if (laneLive) s2.appendChild(sv('path', { 'class': 'flow',
             d: 'M' + busX + ' ' + mid + ' H' + colRouter }));
 
         s2.appendChild(sv('rect', { 'class': 'nodebox on', x: colRouter, y: mid - 14,
@@ -276,7 +309,7 @@ function renderMap(d) {
         s2.appendChild(svtext(colRouter + 10, mid + 4, 'Beryl 7', 't1'));
         s2.appendChild(sv('path', { 'class': 'link ' + cls,
             d: 'M' + (colRouter + 92) + ' ' + mid + ' H' + colTun }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow',
+        if (laneLive) s2.appendChild(sv('path', { 'class': 'flow',
             d: 'M' + (colRouter + 92) + ' ' + mid + ' H' + colTun }));
 
         s2.appendChild(sv('rect', { 'class': 'nodebox ' + (up ? 'on' : 'bad'),
@@ -288,7 +321,7 @@ function renderMap(d) {
 
         s2.appendChild(sv('path', { 'class': 'link ' + cls,
             d: 'M' + (colTun + 218) + ' ' + mid + ' H' + colNet }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow',
+        if (laneLive) s2.appendChild(sv('path', { 'class': 'flow',
             d: 'M' + (colTun + 218) + ' ' + mid + ' H' + colNet }));
 
         var ep = (t.endpoint || '').split(':')[0];
@@ -504,6 +537,11 @@ function loadDevices(force) {
             }
             out.sort(function (a, b) { return a.name.localeCompare(b.name); });
             devices = out; devicesLoaded = true;
+            /* Kept separately so a device the router has since forgotten —
+               no lease, no neighbour entry — can still be named. A policy
+               outlives the device's presence, and a bare MAC is a worse
+               answer than the name you gave it. */
+            cmap = d.classmap || {};
 
             /* This page has no uplink data of its own, which left the rail's
                Uplink row as a placeholder here and live on every other page.
@@ -840,20 +878,39 @@ function render(d) {
     }
 
     var upCount = (d.tunnels || []).filter(function (t) { return !t.disabled && t.up; }).length;
-    var routed = (d.policies || []).filter(function (p) { return p.enabled; }).length;
+    /* Devices actually HERE, not policies on file. "2 devices are routed" while
+       one of them has not been on the network for hours is a claim about
+       traffic that is not happening; the policy count belongs to the list
+       below, which is a configuration view. */
+    var enabled = (d.policies || []).filter(function (p) { return p.enabled; });
+    var routed = 0, absent = 0;
+    enabled.forEach(function (p) {
+        var m = String(p.mac || '').toUpperCase();
+        var v = devices.filter(function (x) { return x.mac === m; })[0];
+        if (v && v.how !== 'Not connected') routed++; else absent++;
+    });
+    /* Before the device list has loaded nothing can be called absent, so fall
+       back to the policy count rather than reporting zero for a second. */
+    if (!devicesLoaded) { routed = enabled.length; absent = 0; }
     OS.stage('routing', routed ? routed + ' tunnelled' : 'Direct',
              dead.length ? 'fault' : routed ? 'live' : '');
     /* "through one" was hardcoded, so three devices spread across two tunnels
        still read as going through a single one. Count the tunnels actually
        carrying something. */
     var carrying = {};
-    (d.policies || []).forEach(function (p) { if (p.enabled) carrying[p.iface] = 1; });
+    enabled.forEach(function (p) {
+        var m = String(p.mac || '').toUpperCase();
+        var v = devices.filter(function (x) { return x.mac === m; })[0];
+        if (!devicesLoaded || (v && v.how !== 'Not connected')) carrying[p.iface] = 1;
+    });
     var nCarry = Object.keys(carrying).length;
+    var absentTail = absent ? ' ' + absent + ' more ' + (absent === 1 ? 'is' : 'are') +
+                              ' set up but not connected.' : '';
     setTxt($('#subtitle'), (d.tunnels || []).length
         ? upCount + ' of ' + d.tunnels.length + ' tunnel' + (d.tunnels.length === 1 ? '' : 's') +
           ' connected. ' + (routed ? routed + ' device' + (routed === 1 ? ' is' : 's are') +
           (nCarry === 1 ? ' routed through one.' : ' routed across ' + nCarry + ' of them.')
-          : 'No device is using one.')
+          : 'No connected device is using one.') + absentTail
         : 'Add a WireGuard configuration to start routing devices through a tunnel.');
 
     renderMap(d);

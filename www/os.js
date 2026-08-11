@@ -758,7 +758,7 @@ function buildShell(activeHref) {
     if (sp) {
         var brand = el('div', 'brand'), mk = el('div', 'brand__mark');
         mk.appendChild(gem());
-        mk.appendChild(el('div', 'brand__name', 'GL.iNet Beryl 7'));
+        mk.appendChild(el('div', 'brand__name', 'Beryl 7'));
         brand.appendChild(mk);
         brand.appendChild(el('div', 'brand__sub', 'network console'));
         sp.appendChild(brand);
@@ -798,7 +798,7 @@ function buildShell(activeHref) {
     if (tl) {
         var mk2 = el('div', 'brand__mark');
         mk2.appendChild(gem());
-        mk2.appendChild(el('div', 'brand__name', 'GL.iNet Beryl 7'));
+        mk2.appendChild(el('div', 'brand__name', 'Beryl 7'));
         tl.appendChild(mk2);
         var sp2 = el('div'); sp2.className = 'push';
         tl.appendChild(sp2);
@@ -1014,16 +1014,48 @@ function svtext(x, y, str, cls, anchor) {
     return t;
 }
 
-/* The mark: a beryl prism seen down its axis. Hexagonal because beryl
-   crystallises hexagonal — the logo is the mineral's actual crystal habit,
-   not a decorative badge. */
+/* The GL.iNet wordmark, as shipped by GL.iNet.
+   ONE copy, filled with currentColor, rather than the two files it arrived as.
+   The light and dark originals differ only in fill (#636363 and #fff), which
+   is precisely what a colour token already expresses — and a second file would
+   have to be swapped by script on every theme change, including the moment the
+   OS preference flips while the page is open. */
 function gem() {
-    return svg('<svg class="brand__gem" viewBox="0 0 24 24" fill="none" ' +
-        'stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">' +
-        '<path d="M12 1.8 21.2 7v10L12 22.2 2.8 17V7z"/>' +
-        '<path d="M12 7.1 16.6 9.7v4.6L12 16.9 7.4 14.3V9.7z" opacity=".55"/>' +
-        '<path d="M12 1.8v5.3M21.2 7l-4.6 2.7M21.2 17l-4.6-2.7M12 22.2v-5.3' +
-        'M2.8 17l4.6-2.7M2.8 7l4.6 2.7" opacity=".45"/></svg>');
+    return svg('<svg class="brand__gem" viewBox="131 325.5 562.1 160.4" ' +
+        'fill="currentColor" role="img" aria-label="GL.iNet">' +
+        '<path d="M219.5,429.3H182c-0.6,0-1,0.4-1,1v13.5c0,0.6,0.4,1,1,1h19.6V468c-3.3,1-8.5,1.6-14.5,1.6' +
+        'c-22.3,0-36.2-13.5-36.2-35.1s14.5-35,37.8-35c10.6,0,16.9,2,21.3,3.8l2.1,0.9c0.3,0.1,0.5,0.1,0.8,0' +
+        's0.4-0.3,0.5-0.6l4.3-13.5c0.2-0.5-0.1-1-0.5-1.2l-1.6-0.7c-5-2.2-14.6-4.6-26.6-4.6c-34.5,0-57.9,20.7-58,51.5' +
+        'c0,15,5.5,28.6,15.1,37.2c10,8.9,23.1,13.2,40,13.2c13.4,0,24.9-2.9,32.2-5.3l1.3-0.4c0.4-0.1,0.7-0.5,0.7-0.9v-48.5' +
+        'C220.5,429.7,220.1,429.3,219.5,429.3z"/>' +
+        '<path d="M317.4,468.5H275v-83c0-0.6-0.4-1-1-1h-17.2c-0.6,0-1,0.4-1,1v97.9c0,0.6,0.4,1,1,1h60.6c0.6,0,1-0.4,1-1v-14' +
+        'C318.4,469,318,468.5,317.4,468.5z"/>' +
+        '<path d="M417.8,375.5c-5.9,0-10.3,4.4-10.3,10.3c0,5.8,4.3,10.2,10,10.2c3.1,0,5.9-1.1,7.8-3.1' +
+        'c1.8-1.9,2.8-4.4,2.7-7.1C427.9,379.8,423.6,375.5,417.8,375.5z"/>' +
+        '<path d="M426.4,411.1h-17.3c-0.6,0-1,0.4-1,1v71.4c0,0.6,0.4,1,1,1h17.3c0.6,0,1-0.4,1-1v-71.4' +
+        'C427.4,411.5,427,411.1,426.4,411.1z"/>' +
+        '<path d="M536.4,384.6H520c-0.6,0-1,0.4-1,1v41.3c0,8,0.1,16.6,0.5,25.7c-3.5-6.1-7.5-12.4-12-19L474.4,385' +
+        'c-0.2-0.3-0.5-0.4-0.8-0.4h-17.5c-0.6,0-1,0.4-1,1v97.9c0,0.6,0.4,1,1,1h16.4c0.6,0,1-0.4,1-1v-42.1' +
+        'c0-10.5-0.1-19-0.4-26.9c3.6,6.2,8,13.1,13.3,20.9l32.8,48.7c0.2,0.3,0.5,0.4,0.8,0.4h16.4c0.6,0,1-0.4,1-1v-97.9' +
+        'C537.4,385,537,384.6,536.4,384.6z"/>' +
+        '<path d="M597.1,409.6c-21.9,0-37.2,16.2-37.2,39.3c0,22.5,15.3,37,38.9,37c12.3,0,20.7-2.4,25.5-4.4l1.5-0.6' +
+        'c0.5-0.2,0.7-0.7,0.6-1.2l-3.2-12.5c-0.1-0.3-0.3-0.5-0.5-0.6c-0.3-0.1-0.6-0.1-0.8,0l-2.2,0.9' +
+        'c-4.3,1.7-9.6,3.3-19,3.3c-6,0-20-1.8-21.8-17.7h49.8c0.5,0,0.9-0.4,1-0.9l0.3-2.2c0.2-1.3,0.4-3.1,0.4-5.5' +
+        'C630.3,428.3,621.6,409.6,597.1,409.6z M579.4,438.3c1.2-4.5,5.2-14.2,16.7-14.2c4.4,0,8,1.2,10.5,3.6' +
+        'c3.3,3.1,4.4,7.6,4.7,10.6H579.4z"/>' +
+        '<path d="M692,411.1h-18v-19c0-0.3-0.1-0.6-0.4-0.8c-0.2-0.2-0.6-0.3-0.9-0.2l-17,4.2c-0.4,0.1-0.8,0.5-0.8,1v14.8h-10.3' +
+        'c-0.6,0-1,0.4-1,1v13.1c0,0.6,0.4,1,1,1H655v34c0,9.4,1.9,15.7,5.9,19.5c3.8,4,9.5,6.1,16.6,6.1' +
+        'c5.1,0,9.7-0.7,12.9-1.9l1.3-0.5c0.4-0.2,0.7-0.6,0.6-1l-0.8-12.9c0-0.3-0.2-0.6-0.4-0.7c-0.2-0.2-0.5-0.2-0.8-0.2' +
+        'l-2.4,0.6c-1.3,0.3-3.6,0.7-6.9,0.7c-3.5,0-6.9-0.8-6.9-10.3V426h18c0.6,0,1-0.4,1-1v-13.1' +
+        'C693,411.5,692.5,411.1,692,411.1z"/>' +
+        '<circle cx="357.2" cy="435.3" r="10.6"/>' +
+        '<path d="M461.1,341.9c1.3-1.3,1-3.4-0.6-4.3l-1.9-1.1c-12.4-7.2-26.6-11-40.9-11c-14.4,0-28.5,3.8-41,11l-1.8,1.1' +
+        'c-1.6,0.9-1.9,3.1-0.6,4.3l5.8,5.8c0.9,0.9,2.3,1.1,3.3,0.4c10.4-6,22.2-9.2,34.2-9.2s23.8,3.2,34.2,9.2h0.1' +
+        'c1.1,0.6,2.5,0.4,3.3-0.4L461.1,341.9z"/>' +
+        '<path d="M442.9,355.7c-7.7-4.2-16.4-6.5-25.3-6.5c-8.8,0-17.5,2.2-25.2,6.4c-0.7,0.4-1.2,1.2-1.3,2' +
+        'c0,0.6,0.2,1.3,0.6,1.7l6.4,6.4c0.8,0.8,2.1,1.1,3.1,0.6c5.1-2.4,10.7-3.6,16.3-3.6c5.7,0,11.3,1.3,16.4,3.6' +
+        'c1.1,0.5,2.3,0.2,3.1-0.6l6.2-6.2c0.5-0.5,0.7-1.2,0.7-1.9v-0.2C444,356.8,443.6,356.1,442.9,355.7z"/>' +
+        '</svg>');
 }
 
 /* Wi-Fi quality, expressed the way an operator says it out loud. Thresholds
