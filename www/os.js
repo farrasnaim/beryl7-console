@@ -188,7 +188,10 @@ function note(text, kind, ic) {
 /* Sparkline. Returns an <svg>; caller sizes it with CSS.
    viewBox is fixed and preserveAspectRatio is none, so the stroke would smear
    vertically — vector-effect on the trace classes keeps it 1.5px true. */
-function spark(vals, h) {
+/* rangeHint: as with ribbon()'s peakHint, an eased [min,max] from the caller so
+   the trace does not re-scale vertically the instant an outlier leaves the
+   window. _rawRange always reports what this window actually contains. */
+function spark(vals, h, rangeHint) {
     h = h || 46;
     var W = 300, P = 3, s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     s.setAttribute('viewBox', '0 0 ' + W + ' ' + h);
@@ -200,6 +203,10 @@ function spark(vals, h) {
     if (pts.length < 2) return s;
     var mn = Math.min.apply(null, pts), mx = Math.max.apply(null, pts);
     if (mx - mn < 4) { var mid = (mx + mn) / 2; mn = mid - 2; mx = mid + 2; }
+    s._rawRange = [mn, mx];
+    if (rangeHint && rangeHint.length === 2 && rangeHint[1] > rangeHint[0]) {
+        mn = rangeHint[0]; mx = rangeHint[1];
+    }
     var d = pts.map(function (v, i) {
         var x = (i / (pts.length - 1)) * (W - 2 * P) + P;
         var y = h - P - ((v - mn) / (mx - mn)) * (h - 2 * P);
@@ -219,7 +226,12 @@ function spark(vals, h) {
 /* Dual-direction throughput ribbon: download mirrored below the axis, upload
    above. One glyph answers "is anything moving, and which way" — two stacked
    line charts do not, because the eye has to compare across a gap. */
-function ribbon(down, up, h) {
+/* peakHint: draw against a caller-supplied vertical scale instead of this
+   window's own maximum. Without it the chart renormalises on every redraw, so
+   the moment a spike ages out of the ring the whole trace jumps to a new
+   height at once — the single most visible piece of judder on the page. The
+   caller eases the hint between frames; the geometry here is unchanged. */
+function ribbon(down, up, h, peakHint) {
     h = h || 84;
     var W = 300, mid = h / 2, ns = 'http://www.w3.org/2000/svg';
     var s = document.createElementNS(ns, 'svg');
@@ -230,6 +242,8 @@ function ribbon(down, up, h) {
     s.setAttribute('aria-hidden', 'true');
     var all = down.concat(up).filter(function (v) { return v != null; });
     var peak = Math.max.apply(null, all.concat([1]));
+    s._rawPeak = peak;
+    if (peakHint > 0) peak = peakHint;
     function side(vals, dir, clsF, clsL) {
         if (vals.length < 2) return;
         var d = vals.map(function (v, i) {

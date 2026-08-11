@@ -362,13 +362,40 @@ function pushSample(dn, up, ms) {
     drawLatency();
 }
 
+/* Eased vertical scales for the two charts.
+   Both used to re-derive their scale from whatever happened to be in the ring,
+   so a spike ageing out re-scaled the entire trace in a single frame — read as
+   the whole graph "twitching" once a second. These follow the target instead.
+   Rising is near-immediate so a real burst is never clipped or under-drawn;
+   falling is slow, because that is the case that produced the jump.
+   A null resets, so switching between the 1s and 5s sources does not drag one
+   window's scale into the other's. */
+var scaleY = { peak: null, lo: null, hi: null };
+function ease(cur, target, upRate, downRate) {
+    if (cur == null || !isFinite(cur)) return target;
+    var k = target > cur ? upRate : downRate;
+    var next = cur + (target - cur) * k;
+    return Math.abs(target - next) < Math.abs(target) * 0.001 ? target : next;
+}
+
 function drawRibbon() {
     var rb = $('#ribbon'); clear(rb);
     var n = ring.dn.length;
     if (n > 1) {
-        var g = OS.ribbon(ring.dn, ring.up, 84);
+        /* the target scale, derived here rather than by building the chart
+           twice — this runs once a second */
+        var rawPeak = 1;
+        for (var q = 0; q < n; q++) {
+            if (ring.dn[q] > rawPeak) rawPeak = ring.dn[q];
+            if (ring.up[q] > rawPeak) rawPeak = ring.up[q];
+        }
+        scaleY.peak = ease(scaleY.peak, rawPeak, 0.9, 0.12);
+        var g = OS.ribbon(ring.dn, ring.up, 84, scaleY.peak);
         rb.appendChild(g);
-        var pk = OS.brate(g._peak);
+        /* the LABEL reports the real peak in the window, never the eased
+           drawing scale — the caption is a reading, only the geometry is
+           smoothed */
+        var pk = OS.brate(rawPeak);
         /* the left edge is the OLDEST sample, so label the span the chart
            actually covers — which also makes the 1s/5s switch self-evident */
         setTxt($('#ribL'), 'last ' + OS.dur((ring.t[n - 1] - ring.t[0]) / 1000));
@@ -427,7 +454,19 @@ function drawLatency() {
     if (lost) midTxt += '  ·  ' + lost + ' lost';
 
     clear(sp);
-    var g = OS.spark(vals, 46);
+    /* Same easing as the ribbon, on both ends of the range. Latency sits in a
+       narrow band, so an outlier arriving or leaving used to re-scale the whole
+       trace and make a flat line look like it lurched. */
+    if (ok.length > 1) {
+        var lo = Math.min.apply(null, ok), hi = Math.max.apply(null, ok);
+        if (hi - lo < 4) { var c = (hi + lo) / 2; lo = c - 2; hi = c + 2; }
+        scaleY.lo = ease(scaleY.lo, lo, 0.35, 0.35);
+        scaleY.hi = ease(scaleY.hi, hi, 0.9, 0.12);
+    } else {
+        scaleY.lo = scaleY.hi = null;
+    }
+    var g = OS.spark(vals, 46,
+        (scaleY.lo != null && scaleY.hi != null) ? [scaleY.lo, scaleY.hi] : null);
     sp.appendChild(g);
     setTxt($('#spkL'), leftTxt);
     var mEl = $('#spkM');
@@ -482,11 +521,15 @@ function fastStart() {
     activeUntil = Date.now() + FAST_WINDOW;
     if (!fastTimer && !fastBusy && document.visibilityState === 'visible') {
         fastOn = true;
+        /* the two sources cover different windows; carrying one's eased scale
+           into the other would show as a slow drift after every switch */
+        scaleY.peak = scaleY.lo = scaleY.hi = null;
         fastTimer = setTimeout(fastTick, 0);
     }
 }
 function fastStop() {
     clearTimeout(fastTimer); fastTimer = null; rPrev = null; fastOn = false;
+    scaleY.peak = scaleY.lo = scaleY.hi = null;
     /* drop the live latency trace but keep array parity with the throughput
        ring, so a resumed session starts a fresh trace instead of stitching
        one across the gap */
@@ -514,7 +557,6 @@ function renderSys(d) {
 }
 function paintSys(sys) {
     var box = $('#sys'); if (!box) return;
-    clear(box);
     sys = sys || {};
     var load = parseFloat(sys.load) || 0;
     var cores = 4;
@@ -522,15 +564,36 @@ function paintSys(sys) {
     var memPct = sys.mem_total ? memUsed / sys.mem_total : 0;
     var t = sys.temp ? sys.temp / 1000 : 0;
 
+    /* Built once, then updated in place. .meter i already carries a background
+       transition, but tearing the panel down and rebuilding it every second
+       meant every segment was a brand-new element starting at its final value,
+       so the transition never had an old state to run from and the bars
+       stepped. Reusing the nodes is what makes them fade. */
     function bar(label, valTxt, frac, tone, meta) {
-        var r = el('div'); r.style.marginBottom = '14px';
-        var top = el('div'); top.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px';
-        top.appendChild(el('span', 'ro__k', label));
-        top.appendChild(el('span', 'n', valTxt)).style.fontSize = '12px';
-        r.appendChild(top);
-        r.appendChild(OS.meter(frac, tone, true));
-        if (meta) { var m = el('div', 'ro__m', meta); m.style.marginTop = '5px'; r.appendChild(m); }
-        box.appendChild(r);
+        var r = box._bars && box._bars[label];
+        if (!r) {
+            r = el('div'); r.style.marginBottom = '14px';
+            var top = el('div'); top.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px';
+            top.appendChild(el('span', 'ro__k', label));
+            r._val = el('span', 'n'); r._val.style.fontSize = '12px';
+            top.appendChild(r._val);
+            r.appendChild(top);
+            r._meter = OS.meter(0, null, true);
+            r.appendChild(r._meter);
+            r._meta = el('div', 'ro__m'); r._meta.style.marginTop = '5px';
+            r.appendChild(r._meta);
+            box.appendChild(r);
+            (box._bars = box._bars || {})[label] = r;
+        }
+        setTxt(r._val, valTxt);
+        setTxt(r._meta, meta || '');
+        r._meta.hidden = !meta;
+        if (tone) r._meter.setAttribute('data-tone', tone);
+        else r._meter.removeAttribute('data-tone');
+        var lit = Math.max(0, Math.min(12, Math.round(frac * 12)));
+        for (var i = 0; i < r._meter.children.length; i++) {
+            r._meter.children[i].className = i < lit ? 'on' : '';
+        }
     }
     bar('Load average', load.toFixed(2), Math.min(1, load / cores),
         load > cores ? 'bad' : load > cores * 0.7 ? 'warn' : null,
@@ -541,13 +604,15 @@ function paintSys(sys) {
     bar('Temperature', (t ? t.toFixed(1) : '—') + ' °C', Math.min(1, t / 100),
         t > 85 ? 'bad' : t > 75 ? 'warn' : null,
         sys.fan_rpm ? 'fan at ' + sys.fan_rpm + ' rpm' : 'fan idle');
-    var upRow = el('div');
-    upRow.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px';
-    upRow.appendChild(el('span', 'ro__k', 'Uptime'));
-    var upV = el('span', 'n', OS.dur(sys.uptime || 0));
-    upV.style.fontSize = '12px';
-    upRow.appendChild(upV);
-    box.appendChild(upRow);
+    if (!box._up) {
+        var upRow = el('div');
+        upRow.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px';
+        upRow.appendChild(el('span', 'ro__k', 'Uptime'));
+        box._up = el('span', 'n'); box._up.style.fontSize = '12px';
+        upRow.appendChild(box._up);
+        box.appendChild(upRow);
+    }
+    setTxt(box._up, OS.dur(sys.uptime || 0));
 
     /* After a storm clears, keep one quiet line pointing at what happened —
        the 2026-08-10 loop wrapped the log ring in 42s, so by the time anyone
@@ -556,12 +621,18 @@ function paintSys(sys) {
        independently: on 2026-08-10 v6 was down for an hour while v4 was perfect
        and nothing on this page said so. -1 = not sampled yet. */
     var v6 = sys.v6_loss;
-    if (v6 != null && v6 >= 0) {
-        var v6row = el('div');
-        v6row.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-top:10px';
-        v6row.appendChild(el('span', 'ro__k', 'IPv6'));
-        v6row.appendChild(OS.stateWord(v6 >= 100 ? 'UNREACHABLE' : 'REACHABLE', v6 >= 100 ? 'bad' : 'ok'));
-        box.appendChild(v6row);
+    if (!box._v6) {
+        box._v6 = el('div');
+        box._v6.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-top:10px';
+        box._v6.appendChild(el('span', 'ro__k', 'IPv6'));
+        box._v6w = el('span');
+        box._v6.appendChild(box._v6w);
+        box.appendChild(box._v6);
+    }
+    box._v6.hidden = !(v6 != null && v6 >= 0);
+    if (!box._v6.hidden) {
+        clear(box._v6w);
+        box._v6w.appendChild(OS.stateWord(v6 >= 100 ? 'UNREACHABLE' : 'REACHABLE', v6 >= 100 ? 'bad' : 'ok'));
     }
 
     var chipBox = $('#sysChip'); clear(chipBox);
