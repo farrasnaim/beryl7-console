@@ -565,13 +565,19 @@ function paintSys(sys) {
 }
 
 /* --------------------------------------------------------------- clients - */
+/* ico: the medium drawn rather than described — a port for the wired group, a
+   signal for every radio. The two headings that carried explanatory notes lost
+   them: "wired to the LAN port" restated the word Ethernet, and the IoT one
+   explained an isolation rule that belongs on the Settings page, not on a
+   heading that repeats on every poll. Blocked and Not connected keep theirs,
+   because those genuinely say something the label does not. */
 var MEDIA = {
-    eth:     { k: 'Ethernet',  note: 'wired to the LAN port' },
-    '5':     { k: '5 GHz',     note: '' },
-    '2.4':   { k: '2.4 GHz',   note: '' },
-    iot:     { k: 'IoT',       note: 'separate network — cannot reach the main one' },
-    blocked: { k: 'Blocked',   note: 'denied by MAC filter' },
-    idle:    { k: 'Not connected', note: 'known, currently offline' }
+    eth:     { k: 'Ethernet',  ico: 'eth',  note: '' },
+    '5':     { k: '5 GHz',     ico: 'wifi', note: '' },
+    '2.4':   { k: '2.4 GHz',   ico: 'wifi', note: '' },
+    iot:     { k: 'IoT',       ico: 'wifi', note: '' },
+    blocked: { k: 'Blocked',   ico: 'lock', note: 'denied by MAC filter' },
+    idle:    { k: 'Not connected', ico: 'dev', note: 'known, currently offline' }
 };
 
 function renderClients(d, M) {
@@ -594,6 +600,7 @@ function renderClients(d, M) {
         var list = groups[key];
         if (!list || !list.length) return;
         var g = el('div', 'tbl__group');
+        if (MEDIA[key].ico) g.appendChild(OS.icon(MEDIA[key].ico));
         g.appendChild(el('span', 'tbl__gk', MEDIA[key].k));
         if (MEDIA[key].note) { var nn = el('span', 'row__sub', MEDIA[key].note); g.appendChild(nn); }
         g.appendChild(el('span', 'tbl__gn', String(list.length)));

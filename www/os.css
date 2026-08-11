@@ -446,6 +446,11 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
     background:var(--face-2);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);
     position:sticky;top:0;z-index:2}
 .tbl__group:first-child{border-top:0}
+/* Group icon. Sized and coloured to sit with .tbl__gk rather than compete with
+   it — the heading is the label, the glyph is a hint. flex:none so it cannot
+   be squeezed when a long note sits beside it. */
+.tbl__group>svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;
+    stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;color:var(--ink-4)}
 .tbl__gk{font-size:12px;font-weight:600;color:var(--ink-2)}
 .tbl__gn{font-family:var(--mono);font-size:11px;color:var(--ink-4);margin-left:auto}
 .row{display:grid;align-items:center;gap:var(--s3);padding:9px var(--s5);
