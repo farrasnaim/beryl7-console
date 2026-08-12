@@ -42,9 +42,22 @@
     --sig:#3fd9be; --sig-fg:#55e2ca; --sig-solid:#3fd9be; --sig-ink:#04231f;
     --sig-dim:rgba(63,217,190,.15); --sig-line:rgba(63,217,190,.34);
 
-    --good:#22c55e;    --good-fg:#4ade80;
-    --caution:#eba13a; --caution-fg:#f2b45f;
-    --fault:#ff5a52;   --fault-fg:#ff7d76;
+    /* Status colours are deliberately DESATURATED rather than lightened. A
+       traffic-light palette at full chroma shouts on every panel at once, and a
+       page where everything shouts has no way left to say "look here" — which is
+       the one job these have. Roughly half the saturation of the originals,
+       hue and lightness kept, so they still read green / amber / red at a glance.
+
+       Softening happened in SATURATION, never in contrast. Lightening the text
+       cut would have been the obvious move and is wrong in light mode, where
+       these sit on warm paper: --good-fg was ALREADY below 4.5:1 there (4.06 on
+       --face-3) and going lighter would have pushed it further under. Measured
+       against every surface token, the new set holds >=4.5:1 for text and >=3:1
+       for graphics in both themes — and light --good rose from 2.67 to 3.45,
+       clearing a floor it used to miss. */
+    --good:#63b381;    --good-fg:#83c79c;
+    --caution:#c9a468; --caution-fg:#dcbb8b;
+    --fault:#d97b74;   --fault-fg:#e8988f;
     --idle:#5a5955;
 
     --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px;
@@ -62,9 +75,9 @@
     --ink:#16150f; --ink-2:#4e4c47; --ink-4:#65635d;
     --sig:#0b8e7c; --sig-fg:#0a6f61; --sig-solid:#0a6f61; --sig-ink:#ffffff;
     --sig-dim:rgba(11,142,124,.13); --sig-line:rgba(11,142,124,.32);
-    --good:#16a34a; --good-fg:#15803d;
-    --caution:#a9700c; --caution-fg:#7f5407;
-    --fault:#c3352c; --fault-fg:#a52a22; --idle:#a5a29a;
+    --good:#4a8760; --good-fg:#356b48;
+    --caution:#94743f; --caution-fg:#6b5324;
+    --fault:#a85a53; --fault-fg:#8c4a44; --idle:#a5a29a;
   }
 }
 :root[data-theme="dark"]{
@@ -73,8 +86,8 @@
   --ink:#f2f1ee; --ink-2:#a3a19c; --ink-4:#8a8883;
   --sig:#3fd9be; --sig-fg:#55e2ca; --sig-solid:#3fd9be; --sig-ink:#04231f;
   --sig-dim:rgba(63,217,190,.15); --sig-line:rgba(63,217,190,.34);
-  --good:#22c55e; --good-fg:#4ade80;
-  --caution:#eba13a; --caution-fg:#f2b45f; --fault:#ff5a52; --fault-fg:#ff7d76; --idle:#5a5955;
+  --good:#63b381; --good-fg:#83c79c;
+  --caution:#c9a468; --caution-fg:#dcbb8b; --fault:#d97b74; --fault-fg:#e8988f; --idle:#5a5955;
 }
 :root[data-theme="light"]{
   --bg:#eeece7; --face:#faf9f6; --face-2:#f3f1ec; --face-3:#e9e7e1;
@@ -82,8 +95,8 @@
   --ink:#16150f; --ink-2:#4e4c47; --ink-4:#65635d;
   --sig:#0b8e7c; --sig-fg:#0a6f61; --sig-solid:#0a6f61; --sig-ink:#ffffff;
   --sig-dim:rgba(11,142,124,.13); --sig-line:rgba(11,142,124,.32);
-  --good:#16a34a; --good-fg:#15803d;
-  --caution:#a9700c; --caution-fg:#7f5407; --fault:#c3352c; --fault-fg:#a52a22; --idle:#a5a29a;
+  --good:#4a8760; --good-fg:#356b48;
+  --caution:#94743f; --caution-fg:#6b5324; --fault:#a85a53; --fault-fg:#8c4a44; --idle:#a5a29a;
 }
 /* aliases: page code written against the old names keeps resolving */
 :root,:root[data-theme="dark"],:root[data-theme="light"]{
