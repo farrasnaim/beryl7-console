@@ -33,7 +33,18 @@ NAME_MAX=24
 printf 'Content-Type: application/json\r\n'
 printf 'Cache-Control: no-store\r\n\r\n'
 
-esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+# JSON forbids a raw control byte inside a string, and JSON.parse enforces it —
+# one such byte anywhere in a payload invalidates the WHOLE response, so the page
+# renders nothing and the cause is invisible. Stripping only \n\r\t left BEL, VT,
+# FF, ESC and the rest passing through verbatim; reachable through any name the
+# router did not author, e.g. a device renamed via setdev, whose own filter also
+# only removes \n\r\t.
+#
+# The range is spelled in octal, NOT as [:cntrl:]. busybox tr does not implement
+# POSIX classes and silently treats [:cntrl:] as the literal set { [ : c n t r l ] },
+# so `tr -d '[:cntrl:]'` turns "hello world" into "heo wod" — measured on this
+# router. That would have quietly corrupted every name containing c, n, t, r or l.
+esc() { printf '%s' "$1" | tr -d '\001-\037\177' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 fail() { printf '{"ok":false,"error":"%s"}' "$(esc "$1")"; exit 0; }
 
 CL="${CONTENT_LENGTH:-0}"; case "$CL" in ''|*[!0-9]*) CL=0 ;; esac
@@ -67,13 +78,39 @@ if [ "$ACTION" != "list" ]; then
     [ "$REQUEST_METHOD" = "POST" ] || fail "POST required"
     src="${HTTP_ORIGIN:-$HTTP_REFERER}"
     src="${src#*://}"; src="${src%%[:/]*}"
+    # DNS is case-insensitive and a browser echoes back whatever was typed
+    # in the address bar, so Beryl7.lan and beryl7.lan are one host. The
+    # address list is already lowercase, so this cannot affect IP matching.
+    src=$(printf '%s' "$src" | tr 'A-Z' 'a-z')
     ok=0
     case "$src" in
         "") ok=0 ;;
         localhost|127.0.0.1|::1) ok=1 ;;
         *) for ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
              [ "$ip" = "$src" ] && { ok=1; break; }
-           done ;;
+           done
+           # ...and the names this router answers to. Opening the console by
+           # name is an ordinary thing to do, and settings-api even offers a
+           # control to CHANGE the hostname — so the console hands you a way to
+           # create the condition that disables it. Without this the page loads
+           # (GET is unguarded) and every button then fails "bad origin" with
+           # nothing pointing at the cause.
+           #
+           # Read from uci at runtime, never written literally: this repository
+           # is public and a hostname baked in here is one deployment's private
+           # detail published.
+           #
+           # NOT Origin == HTTP_HOST, which is the usual fix and is wrong here.
+           # That compares two headers the caller controls to each other, so an
+           # attacker domain pointed at this router matches itself and passes.
+           # Checking against addresses the router actually owns is precisely
+           # what defeats DNS rebinding, so it stays an allowlist.
+           if [ "$ok" = 0 ]; then
+               n_h=$(uci -q get system.@system[0].hostname | tr 'A-Z' 'a-z')
+               n_d=$(uci -q get dhcp.@dnsmasq[0].domain | tr 'A-Z' 'a-z')
+               [ -n "$n_d" ] || n_d=lan
+               [ -n "$n_h" ] && { [ "$src" = "$n_h" ] || [ "$src" = "$n_h.$n_d" ]; } && ok=1
+           fi ;;
     esac
     [ "$ok" = 1 ] || fail "bad origin"
 fi
