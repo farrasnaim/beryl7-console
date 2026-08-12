@@ -99,24 +99,36 @@ www/
     repeater-api             scan/join/forget, uplink status
     tethering-api            USB device detection, modem config, uplink control
     settings-api             radios, SSIDs, hostname, timezone, DHCP, block list
+    probe-api                the Overview's ping target, and the saved list
   theme.css                  v1 design system (superseded — kept for reference)
   legacy/                    v1 pages (superseded — kept for reference)
+
+usr/share/beryl/
+  cgi-lib.sh                 helpers every *-api sources: JSON escaping, query
+                             parsing, and the POST/same-origin guard. Outside
+                             /www because uhttpd would serve it as an endpoint.
 
 usr/sbin/
   dashmon                    1-minute telemetry collector (cron)
   apwatch                    Wi-Fi AP watchdog (cron)
   vpnwatch                   optional VPN dead-tunnel handling (cron)
   beryl-vpndns               regenerates per-device VPN DNS nftables rules
+  beryl-pbrtbl               reads pbr's fwmark routing tables in one pass
+  pingmon                    1s probe; its 5-minute ring feeds the charts
 
 etc/
   crontabs/root              the three cron entries
   dashboard/classmap.example device name/class map — copy to /etc/dashboard/classmap
   hotplug.d/iface/15-travel-dns        captive-portal-safe DNS on travel uplinks
   hotplug.d/iface/31-tethering-clash   reject colliding USB subnets (HiLink!)
+  hotplug.d/iface/32-pbr-uplink        repoint pbr when the pinned uplink dies
+  hotplug.d/iface/33-uplink-width      narrow AP width to fit the uplink channel
+  hotplug.d/iface/34-vpn-resume        resume a paused tunnel when a link returns
   hotplug.d/iface/99-repeater-iot      IoT SSID off while repeating
   hotplug.d/net/30-tethering           bind any tethering netdev name
   hotplug.d/usb/40-usbmuxd             disabled stub (see its header for why)
   init.d/cpugovernor         schedutil instead of a pinned 2.0 GHz
+  init.d/pingmon             keeps pingmon running (procd, not cron)
   sysctl.d/99-local.conf     TCP MTU probing for hotel/tunnel PMTU black holes
 ```
 
@@ -185,12 +197,15 @@ tar -cf - www usr etc | ssh root@$R "tar -xf - -C /tmp/beryl7"
 ssh root@$R
 cp -r /tmp/beryl7/www/* /www/
 cp /tmp/beryl7/usr/sbin/* /usr/sbin/
+mkdir -p /usr/share/beryl && cp /tmp/beryl7/usr/share/beryl/cgi-lib.sh /usr/share/beryl/
 cp -r /tmp/beryl7/etc/hotplug.d /tmp/beryl7/etc/init.d /tmp/beryl7/etc/sysctl.d /etc/
 
-chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
-          /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
-          /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
-          /etc/hotplug.d/iface/* /etc/hotplug.d/net/30-tethering /etc/init.d/cpugovernor
+# cgi-lib.sh is sourced, not executed, so it needs no exec bit — but every CGI
+# does, and a CGI without one is a 403 with nothing in the log to explain it.
+chmod 755 /www/cgi-bin/*-api /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch \
+          /usr/sbin/beryl-vpndns /usr/sbin/beryl-pbrtbl /usr/sbin/pingmon \
+          /etc/hotplug.d/iface/* /etc/hotplug.d/net/30-tethering \
+          /etc/init.d/cpugovernor /etc/init.d/pingmon
 
 # dashmon feeds the Overview history panels; the two watchdogs are optional
 crontab -l > /tmp/cron; cat /tmp/beryl7/etc/crontabs/root >> /tmp/cron; crontab /tmp/cron

@@ -11,98 +11,27 @@
 # unauthenticated on the trusted LAN by design (see the README). Private keys
 # are never echoed back — list output returns public metadata only.
 
-POST_MAX=65536          # larger than the dashboard's: a .conf is pasted in full
+# esc, jnum, fail, read_body, urldec, qs_get, qs_get_dec, guard_post — one copy,
+# shared with every other endpoint. Tested for readability rather than sourced
+# blind: busybox ash treats `.` as a special builtin, so a missing file aborts
+# the script outright and an `|| fallback` after it never runs. Without the
+# check the failure is a 500 with an empty body and nothing in the log.
+BERYL_LIB=/usr/share/beryl/cgi-lib.sh
+if [ -r "$BERYL_LIB" ]; then
+    . "$BERYL_LIB"
+else
+    printf 'Content-Type: application/json\r\n'
+    printf 'Cache-Control: no-store\r\n\r\n'
+    printf '{"ok":false,"error":"missing %s - reinstall the console"}' "$BERYL_LIB"
+    exit 0
+fi
 
-# JSON forbids a raw control byte inside a string, and JSON.parse enforces it —
-# one such byte anywhere in a payload invalidates the WHOLE response, so the page
-# renders nothing and the cause is invisible. Stripping only \n\r\t left BEL, VT,
-# FF, ESC and the rest passing through verbatim; reachable through any name the
-# router did not author, e.g. a device renamed via setdev, whose own filter also
-# only removes \n\r\t.
-#
-# The range is spelled in octal, NOT as [:cntrl:]. busybox tr does not implement
-# POSIX classes and silently treats [:cntrl:] as the literal set { [ : c n t r l ] },
-# so `tr -d '[:cntrl:]'` turns "hello world" into "heo wod" — measured on this
-# router. That would have quietly corrupted every name containing c, n, t, r or l.
-esc() { printf '%s' "$1" | tr -d '\001-\037\177' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+POST_MAX=65536          # larger than the dashboard's: a .conf is pasted in full
 
 printf 'Content-Type: application/json\r\n'
 printf 'Cache-Control: no-store\r\n\r\n'
 
-BODY=""
-if [ "$REQUEST_METHOD" = "POST" ]; then
-    CL="${CONTENT_LENGTH:-0}"; case "$CL" in ''|*[!0-9]*) CL=0 ;; esac
-    [ "$CL" -gt "$POST_MAX" ] && { printf '{"ok":false,"error":"body too large"}'; exit 0; }
-    [ "$CL" -gt 0 ] && BODY=$(dd bs=1 count="$CL" 2>/dev/null)
-fi
-
-# URL-decode in awk, not sed: busybox sed drops the backslash in a `\\x\1`
-# replacement, so the classic sed+printf%b trick silently returns the string
-# with its escapes stripped (verified on this router) and every parsed field
-# comes back empty. awk builds the byte directly from the hex pair instead.
-urldec() {
-    printf '%s' "$1" | awk '
-    BEGIN{ for(i=0;i<16;i++){ h=sprintf("%X",i); H[h]=i; H[tolower(h)]=i } }
-    {
-      gsub(/\+/," ")
-      s=$0; n=length(s); out=""
-      for(i=1;i<=n;i++){
-        c=substr(s,i,1)
-        if(c=="%" && i+2<=n){
-          a=substr(s,i+1,1); b=substr(s,i+2,1)
-          if((a in H) && (b in H)){ out=out sprintf("%c",H[a]*16+H[b]); i+=2; continue }
-        }
-        out=out c
-      }
-      printf "%s", out
-    }'
-}
-qs_get() {
-    printf '%s' "${QUERY_STRING}&${BODY}" | tr '&' '\n' \
-      | awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}'
-}
-qs_get_dec() { urldec "$(qs_get "$1")"; }
-
-guard_post() {
-    [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; }
-    gp_src="${HTTP_ORIGIN:-$HTTP_REFERER}"
-    gp_src="${gp_src#*://}"; gp_src="${gp_src%%[:/]*}"
-    # DNS is case-insensitive and a browser echoes back whatever was typed
-    # in the address bar, so Beryl7.lan and beryl7.lan are one host. The
-    # address list is already lowercase, so this cannot affect IP matching.
-    gp_src=$(printf '%s' "$gp_src" | tr 'A-Z' 'a-z')
-    gp_ok=0
-    case "$gp_src" in
-        "") gp_ok=0 ;;
-        localhost|127.0.0.1|::1) gp_ok=1 ;;
-        *) for gp_ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
-             [ "$gp_ip" = "$gp_src" ] && { gp_ok=1; break; }
-           done
-           # ...and the names this router answers to. Opening the console by
-           # name is an ordinary thing to do, and settings-api even offers a
-           # control to CHANGE the hostname — so the console hands you a way to
-           # create the condition that disables it. Without this the page loads
-           # (GET is unguarded) and every button then fails "bad origin" with
-           # nothing pointing at the cause.
-           #
-           # Read from uci at runtime, never written literally: this repository
-           # is public and a hostname baked in here is one deployment's private
-           # detail published.
-           #
-           # NOT Origin == HTTP_HOST, which is the usual fix and is wrong here.
-           # That compares two headers the caller controls to each other, so an
-           # attacker domain pointed at this router matches itself and passes.
-           # Checking against addresses the router actually owns is precisely
-           # what defeats DNS rebinding, so it stays an allowlist.
-           if [ "$gp_ok" = 0 ]; then
-               gp_h=$(uci -q get system.@system[0].hostname | tr 'A-Z' 'a-z')
-               gp_d=$(uci -q get dhcp.@dnsmasq[0].domain | tr 'A-Z' 'a-z')
-               [ -n "$gp_d" ] || gp_d=lan
-               [ -n "$gp_h" ] && { [ "$gp_src" = "$gp_h" ] || [ "$gp_src" = "$gp_h.$gp_d" ]; } && gp_ok=1
-           fi ;;
-    esac
-    [ "$gp_ok" = 1 ] || { printf '{"ok":false,"error":"bad origin"}'; exit 0; }
-}
+read_body
 
 # Re-apply pbr safely.
 #

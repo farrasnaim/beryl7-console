@@ -74,6 +74,13 @@ cp -r $S/www/dashboard $S/www/vpn $S/www/repeater $S/www/tethering $S/www/settin
 cp -r $S/www/legacy /www/
 cp    $S/www/cgi-bin/*-api /www/cgi-bin/
 
+# The helpers every CGI sources. Outside /www on purpose: uhttpd would serve
+# anything under /www/cgi-bin as an endpoint of its own. Copied BEFORE the pages
+# above would matter, but ordering here is cosmetic — nothing runs until a
+# request arrives.
+mkdir -p /usr/share/beryl
+cp $S/usr/share/beryl/cgi-lib.sh /usr/share/beryl/
+
 # Helper daemons and the nftables generator.
 cp $S/usr/sbin/dashmon $S/usr/sbin/apwatch $S/usr/sbin/vpnwatch $S/usr/sbin/beryl-vpndns \
    $S/usr/sbin/beryl-pbrtbl $S/usr/sbin/pingmon /usr/sbin/
@@ -145,7 +152,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
          /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
          /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
-         /usr/sbin/beryl-pbrtbl \
+         /usr/sbin/beryl-pbrtbl /usr/share/beryl/cgi-lib.sh \
          /etc/dashboard /etc/crontabs/root \
          /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
          /etc/hotplug.d/iface/32-pbr-uplink \
@@ -161,8 +168,18 @@ rm -rf /tmp/beryl7'
 
 # --------------------------------------------------------------------- check --
 say "Verifying"
+# Fetch from the address uhttpd is actually bound to, not 127.0.0.1. A router
+# that narrows uhttpd to its LAN address — a reasonable thing to do, since it
+# keeps the console off the WAN — has no listener on loopback at all, so every
+# endpoint reported ERR on a console that was installed and working perfectly.
+# A verification step that fails on a correct install is worse than none.
+BASE=$(ssh -n "$TARGET" 'a=$(uci -q get uhttpd.main.listen_http 2>/dev/null | tr " " "\n" | grep -v "^\[" | head -n1)
+    a=${a%:*}
+    [ -n "$a" ] || a=$(uci -q get network.lan.ipaddr 2>/dev/null)
+    [ -n "$a" ] || a=127.0.0.1
+    echo "$a"')
 for ep in dashboard-api rate-api vpn-api repeater-api tethering-api settings-api probe-api; do
-    CODE=$(ssh -n "$TARGET" "uclient-fetch -q -O /dev/null http://127.0.0.1/cgi-bin/$ep 2>&1 && echo 200 || echo ERR")
+    CODE=$(ssh -n "$TARGET" "uclient-fetch -q -O /dev/null http://$BASE/cgi-bin/$ep 2>&1 && echo 200 || echo ERR")
     printf '  %-14s %s\n' "$ep" "$CODE"
 done
 
