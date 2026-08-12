@@ -154,7 +154,7 @@ textarea{min-height:190px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas
 <header class="appbar">
   <div class="appbar__brand">
     <span class="nav__dot" id="pulse"></span>
-    <span class="appbar__name"><span class="t-long">Farras's GL.iNet Beryl 7 🔱</span><span class="t-short">Beryl 7 🔱</span></span>
+    <span class="appbar__name"><span class="t-long">GL.iNet Beryl 7 🔱</span><span class="t-short">Beryl 7 🔱</span></span>
   </div>
   <div class="appbar__tools">
     <span class="nav__status" id="stamp">connecting…</span>
@@ -530,7 +530,7 @@ function loadDevices(){
         // "localhost" SSID check still holds if that SSID is ever moved or
         // duplicated onto another network.
         if(a.network==='iot') return;
-        if((a.info&&a.info.ssid)==='localhost') return;
+        if(a.network!=='lan') return;
         ((a.assoc&&a.assoc.results)||[]).forEach(function(c){
           var m=c.mac.toUpperCase(); if(seen[m])return; seen[m]=1;
           var cm=(d.classmap||{})[m]||{}, L=(d.leases||{})[m]||null,

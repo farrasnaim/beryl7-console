@@ -251,9 +251,10 @@ function model(d) {
        which still says how it is attached (5 / 2.4 / eth) and drives the
        signal, band and generation columns — an IoT plug is still a 2.4 GHz
        Wi-Fi 4 client and should render as one.
-       The split is by NETWORK, not by band: the IoT devices sit on 192.168.10.0
-       in their own firewall zone, while the Apple Watch is on the main LAN and
-       merely happens to use 2.4 GHz. Filing them together hid a real boundary.
+       The split is by NETWORK, not by band: smart-home devices sit on their own
+       network in their own firewall zone, while a watch may be on the main LAN
+       and merely happen to use 2.4 GHz. Filing them together hid a real
+       boundary.
        blocked/idle win, since "not connected" outranks where it would sit. */
     out.forEach(function (dv) {
         dv.group = (dv.medium === 'idle' || dv.medium === 'blocked') ? dv.medium

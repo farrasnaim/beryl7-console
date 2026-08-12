@@ -130,7 +130,7 @@ details[open] .disc::before{content:"▾ "}
 <header class="appbar">
   <div class="appbar__brand">
     <span class="nav__dot" id="pulse"></span>
-    <span class="appbar__name"><span class="t-long">Farras's GL.iNet Beryl 7 🔱</span><span class="t-short">Beryl 7 🔱</span></span>
+    <span class="appbar__name"><span class="t-long">GL.iNet Beryl 7 🔱</span><span class="t-short">Beryl 7 🔱</span></span>
   </div>
   <div class="appbar__tools">
     <span class="nav__status" id="stamp">connecting…</span>
@@ -292,9 +292,8 @@ details[open] .disc::before{content:"▾ "}
   <summary class="disc">Huawei E5577 and other MiFi units</summary>
   <div class="guide">
     Plug it in and it should just work — the E5577 presents itself as a network device
-    and serves <code>192.168.9.0/24</code>, which does not overlap your LAN
-    (<code>192.168.8.0/24</code>), your IoT network (<code>192.168.10.0/24</code>) or the
-    upstream network (<code>192.168.1.0/24</code>). Its own admin page stays reachable at
+    and serves <code>192.168.9.0/24</code>, which does not usually overlap the router's own
+    networks or the upstream one. Its own admin page stays reachable at
     <code>192.168.9.1</code> while tethered.
   </div>
 </details>

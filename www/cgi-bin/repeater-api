@@ -310,7 +310,7 @@ if [ "$ACTION" = "scan" ]; then
              [ -n "$IF24" ] && iw dev "$IF24" scan dump 2>/dev/null; } | awk '
         BEGIN { for (i=0; i<16; i++) { h=sprintf("%X",i); HX[h]=i; HX[tolower(h)]=i } }
         # iw prints any non-ASCII SSID byte as the LITERAL text \xNN (an iPhone
-        # hotspot named "Farras’s iPhone" arrives as Farras\xe2\x80\x99s iPhone).
+        # hotspot named "Alex’s iPhone" arrives as Alex\xe2\x80\x99s iPhone).
         # \x is not a valid JSON escape, so passing it through made the whole
         # response unparseable and the UI reported "Scan failed". Turn those
         # sequences back into the real bytes.

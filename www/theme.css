@@ -1,5 +1,5 @@
 /* =========================================================================
-   Beryl 7 control panel — "Farras Naim" design system (red accent)
+   Beryl 7 control panel — design system (red accent)
    Dark-first; light via html[data-theme="light"]. Self-contained, no CDN.
 
    Linked AFTER each page's inline <style> so it wins the cascade. Two things

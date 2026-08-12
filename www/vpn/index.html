@@ -514,11 +514,12 @@ function loadDevices(force) {
             if (!d || !d.ok) return;
             var seen = {}, out = [];
             (d.aps || []).forEach(function (a) {
-                /* IoT never routes through a VPN. Match the zone AND the SSID:
-                   the zone catches anything placed in iot, the name still holds
-                   if that SSID is ever moved onto another network. */
-                if (a.network === 'iot') return;
-                if ((a.info && a.info.ssid) === 'localhost') return;
+                /* Only the primary LAN routes through a VPN. Anything on a
+                   secondary network — IoT, guest, whatever it is called on a
+                   given router — is excluded by the network it sits on rather
+                   than by name. Matching a literal SSID both published this
+                   deployment's private one and broke on any other router. */
+                if (a.network !== OS.LANNET) return;
                 ((a.assoc && a.assoc.results) || []).forEach(function (c) {
                     var m = String(c.mac).toUpperCase();
                     if (seen[m]) return; seen[m] = 1;
