@@ -171,7 +171,8 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/hotplug.d/iface/34-vpn-resume \
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
          /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
-         /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api \n         /www/cgi-bin/version-api \
+         /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api \
+         /www/cgi-bin/version-api \
          /etc/init.d/beryl-vpndns; do
     grep -qxF "$p" /etc/sysupgrade.conf || echo "$p" >> /etc/sysupgrade.conf
 done
