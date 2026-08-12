@@ -549,6 +549,11 @@ if [ "$ACTION" = "setlan" ]; then
         [ -n "$CONFLICT" ] && fail "that subnet is already in use by $CONFLICT"
     fi
 
+    # Read the pool BEFORE overwriting it. The else arm below needs to tell a
+    # real pool change from a form submitted with these fields untouched, and
+    # after the `uci set` there is nothing left to compare against.
+    OLDSTART=$(uci -q get dhcp.lan.start); OLDLIMIT=$(uci -q get dhcp.lan.limit)
+    OLDLEASE=$(uci -q get dhcp.lan.leasetime)
     uci set dhcp.lan.start="$DSTART"
     uci set dhcp.lan.limit="$DLIMIT"
     uci set dhcp.lan.leasetime="$DLEASE"
@@ -574,8 +579,19 @@ if [ "$ACTION" = "setlan" ]; then
         ( sleep 2; /etc/init.d/network reload; sleep 2; /etc/init.d/uhttpd reload; /etc/init.d/dnsmasq restart ) >/dev/null 2>&1 &
         printf '{"ok":true,"moved":"%s"}' "$(esc "$IP")"
     else
-        logger -t settings "DHCP settings applied via web UI"
-        /etc/init.d/dnsmasq restart >/dev/null 2>&1
+        # The restart is NOT unconditional. dnsmasq derives its dhcp-range from
+        # exactly these three values, so a pool change does need it — but this
+        # arm also runs whenever the address was left alone, which is what
+        # happens every time the owner edits any other field on this form and
+        # saves. Restarting then takes name resolution away from every device on
+        # the network to apply a change that was not made.
+        if [ "$DSTART" != "$OLDSTART" ] || [ "$DLIMIT" != "$OLDLIMIT" ] || \
+           [ "$DLEASE" != "$OLDLEASE" ]; then
+            logger -t settings "DHCP pool changed via web UI: $OLDSTART/$OLDLIMIT/$OLDLEASE -> $DSTART/$DLIMIT/$DLEASE"
+            /etc/init.d/dnsmasq restart >/dev/null 2>&1
+        else
+            logger -t settings "LAN settings submitted via web UI with nothing changed"
+        fi
         printf '{"ok":true}'
     fi
     exit 0
