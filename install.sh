@@ -49,7 +49,13 @@ MISSING=$(ssh -n "$TARGET" 'for c in uci ubus iw nft; do command -v $c >/dev/nul
 
 # Optional packages: report, never fail. OpenWrt moved from opkg to apk, so ask
 # whichever one this build actually has.
-for pkg in pbr wireguard-tools vnstat2; do
+#
+# This list must stay identical to the README's dependency table. It named a
+# statistics package that had been removed from the router, while the Traffic
+# panel has always read nlbwmon — so a reader following the README installed the
+# wrong thing and still got an empty panel. Each of these degrades honestly when
+# absent; the warning exists to say so before you go looking for the reason.
+for pkg in pbr wireguard-tools nlbwmon; do
     ssh -n "$TARGET" "if command -v apk >/dev/null 2>&1; then apk info -e '$pkg' >/dev/null 2>&1;
                       else opkg list-installed 2>/dev/null | grep -q \"^$pkg \"; fi" \
         || warn "not installed: $pkg — the matching page will be limited (see the README)"

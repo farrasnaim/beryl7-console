@@ -147,20 +147,20 @@ Every script carries a header comment explaining what it does and, more importan
 |---|---|
 | VPN page | `pbr`, `wireguard-tools`, `kmod-wireguard` |
 | USB uplink page | `kmod-usb-net-ipheth` + `usbmuxd` (iPhone), `kmod-usb-net-rndis` (Android), `kmod-usb-net-cdc-ether`, `kmod-usb-net-cdc-ncm` / `qmi` / `mbim` + `uqmi`/`umbim` as needed |
-| Traffic panel | `vnstat2` |
+| Traffic panel | `nlbwmon` (per-device accounting; the panel says so plainly when it is absent) |
 | Travel DNS hotplug | `https-dns-proxy` (the hotplug is a no-op without it) |
 | Everything else | stock OpenWrt (`iw`, `ubus`, `uci`, `nftables`, BusyBox) |
 
 On OpenWrt 24.10 and newer (`apk`):
 
 ```sh
-apk update && apk add pbr wireguard-tools kmod-wireguard vnstat2 https-dns-proxy
+apk update && apk add pbr wireguard-tools kmod-wireguard nlbwmon https-dns-proxy
 ```
 
 On older releases (`opkg`):
 
 ```sh
-opkg update && opkg install pbr wireguard-tools kmod-wireguard vnstat2 https-dns-proxy
+opkg update && opkg install pbr wireguard-tools kmod-wireguard nlbwmon https-dns-proxy
 ```
 
 ## Installation
