@@ -29,6 +29,28 @@
 # Called by vpn-api (route/add/del) and vpnwatch (pause/resume a dead tunnel).
 NFT=/etc/nftables.d/30-beryl-vpndns.nft
 TMP="$NFT.$$"
+
+# valid_ip4 comes from the console's shared library. This is not a CGI, but the
+# check has to be the SAME one vpn-api applies at the boundary — two validators
+# that disagree is how a value passes one gate and fails the next.
+#
+# Validating here as well as there is deliberate, not belt-and-braces: vpnwatch
+# calls this script too, /etc/config/network can be hand-edited, and anything
+# stored before the boundary check existed is still in UCI unvalidated. This is
+# the last point before the value becomes nftables syntax.
+#
+# If the library is missing, no IPv4 value can be validated, so none is emitted —
+# the redirect is lost but the IPv6 protection below is not. That is the safe
+# direction: the redirect hides which resolver you use, the v6 block hides where
+# you are.
+BERYL_LIB=/usr/share/beryl/cgi-lib.sh
+if [ -r "$BERYL_LIB" ]; then
+    . "$BERYL_LIB"
+else
+    logger -t beryl-vpndns "missing $BERYL_LIB — emitting IPv6 protection only"
+    valid_ip4() { return 1; }
+fi
+
 body=""; body6=""; body6fw=""; i=0
 while [ "$i" -lt 64 ]; do
     pn=$(uci -q get pbr.@policy[$i].name 2>/dev/null) || break
@@ -39,21 +61,40 @@ while [ "$i" -lt 64 ]; do
             pif=$(uci -q get pbr.@policy[$i].interface 2>/dev/null)
             en=$(uci -q get pbr.@policy[$i].enabled 2>/dev/null)
             if [ "$en" = "1" ] && [ -n "$pif" ] && [ -n "$sa" ]; then
-                d=$(uci -q get network.$pif.dns 2>/dev/null | tr " ," "\n\n" | grep -v ":" | grep -m1 "[0-9]")
+                # The first entry that is actually a usable IPv4 literal, not
+                # merely the first one that has a digit and no colon. Those are
+                # not the same thing: a list like "dns.example.com 10.2.0.1"
+                # used to yield the hostname, which nft then refused — taking
+                # the whole ruleset, and every device's v6 protection, with it.
+                d=""
+                for _e in $(uci -q get network.$pif.dns 2>/dev/null | tr " ," "  "); do
+                    if valid_ip4 "$_e"; then d="$_e"; break; fi
+                done
                 if [ -n "$d" ]; then
                     body="$body	meta nfproto ipv4 ether saddr $sa udp dport 53 counter dnat ip to $d comment \"!vpn-dns $pn\"
 	meta nfproto ipv4 ether saddr $sa tcp dport 53 counter dnat ip to $d comment \"!vpn-dns $pn\"
 "
-                    body6="$body6	meta nfproto ipv6 ether saddr $sa udp dport 53 counter reject comment \"!vpn-dns6 $pn\"
+                fi
+
+                # The v6 chains are emitted for every routed device, WHETHER OR
+                # NOT the tunnel has a usable resolver.
+                #
+                # They used to sit inside the `if [ -n "$d" ]` above, which meant
+                # a tunnel with no DNS line in its .conf — ordinary for anything
+                # that is not Proton — silently gave its routed devices no IPv6
+                # protection at all, while the VPN page showed them routed. The
+                # two are unrelated: these rules match on the device's MAC and do
+                # not reference $d. Coupling them made a missing resolver into a
+                # location leak.
+                body6="$body6	meta nfproto ipv6 ether saddr $sa udp dport 53 counter reject comment \"!vpn-dns6 $pn\"
 	meta nfproto ipv6 ether saddr $sa tcp dport 53 counter reject with tcp reset comment \"!vpn-dns6 $pn\"
 "
-                    # Everything leaving this device over v6, not just DNS. TCP
-                    # gets a reset so Happy Eyeballs abandons v6 immediately
-                    # rather than waiting out a timeout on every connection.
-                    body6fw="$body6fw	meta nfproto ipv6 ether saddr $sa meta l4proto tcp counter reject with tcp reset comment \"!vpn-v6 $pn\"
+                # Everything leaving this device over v6, not just DNS. TCP
+                # gets a reset so Happy Eyeballs abandons v6 immediately
+                # rather than waiting out a timeout on every connection.
+                body6fw="$body6fw	meta nfproto ipv6 ether saddr $sa meta l4proto tcp counter reject with tcp reset comment \"!vpn-v6 $pn\"
 	meta nfproto ipv6 ether saddr $sa counter reject comment \"!vpn-v6 $pn\"
 "
-                fi
             fi ;;
     esac
     i=$((i+1))
