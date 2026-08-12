@@ -51,7 +51,36 @@ else
     valid_ip4() { return 1; }
 fi
 
-body=""; body6=""; body6fw=""; i=0
+# Why a marker file at all, when the console could just look at this script's
+# output: because the output is not the authority. fw4 can be reloaded by
+# anything after this script last ran, and the file on disk is what fw4 reads at
+# boot — so the console reads the FACT (are the v6 rules actually loaded?) from
+# the kernel, and only the REASON from here. This script is the one thing that
+# knows WHY a policy got no rules, because it is the one holding $d.
+#
+# /etc/dashboard, not /tmp: this script never runs at boot (only vpn-api and
+# vpnwatch call it), so a degraded ruleset survives a reboot while a /tmp marker
+# would not — the two would diverge in exactly the direction that hides the
+# problem. /etc/dashboard is already the console's persistent state directory
+# and is already listed in sysupgrade.conf.
+STATEF=/etc/dashboard/vpndns-state
+write_state() {          # $1 = ok | nodns | rejected | rejected-v6only
+    mkdir -p /etc/dashboard 2>/dev/null
+    { printf 'state=%s\n' "$1"
+      printf 'nodns=%s\n' "$nodns"
+      printf 'ts=%s\n' "$(date +%s 2>/dev/null)"
+    } > "$STATEF.tmp" 2>/dev/null || return 0
+    # Only touch flash when something actually changed. The timestamp is
+    # deliberately excluded from that comparison, or every run would be a write.
+    if [ -f "$STATEF" ] &&
+       [ "$(grep -v '^ts=' "$STATEF" 2>/dev/null)" = "$(grep -v '^ts=' "$STATEF.tmp")" ]; then
+        rm -f "$STATEF.tmp"; return 0
+    fi
+    mv "$STATEF.tmp" "$STATEF" 2>/dev/null
+}
+base_state() { [ -n "$nodns" ] && printf 'nodns' || printf 'ok'; }
+
+body=""; body6=""; body6fw=""; nodns=""; i=0
 while [ "$i" -lt 64 ]; do
     pn=$(uci -q get pbr.@policy[$i].name 2>/dev/null) || break
     [ -n "$pn" ] || break
@@ -74,6 +103,12 @@ while [ "$i" -lt 64 ]; do
                     body="$body	meta nfproto ipv4 ether saddr $sa udp dport 53 counter dnat ip to $d comment \"!vpn-dns $pn\"
 	meta nfproto ipv4 ether saddr $sa tcp dport 53 counter dnat ip to $d comment \"!vpn-dns $pn\"
 "
+                else
+                    # Recorded, not silently accepted: this device's DNS still
+                    # resolves from the home uplink, which is a smaller leak than
+                    # the v6 one below but is still a leak, and the owner cannot
+                    # fix what nothing tells them about.
+                    nodns="$nodns $pn"
                 fi
 
                 # The v6 chains are emitted for every routed device, WHETHER OR
@@ -106,12 +141,18 @@ done
     printf "chain beryl_vpndns6_fw {\n\ttype filter hook forward priority filter - 5; policy accept;\n%s}\n" "$body6fw"
 } > "$TMP" 2>/dev/null
 [ -s "$TMP" ] || { rm -f "$TMP"; exit 1; }
-cmp -s "$TMP" "$NFT" 2>/dev/null && { rm -f "$TMP"; exit 0; }
+# An unchanged file means the previous run installed this exact ruleset and fw4
+# accepted it — had it been rejected, the fallback would have left the degraded
+# file on disk and this comparison would differ, which is what makes a later run
+# retry by itself. So the state is whatever the policy walk just found.
+cmp -s "$TMP" "$NFT" 2>/dev/null && { rm -f "$TMP"; write_state "$(base_state)"; exit 0; }
 mv "$TMP" "$NFT"
 if fw4 check >/dev/null 2>&1; then
     /etc/init.d/firewall reload >/dev/null 2>&1
+    write_state "$(base_state)"
 else
     logger -t beryl-vpndns "ruleset rejected by fw4 — falling back to no redirects"
     printf "chain beryl_vpndns {\n\ttype nat hook prerouting priority dstnat - 5; policy accept;\n}\n" > "$NFT"
     /etc/init.d/firewall reload >/dev/null 2>&1
+    write_state rejected
 fi

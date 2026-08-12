@@ -936,6 +936,31 @@ function render(d) {
         n.style.marginBottom = '12px';
         alerts.appendChild(n);
     }
+    /* IPv6 leak protection: three states that all look like "routed and fine"
+       on this page, and each has a different remedy. The fact comes from the
+       live kernel ruleset, the reason from what the generator recorded — a
+       tunnel with no usable resolver and a ruleset the firewall refused both
+       end in "fewer rules than expected". Warn only. Nothing here pauses a
+       policy: releasing a device to the home uplink is the OPEN fail mode, and
+       applying it unasked would swap a partial leak for a total one. */
+    var vd = d.vpndns;
+    if (vd && vd.state === 'unprotected') {
+        var n3 = OS.note('IPv6 leak protection is NOT in force. ' + vd.routed +
+            (vd.routed > 1 ? ' devices are' : ' device is') + ' routed through a tunnel, ' +
+            'but the firewall is carrying no IPv6 rules for them — their IPv6 traffic is ' +
+            'going out through the home uplink in clear, with the tunnel still up. ' +
+            'The generated ruleset was refused; check the tunnel DNS values.', 'bad');
+        n3.style.marginBottom = '12px';
+        alerts.appendChild(n3);
+    } else if (vd && vd.state === 'nodns' && (vd.nodns || []).length) {
+        var n4 = OS.note('No usable DNS server on ' +
+            (vd.nodns.length > 1 ? vd.nodns.length + ' routed tunnels' : 'a routed tunnel') +
+            '. IPv6 is still blocked for the affected devices, so the location leak is ' +
+            'closed, but their DNS is answered from the home uplink rather than inside the tunnel. ' +
+            'Add a DNS line to the tunnel config to close it.', 'warn');
+        n4.style.marginBottom = '12px';
+        alerts.appendChild(n4);
+    }
     var now = d.ts || Math.floor(Date.now() / 1e3);
     var dead = (d.tunnels || []).filter(function (t) {
         return !t.disabled && tunnelState(t, now).tone === 'bad';

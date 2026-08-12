@@ -537,7 +537,15 @@ if [ "$ACTION" = "route" ]; then
         ip link show "$IFACE" >/dev/null 2>&1 || \
             WARN="tunnel is not connected — press Connect to activate this route"
 
-        VDNS=$(uci -q get network.$IFACE.dns | awk '{print $1}')
+        # The resolver the generator will ACTUALLY use, found the same way it
+        # finds it — the first entry that is a usable IPv4 literal. `{print $1}`
+        # simply took the first entry, so a tunnel listing IPv6 first reported a
+        # resolver that was never going to be used, and one whose first entry
+        # was unusable reported that instead of the working one behind it.
+        VDNS=""
+        for _e in $(uci -q get network.$IFACE.dns 2>/dev/null | tr ' ,' '  '); do
+            if valid_ip4 "$_e"; then VDNS="$_e"; break; fi
+        done
 
         # The IPv6 bypass is closed by beryl-vpndns, called through
         # rebuild_vpn_dns below. pbr only marks IPv4 (ipv6_enabled=0) and these
@@ -627,8 +635,38 @@ done
 FM=$(cat "$FAILMODE_FILE" 2>/dev/null); case "$FM" in open|closed) ;; *) FM=closed ;; esac
 AUTOP=$(grep -c . /etc/dashboard/vpn-autopaused 2>/dev/null); case "$AUTOP" in ''|*[!0-9]*) AUTOP=0 ;; esac
 
-printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"failmode":"%s","autopaused":%s,"tunnels":[%s],"policies":[%s]}' \
+# ---- is the IPv6 leak protection actually in force? ----
+# The FACT comes from the kernel, not from the generated file and not from a
+# marker. fw4 can be reloaded by anything after beryl-vpndns last ran, and the
+# file on disk is only what fw4 reads at boot — so "does the live forward chain
+# carry rules" is the only question whose answer cannot be stale. ~8ms against
+# this endpoint's ~205ms, on a 5s poll.
+#
+# The REASON comes from the marker beryl-vpndns writes, because it is the only
+# thing that knows WHY a policy got no rules: a tunnel with no usable resolver
+# and a ruleset fw4 refused both end in "fewer rules than expected", and they
+# have different remedies. Distinguishing them was the whole point.
+V6RULES=$(nft list chain inet fw4 beryl_vpndns6_fw 2>/dev/null | grep -c 'saddr')
+case "$V6RULES" in ''|*[!0-9]*) V6RULES=0 ;; esac
+ROUTED=$(printf '%s' "$POLS" | grep -o '"enabled":true' | grep -c .)
+case "$ROUTED" in ''|*[!0-9]*) ROUTED=0 ;; esac
+VSTATE=ok; VNODNS=""
+if [ -r /etc/dashboard/vpndns-state ]; then
+    VSTATE=$(sed -n 's/^state=//p' /etc/dashboard/vpndns-state | head -1)
+    VNODNS=$(sed -n 's/^nodns=//p' /etc/dashboard/vpndns-state | head -1)
+    case "$VSTATE" in ok|nodns|rejected|rejected-v6only) ;; *) VSTATE=ok ;; esac
+fi
+# The kernel overrules the marker: no live v6 rules while devices are routed is
+# "unprotected" whatever the marker last recorded.
+[ "$ROUTED" -gt 0 ] && [ "$V6RULES" = 0 ] && VSTATE=unprotected
+[ "$ROUTED" = 0 ] && VSTATE=idle
+VN=""
+for _p in $VNODNS; do VN="$VN${VN:+,}\"$(esc "$_p")\""; done
+
+printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"failmode":"%s","autopaused":%s,"tunnels":[%s],"policies":[%s],' \
     "$(date +%s)" \
     "$( [ "$(uci -q get pbr.config.enabled)" = "1" ] && echo true || echo false )" \
     "$FM" "$AUTOP" \
     "$TUNS" "$POLS"
+printf '"vpndns":{"state":"%s","v6_rules":%s,"routed":%s,"nodns":[%s]}}' \
+    "$VSTATE" "$(jnum "$V6RULES")" "$(jnum "$ROUTED")" "$VN"
