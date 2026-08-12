@@ -6,6 +6,16 @@ PRES=/tmp/.presence
 SNAP=/tmp/.dashmon.sta
 now=$(date +%s)
 
+# ---- heartbeat ---------------------------------------------------------------
+# Written where this script legitimately FINISHES, never at the top and never
+# from a trap on EXIT — the top proves only that cron fired it, and a trap fires
+# on a crash too. See apwatch for the full reasoning; the name is derived from $0
+# so the file written and the file looked for cannot drift apart. /tmp, not
+# flash: this runs every minute.
+HB=/tmp/.hb-${0##*/}
+beat() { read -r _hb _ < /proc/uptime 2>/dev/null; printf '%s
+' "${_hb%.*}" > "$HB" 2>/dev/null; return 0; }
+
 # ---- WAN reachability, for the status LED below -----------------------------
 # Three packets, once a minute, and nothing is kept. This used to append a row
 # to a 4-hour ring at /tmp/.wanlat; that ring was deleted 2026-08-11 because
@@ -128,3 +138,6 @@ if [ "$_snapday" != "$_today" ]; then
         fi
     fi
 fi
+
+# Reached the end of every probe and every write above.
+beat

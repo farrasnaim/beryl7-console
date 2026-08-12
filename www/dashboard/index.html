@@ -24,6 +24,7 @@
          that panel; this is for conditions that make the rest of the page
          beside the point, which today means "there is no firewall". -->
     <div id="alerts"></div>
+    <div id="jobs"></div>
 
     <!-- THE HERO: the network, drawn directly on the page. No container —
          the topology is the product, not a widget inside it. -->
@@ -1653,11 +1654,39 @@ function renderFirewall(d) {
     box.appendChild(n);
 }
 
+/* The background jobs that fix things without being asked. They share one
+   crontab and die together, and until now nothing said whether any of them was
+   alive — which matters most for apwatch, the watchdog that exists precisely for
+   the case where a traveller has only a phone and a dead radio.
+
+   Two diagnoses, two remedies, so they are not collapsed into one sentence. */
+function renderJobs(d) {
+    var box = $('#jobs');
+    if (!box) return;
+    clear(box);
+    var j = d.jobs;
+    if (!j || j.state !== 'stale' || !(j.stale || []).length) return;
+    var names = { dashmon: 'history and reachability', apwatch: 'the Wi-Fi watchdog',
+                  vpnwatch: 'automatic VPN release' };
+    var which = j.stale.map(function (n) { return names[n] || n; }).join(', ');
+    var n = OS.note(j.cron === false
+        ? 'The scheduler is not running, so nothing that recovers this router on its own ' +
+          'is running either — including the Wi-Fi watchdog that restarts a radio when it ' +
+          'stops answering. Restart it over SSH with:  /etc/init.d/cron restart'
+        : 'A background job has stopped completing: ' + which + '. The scheduler itself is ' +
+          'still running, so this is that job failing rather than the whole schedule. ' +
+          'Its log lines are under Settings, in the system log.',
+        'warn');
+    n.style.marginBottom = '14px';
+    box.appendChild(n);
+}
+
 function render(d) {
     if (!d || !d.ok) return;
     last = d;
     var M = model(d);
     renderFirewall(d);
+    renderJobs(d);
     renderTopo(d, M);
     renderSys(d);
     renderClients(d, M);

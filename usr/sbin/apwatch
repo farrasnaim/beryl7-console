@@ -32,13 +32,35 @@
 STATE=/tmp/.apwatch.strikes
 LOG="logger -t apwatch"
 
+# ---- heartbeat ---------------------------------------------------------------
+# Written at every point this script legitimately FINISHES, never at the top and
+# never from a trap on EXIT. The top would only prove cron fired it, so a job
+# dying on line two would still look healthy; a trap fires on a crash too, which
+# is the same lie one level up. Reaching one of these calls means this script got
+# to the end of its logic and decided what to do — including deciding to do
+# nothing, which is a correct outcome, not a failure.
+#
+# The name is derived from $0 rather than written out, so the file this job
+# stamps and the file the console looks for cannot drift apart.
+#
+# /tmp, not /etc/dashboard: this runs every minute, and 1440 flash writes a day
+# per job is exactly the wear this project keeps its ring buffers in RAM to
+# avoid. Uptime rather than wall clock, for the reason dashmon states about
+# .wanreach — an NTP step must not be able to make a fresh stamp look ancient.
+HB=/tmp/.hb-${0##*/}
+beat() { read -r _hb _ < /proc/uptime 2>/dev/null; printf '%s
+' "${_hb%.*}" > "$HB" 2>/dev/null; return 0; }
+
 MIN_UPTIME=600          # don't act during the first 10 min (boot still settling)
 
 uptime_s=$(cut -d. -f1 /proc/uptime 2>/dev/null); : "${uptime_s:=0}"
-[ "$uptime_s" -lt "$MIN_UPTIME" ] && exit 0
+# Standing back while boot settles is a correct outcome, so it stamps. Without
+# this the watchdog that exists for the phone-only case would report itself dead
+# for the first ten minutes of every boot.
+[ "$uptime_s" -lt "$MIN_UPTIME" ] && { beat; exit 0; }
 
 # A repeater connect legitimately tears radios down for a few seconds.
-[ -f /tmp/.repeater-trying ] && exit 0
+[ -f /tmp/.repeater-trying ] && { beat; exit 0; }
 
 # Which AP sections are *supposed* to be running right now?
 want=0; have=0; missing=""
@@ -66,10 +88,11 @@ for sec in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/
 done
 
 # No APs configured at all? Nothing to guard.
-[ "$want" -gt 0 ] || exit 0
+[ "$want" -gt 0 ] || { beat; exit 0; }
 
 if [ "$have" -ge "$want" ]; then
     [ -f "$STATE" ] && { rm -f "$STATE"; $LOG "all $want AP(s) healthy again"; }
+    beat
     exit 0
 fi
 
@@ -82,4 +105,5 @@ case "$strikes" in
     1) $LOG "recovery: wifi up";     wifi up     >/dev/null 2>&1 ;;
     *) $LOG "recovery: wifi reload"; wifi reload >/dev/null 2>&1 ;;
 esac
+beat
 exit 0

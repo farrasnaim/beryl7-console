@@ -803,6 +803,66 @@ printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_t
     "$(esc "$HOST")" "$UP" "$TEMP" "$FAN" "$(esc "$LOAD")" "$(jnum "$MEMT")" "$(jnum "$MEMA")" "$V6LOSS"
 printf '"ovl_total":%s,"ovl_used":%s,"wan_uptime":%s,"firewall":"%s"},' \
     "$OVLT" "$OVLU" "${UPSECS:--1}" "$FWSTATE"
+
+# ---- are the background jobs still completing? ------------------------------
+# dashmon, apwatch and vpnwatch share one crontab line each and therefore live or
+# die together. Nothing surfaced whether any of them was alive, which matters
+# most for apwatch: it exists because a failed radio reload leaves a traveller
+# "with only a phone... no AP, no dashboard, no SSH", so its silent death removes
+# the recovery the whole travelling story depends on.
+#
+# Each job stamps /tmp/.hb-<name> with the uptime at which it FINISHED its work.
+# Freshness of that stamp is the observable; process presence is not, because
+# vpnwatch exits immediately by design whenever the fail mode is closed.
+#
+# GRACE, 180s. The stamps live in RAM and are gone after a reboot, so before the
+# first cron tick every job is "stale" and a bare check would cry wolf on every
+# single start-up — the most frequent condition on a travel router. cron can take
+# up to 60s to reach the first tick, the jobs take a moment, and one missed tick
+# should not fire; 180s covers all of that. Deliberately NOT apwatch's
+# MIN_UPTIME=600, which is the right number for leaving radios alone while boot
+# settles and the wrong one here: it would blind this check for ten minutes after
+# every boot. apwatch stamps from its very first run precisely so that standing
+# back during those ten minutes reads as healthy rather than dead.
+#
+# STALE, 150s. The jobs run every minute and a slow one can stamp a few seconds
+# late, so ~65s between stamps is normal; 150s tolerates a fully missed tick
+# without complaining and still surfaces a dead cron inside three minutes. Same
+# window as .wanreach, which is the same class of signal.
+#
+# The cron daemon is only asked about when a stamp is already stale — 40ms, and
+# the healthy path should not pay it. It separates two diagnoses with different
+# remedies: cron itself down, versus one job failing while the others run.
+JOBS_STATE=ok; JOBS_STALE=""; JOBS_CRON=true
+if [ "$_upnow" -lt 180 ]; then
+    JOBS_STATE=grace
+else
+    # `read`, not `cat`: this is on the healthy path of a 5s poll and four forks
+    # measured ~38ms, which is most of what this whole check costs.
+    _fmj=""; [ -f /etc/dashboard/vpn-failmode ] && read -r _fmj < /etc/dashboard/vpn-failmode 2>/dev/null
+    case "$_fmj" in open|closed) ;; *) _fmj=closed ;; esac
+    for _j in dashmon apwatch vpnwatch; do
+        # A dead vpnwatch under the CLOSED fail mode is latent, not present, harm:
+        # it has nothing to release. Warning about it here would be warning about
+        # something currently harmless, which is how an alarm earns a reflex to
+        # dismiss it. The VPN page reports it where it actually bites — on the
+        # promise that devices get released, which only exists under open.
+        [ "$_j" = vpnwatch ] && [ "$_fmj" != open ] && continue
+        _hbv=""; [ -f "/tmp/.hb-$_j" ] && read -r _hbv < "/tmp/.hb-$_j" 2>/dev/null
+        case "$_hbv" in ''|*[!0-9]*) _hbv=-1 ;; esac
+        _hbage=$((_upnow - _hbv))
+        if [ "$_hbv" -lt 0 ] || [ "$_hbage" -lt 0 ] || [ "$_hbage" -gt 150 ]; then
+            JOBS_STALE="$JOBS_STALE $_j"
+        fi
+    done
+    if [ -n "$JOBS_STALE" ]; then
+        JOBS_STATE=stale
+        /etc/init.d/cron running >/dev/null 2>&1 || JOBS_CRON=false
+    fi
+fi
+_jl=""
+for _j in $JOBS_STALE; do _jl="$_jl${_jl:+,}\"$(esc "$_j")\""; done
+printf '"jobs":{"state":"%s","cron":%s,"stale":[%s]},' "$JOBS_STATE" "$JOBS_CRON" "$_jl"
 # ---- per-lane byte counters -------------------------------------------------
 # Every lane drawn on the topology is exactly one netdev: each AP has its own
 # wireless interface, and the wired lane is the LAN bridge's non-wireless port(s). One

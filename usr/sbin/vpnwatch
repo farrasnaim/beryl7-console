@@ -19,14 +19,28 @@
 # tunnel returns, the policy is re-enabled automatically. Only policies THIS
 # script paused are ever resumed, so a deliberate manual pause is never undone.
 
+# ---- heartbeat ---------------------------------------------------------------
+# Written where this script legitimately FINISHES, never at the top and never
+# from a trap on EXIT — the top proves only that cron fired it, and a trap fires
+# on a crash too. See apwatch for the full reasoning; the name is derived from $0
+# so the file written and the file looked for cannot drift apart. /tmp, not
+# flash: this runs every minute.
+HB=/tmp/.hb-${0##*/}
+beat() { read -r _hb _ < /proc/uptime 2>/dev/null; printf '%s
+' "${_hb%.*}" > "$HB" 2>/dev/null; return 0; }
+
 MODEFILE=/etc/dashboard/vpn-failmode
 MARK=/etc/dashboard/vpn-autopaused      # persistent: must survive a reboot
 STALE_AFTER=180                         # seconds without a handshake = down
 LOG="logger -t vpnwatch"
 
 mode=$(cat "$MODEFILE" 2>/dev/null); : "${mode:=closed}"
-[ "$mode" = "open" ] || exit 0
+# Closed fail mode gives this script nothing to do, and doing nothing correctly
+# is a completion, not a failure — so it stamps.
+[ "$mode" = "open" ] || { beat; exit 0; }
 
+# Deliberately does NOT stamp. A missing state directory is a broken install,
+# not an idle tick, and reporting it as a healthy run is how a real fault hides.
 [ -d /etc/dashboard ] || exit 0
 touch "$MARK" 2>/dev/null
 
@@ -83,4 +97,5 @@ if [ "$changed" = "1" ]; then
     [ -x /usr/sbin/beryl-vpndns ] && /usr/sbin/beryl-vpndns   # DNS redirects must follow the pause/resume
     /etc/init.d/pbr reload >/dev/null 2>&1 || /etc/init.d/pbr restart >/dev/null 2>&1
 fi
+beat
 exit 0

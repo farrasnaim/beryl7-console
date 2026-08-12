@@ -740,6 +740,27 @@ for _p in $VNODNS; do VN="$VN${VN:+,}\"$(esc "$_p")\""; done
 PBRACT=$(ip rule show 2>/dev/null | grep -c 'lookup pbr_')
 case "$PBRACT" in ''|*[!0-9]*) PBRACT=0 ;; esac
 
+# ---- is the thing that makes the fail-open promise still running? ----
+# Under the open fail mode this page tells the owner that devices "will be
+# released to the normal uplink automatically". That release is vpnwatch's job,
+# from cron. A stale reading is a false statement about the past that someone can
+# catch by looking; a promise is a claim about the future that they act on by NOT
+# looking, which is why it has to be conditional on something observable.
+#
+# vpnwatch's OWN stamp, not the shared cron signal — the shared one would be the
+# proxy trap a level up, since cron can be alive while this one job is missing
+# from the crontab or failing. Same 180s grace and 150s window as the Overview,
+# for the same reasons. -1 means the router has not been up long enough to know,
+# and the page must not make the promise on that either.
+VW=-1
+if [ "$(cut -d. -f1 /proc/uptime 2>/dev/null)" -ge 180 ] 2>/dev/null; then
+    _vwu=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+    _vwh=""; [ -f /tmp/.hb-vpnwatch ] && read -r _vwh < /tmp/.hb-vpnwatch 2>/dev/null
+    case "$_vwh" in ''|*[!0-9]*) _vwh=-1 ;; esac
+    _vwa=$((_vwu - _vwh))
+    if [ "$_vwh" -ge 0 ] && [ "$_vwa" -ge 0 ] && [ "$_vwa" -le 150 ]; then VW=1; else VW=0; fi
+fi
+
 printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"pbr_active":%s,"pbr_rules":%s,"failmode":"%s","autopaused":%s,"tunnels":[%s],"policies":[%s],' \
     "$(date +%s)" \
     "$( [ "$(uci -q get pbr.config.enabled)" = "1" ] && echo true || echo false )" \
@@ -747,5 +768,6 @@ printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"pbr_active":%s,"pbr_rules":%s,"fail
     "$(jnum "$PBRACT")" \
     "$FM" "$AUTOP" \
     "$TUNS" "$POLS"
-printf '"vpndns":{"state":"%s","v6_rules":%s,"routed":%s,"chain":%s,"nodns":[%s]}}' \
+printf '"vpndns":{"state":"%s","v6_rules":%s,"routed":%s,"chain":%s,"nodns":[%s]},' \
     "$VSTATE" "$(jnum "$V6RULES")" "$(jnum "$ROUTED")" "$V6CHAIN" "$VN"
+printf '"vpnwatch":%s}' "$(jnum "$VW")"

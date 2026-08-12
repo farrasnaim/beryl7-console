@@ -1052,8 +1052,21 @@ function render(d) {
     if (dead.length) {
         var n2 = OS.note(dead.map(function (t) { return t.label || t.name; }).join(', ') +
             (dead.length > 1 ? ' are not passing traffic.' : ' is not passing traffic.') +
+            /* The open-mode sentence is a PROMISE about the future, and the
+               thing that keeps it is vpnwatch, from cron. A promise is acted on
+               by not looking, so it is only made when the console can see
+               vpnwatch still completing — its own stamp, not the shared cron
+               signal, because cron can be alive while this one job is missing
+               from the crontab. d.vpnwatch: 1 fresh, 0 stale, -1 too early to
+               know. On anything but 1 the page says what it actually knows. */
             (d.failmode === 'open'
-                ? ' Devices on it will be released to the normal uplink automatically.'
+                ? (d.vpnwatch === 1
+                    ? ' Devices on it will be released to the normal uplink automatically.'
+                    : d.vpnwatch === 0
+                        ? ' Automatic release is NOT running, so devices pinned to it stay ' +
+                          'without internet until the tunnel recovers or you pause them by hand.'
+                        : ' Automatic release has not reported in yet, so do not count on it ' +
+                          'until it has.')
                 : ' Devices pinned to it have no internet until it recovers.'), 'warn');
         n2.style.marginBottom = '12px';
         alerts.appendChild(n2);
