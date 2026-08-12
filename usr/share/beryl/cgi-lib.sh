@@ -64,6 +64,66 @@ jbool() { case "$1" in 1|true) printf 'true' ;; *) printf 'false' ;; esac; }
 
 fail() { printf '{"ok":false,"error":"%s"}' "$(esc "$1")"; exit 0; }
 
+# ---------------------------------------------------------------- address ---
+# A literal unicast IPv4 address and nothing else.
+#
+# NOT a hostname: probe-api resolving one could go out through the VPN, or fail
+# during exactly the outage the probe exists to measure. vpn-api has a second
+# reason — an unresolvable name reaching nft aborts the whole ruleset, and a
+# resolvable one silently pins whatever it resolved to at load time. NOT
+# multicast or broadcast, which mean nothing as a round-trip target or a
+# resolver. A LAN address IS allowed: both callers have legitimate uses for one.
+valid_ip4() {
+    case "$1" in
+        ''|*[!0-9.]*|*..*|.*|*.) return 1 ;;
+    esac
+    _c=0; _first=""
+    _oldifs=$IFS; IFS=.
+    for _o in $1; do
+        case "$_o" in ''|*[!0-9]*) IFS=$_oldifs; return 1 ;; esac
+        [ "${#_o}" -gt 3 ] && { IFS=$_oldifs; return 1; }
+        [ "$_o" -gt 255 ] && { IFS=$_oldifs; return 1; }
+        _c=$((_c + 1))
+        [ "$_c" = 1 ] && _first=$_o
+    done
+    IFS=$_oldifs
+    [ "$_c" = 4 ] || return 1
+    [ "$_first" = 0 ] && return 1            # "this network"
+    [ "$_first" -ge 224 ] && return 1        # multicast, and 255.x broadcast
+    return 0
+}
+
+# A literal IPv6 address. A sanity check, NOT a full RFC 4291 parser: its job is
+# to keep things that are not addresses out of a config file, and the one caller
+# that could reach nft syntax consumes only IPv4 anyway. Accepts the embedded
+# IPv4 form (::ffff:10.0.0.1) because that is a real way to write a resolver.
+valid_ip6() {
+    case "$1" in
+        ''|*[!0-9A-Fa-f:.]*) return 1 ;;
+        *:::*) return 1 ;;                   # ":::" is never valid
+        *::*::*) return 1 ;;                 # at most one "::"
+        *:*) ;;                              # must contain a colon
+        *) return 1 ;;
+    esac
+    case "$1" in ::*) ;; :*) return 1 ;; esac    # a lone leading colon
+    case "$1" in *::) ;; *:) return 1 ;; esac    # a lone trailing colon
+    # NOT _oldifs: valid_ip4 uses that name for its own save/restore, and calling
+    # it from inside this loop would overwrite the IFS this function has to put
+    # back — leaving IFS as ":" for the rest of the request.
+    _n=0; _v6ifs=$IFS; IFS=:
+    for _g in $1; do
+        [ -n "$_g" ] || continue             # the empty group of "::"
+        case "$_g" in
+            *.*) valid_ip4 "$_g" || { IFS=$_v6ifs; return 1; }
+                 _n=$((_n + 2)) ;;           # an embedded v4 fills two groups
+            *)   [ "${#_g}" -gt 4 ] && { IFS=$_v6ifs; return 1; }
+                 _n=$((_n + 1)) ;;
+        esac
+    done
+    IFS=$_v6ifs
+    [ "$_n" -ge 1 ] && [ "$_n" -le 8 ]
+}
+
 # ----------------------------------------------------------------- request ---
 # Read the POST body up-front and bounded, into BODY, so `action` can be parsed
 # from it before dispatch — qs_get looks in QUERY_STRING and BODY together, so

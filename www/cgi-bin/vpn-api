@@ -310,7 +310,58 @@ if [ "$ACTION" = "add" ]; then
         [ -n "$a" ] && uci add_list network.$IFACE.addresses="$a"
     done
     IFS="$old_ifs"
-    [ -n "$IDNS" ] && uci set network.$IFACE.dns="$(printf '%s' "$IDNS" | tr -d ' ' | tr ',' ' ')"
+
+    # --- the DNS list, validated per entry -----------------------------------
+    # This value is UNTRUSTED. The whole UX of this page is "paste the config
+    # your provider gave you", and people paste .conf files they have not read
+    # line by line. It used to be stored with nothing but a presence check while
+    # the keys got a charset check and the port a numeric one — and it is the
+    # only field from the .conf that reaches nftables syntax, because
+    # beryl-vpndns interpolates it straight into `dnat ip to $d`.
+    #
+    # Measured on this router with `nft --check`, that mattered three ways:
+    #   10.2.0.1;drop      ACCEPTED — ';' separates statements, so the rest is
+    #                      appended to the rule as another nft statement
+    #   1.2.3.4/24         ACCEPTED — DNATs across a whole range
+    #   dns.example.com    REJECTED — and a rejected ruleset takes the IPv6 leak
+    #                      protection down with it, for every routed device
+    #
+    # Trailing comments are stripped here because the .conf parser only handles
+    # WHOLE-line comments (its `line ~ /^#/` branch), so `DNS = 10.2.0.1 # Proton`
+    # arrived intact and `tr -d ' '` then welded it into one token.
+    #
+    # Per ENTRY, not per string: several resolvers is a normal thing to list.
+    # IPv6 entries are kept — `DNS = 10.2.0.1, fd00::1` is a valid config and
+    # refusing it would break tunnels that work today. The generator consumes
+    # only the first IPv4 entry; that is its business, not this validator's.
+    #
+    # Invalid entries are DROPPED and the rest kept, rather than refusing the
+    # whole paste. Refusing would make the console reject a config wg-quick
+    # itself accepts; dropping silently would be the same invisible failure this
+    # whole change is about. So what was dropped comes back in `warn`, and a
+    # tunnel left with no usable resolver becomes the "no usable DNS" state the
+    # VPN page now reports rather than a tunnel that quietly does not redirect.
+    DNSOK=""; DNSBAD=""; ADDWARN=""
+    if [ -n "$IDNS" ]; then
+        IDNS=${IDNS%%#*}
+        old_ifs="$IFS"; IFS=', '
+        for e in $IDNS; do
+            [ -n "$e" ] || continue
+            if valid_ip4 "$e" || valid_ip6 "$e"; then
+                DNSOK="$DNSOK $e"
+            else
+                DNSBAD="$DNSBAD $e"
+            fi
+        done
+        IFS="$old_ifs"
+        DNSOK=${DNSOK# }; DNSBAD=${DNSBAD# }
+    fi
+    if [ -n "$DNSOK" ]; then
+        uci set network.$IFACE.dns="$DNSOK"
+    else
+        uci -q delete network.$IFACE.dns
+    fi
+    [ -n "$DNSBAD" ] && ADDWARN="ignored an unusable DNS entry in the config: $DNSBAD"
     # keep it down until the user explicitly connects
     uci set network.$IFACE.disabled='1'
     uci set network.$IFACE.auto='0'
@@ -362,8 +413,9 @@ if [ "$ACTION" = "add" ]; then
 
     uci commit network; uci commit firewall
     /etc/init.d/firewall reload >/dev/null 2>&1 &
-    printf '{"ok":true,"action":"add","name":"%s","label":"%s","iface":"%s","endpoint":"%s:%s"}' \
-        "$(esc "$NAME")" "$(esc "$LABEL")" "$(esc "$IFACE")" "$(esc "$EHOST")" "$EPORT"
+    printf '{"ok":true,"action":"add","name":"%s","label":"%s","iface":"%s","endpoint":"%s:%s","dns":"%s","warn":"%s"}' \
+        "$(esc "$NAME")" "$(esc "$LABEL")" "$(esc "$IFACE")" "$(esc "$EHOST")" "$EPORT" \
+        "$(esc "$DNSOK")" "$(esc "$ADDWARN")"
     exit 0
 fi
 

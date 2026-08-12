@@ -60,32 +60,9 @@ if [ "$ACTION" != "list" ]; then
     guard_post
 fi
 
-# A literal unicast IPv4 address and nothing else.
-#
-# NOT a hostname: resolving one at probe time could go out through the VPN, or
-# fail during exactly the outage the probe exists to measure. NOT multicast or
-# broadcast, which do not mean anything as a round-trip target. A LAN address IS
-# allowed — pointing this at something on your own network is a legitimate thing
-# to want to measure.
-valid_ip4() {
-    case "$1" in
-        ''|*[!0-9.]*|*..*|.*|*.) return 1 ;;
-    esac
-    _c=0; _first=""
-    _oldifs=$IFS; IFS=.
-    for _o in $1; do
-        case "$_o" in ''|*[!0-9]*) IFS=$_oldifs; return 1 ;; esac
-        [ "${#_o}" -gt 3 ] && { IFS=$_oldifs; return 1; }
-        [ "$_o" -gt 255 ] && { IFS=$_oldifs; return 1; }
-        _c=$((_c + 1))
-        [ "$_c" = 1 ] && _first=$_o
-    done
-    IFS=$_oldifs
-    [ "$_c" = 4 ] || return 1
-    [ "$_first" = 0 ] && return 1            # "this network"
-    [ "$_first" -ge 224 ] && return 1        # multicast, and 255.x broadcast
-    return 0
-}
+# valid_ip4 now lives in the shared library: vpn-api needs the same check on a
+# tunnel's DNS entries, and a second copy of an address validator is exactly the
+# drift this console keeps paying for.
 
 # The file is `ip|name` per line, the same shape as the classmap and the oui
 # map. `|` and control characters are stripped from names on the way in, so a

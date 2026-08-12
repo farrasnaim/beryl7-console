@@ -896,6 +896,10 @@ $('#addBtn').addEventListener('click', function () {
             return OS.post(API, { action: 'add', name: nm, conf: cf }).then(function (j) {
                 if (j && j.ok) {
                     OS.toast((j.label || j.name || nm || 'Tunnel') + ' added.', 'ok');
+                    /* The router drops DNS entries it cannot use rather than
+                       refusing the whole config. Say so — a resolver silently
+                       missing is how a routed device ends up leaking. */
+                    if (j.warn) OS.toast(j.warn, 'warn');
                     OS.tp.refresh(400);
                     return true;
                 }
