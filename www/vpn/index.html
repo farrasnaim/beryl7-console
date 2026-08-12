@@ -952,6 +952,18 @@ function render(d) {
             'The generated ruleset was refused; check the tunnel DNS values.', 'bad');
         n3.style.marginBottom = '12px';
         alerts.appendChild(n3);
+    } else if (vd && (vd.state === 'rejected-v6only' || vd.state === 'external')) {
+        var n5 = OS.note(vd.state === 'external'
+            ? 'The firewall is refusing to load its ruleset, and the cause is not these ' +
+              'rules — something else under /etc/nftables.d is broken. IPv6 protection is ' +
+              'still in force from the last good load, but no firewall change will apply ' +
+              'until that is fixed.'
+            : 'The firewall refused the per-device DNS redirect, so it has been dropped. ' +
+              'IPv6 is still blocked for routed devices, so the location leak is closed, ' +
+              'but their DNS is answered from the home uplink. Check the tunnel DNS values.',
+            'warn');
+        n5.style.marginBottom = '12px';
+        alerts.appendChild(n5);
     } else if (vd && vd.state === 'nodns' && (vd.nodns || []).length) {
         var n4 = OS.note('No usable DNS server on ' +
             (vd.nodns.length > 1 ? vd.nodns.length + ' routed tunnels' : 'a routed tunnel') +

@@ -654,7 +654,7 @@ VSTATE=ok; VNODNS=""
 if [ -r /etc/dashboard/vpndns-state ]; then
     VSTATE=$(sed -n 's/^state=//p' /etc/dashboard/vpndns-state | head -1)
     VNODNS=$(sed -n 's/^nodns=//p' /etc/dashboard/vpndns-state | head -1)
-    case "$VSTATE" in ok|nodns|rejected|rejected-v6only) ;; *) VSTATE=ok ;; esac
+    case "$VSTATE" in ok|nodns|rejected|rejected-v6only|external) ;; *) VSTATE=ok ;; esac
 fi
 # The kernel overrules the marker: no live v6 rules while devices are routed is
 # "unprotected" whatever the marker last recorded.
