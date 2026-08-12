@@ -644,7 +644,21 @@ idx=0
 # table for that tunnel is empty, and that is invisible from the tunnel's own
 # state — see /usr/sbin/beryl-pbrtbl. Read once, outside the loop; the same
 # helper feeds dashboard-api, so the Overview and this page cannot disagree.
-PBRTBL=$(/usr/sbin/beryl-pbrtbl 2>/dev/null)
+#
+# Whether the helper ANSWERED is tracked separately from what it answered. With
+# the helper missing its output is empty, every policy fell to the `*)` branch,
+# and the page told the owner that none of their devices was being routed —
+# hunting a routing fault that did not exist. Measured by hiding the binary:
+# pbr_active stayed true while every row flipped to not-carrying.
+#
+# An empty answer from a helper that RAN is still a real answer: pbr genuinely
+# has no tables when it is stopped, and false is correct there. Only the helper
+# being absent or failing makes the question unanswerable.
+if [ -x /usr/sbin/beryl-pbrtbl ]; then
+    PBRTBL=$(/usr/sbin/beryl-pbrtbl 2>/dev/null); PBRTBL_OK=$?
+else
+    PBRTBL=""; PBRTBL_OK=1
+fi
 while :; do
     p=$(uci -q get pbr.@policy[$idx] 2>/dev/null) || break
     [ -n "$p" ] || break
@@ -654,10 +668,21 @@ while :; do
     # `carrying` answers "is this device's traffic actually going into the
     # tunnel right now", which is what the row claims to the reader. A disabled
     # policy is not a fault, so it reports false without being flagged.
-    case "$PBRTBL" in
-        *"|pbr_$inf=route|"*) carry=true ;;
-        *)                    carry=false ;;
-    esac
+    # null, not false, when the question could not be asked. The same rule the
+    # rest of this branch follows: fw_table_state reports unknown and callers stay
+    # silent, v6_loss stays -1 until a sample is fresh. The page tests
+    # `carrying !== false`, so null already excludes the device from the "nothing
+    # is routing it" alert without claiming some other fault instead.
+    if [ "$PBRTBL_OK" != 0 ]; then
+        carry=null
+    else
+        case "$PBRTBL" in
+            *"|pbr_$inf=route|"*) carry=true ;;
+            *)                    carry=false ;;
+        esac
+    fi
+    # A policy the owner switched off is definitively not carrying, whatever the
+    # helper could or could not say.
     [ "$en" = "0" ] && carry=false
     # Disabled BY THE ROUTER (fail-open released it) or disabled by the owner?
     # The page has to tell these apart: one is temporary and about to undo
