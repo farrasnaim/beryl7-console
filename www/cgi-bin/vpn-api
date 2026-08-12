@@ -251,7 +251,7 @@ if [ "$ACTION" = "add" ]; then
           sub(/^[ \t]+/,"",line); sub(/[ \t]+$/,"",line)
           if (line == "") next
           # Providers name the server in the first comment under [Peer]
-          # (Proton: "# US-CA#151"). Grab it as the human label. Later comments in
+          # (Proton: "# ZZ-EX#42"). Grab it as the human label. Later comments in
           # that section are boilerplate ("# Uncomment the following line…"), so
           # only the first one counts, and instructional/config-looking lines are
           # rejected outright.
@@ -300,7 +300,7 @@ if [ "$ACTION" = "add" ]; then
     PLABEL=$(printf '%s' "$P" | sed -n 10p)
 
     # ---- display label vs interface name ----
-    # LABEL is what the UI shows (full "US-CA#151"). NAME becomes the uci section
+    # LABEL is what the UI shows (full "ZZ-EX#42"). NAME becomes the uci section
     # and therefore the Linux interface "wg_<name>", which the kernel caps at 15
     # chars total (IFNAMSIZ) — hence the 12-char budget here. They are deliberately
     # decoupled so a long provider name never breaks interface creation.

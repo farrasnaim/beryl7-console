@@ -211,7 +211,7 @@ textarea{min-height:190px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas
     <label>Name <span class="opt">optional</span>
       <input id="aname" placeholder="detected from the config" autocomplete="off" maxlength="12">
       <div class="hint" id="nameHint">Leave blank to use the server name from the config
-        (e.g. <code>US-CA#151</code>). Only the short interface id is length-limited —
+        (e.g. <code>ZZ-EX#42</code>). Only the short interface id is length-limited —
         the full name is kept for display.</div>
     </label>
     <label>WireGuard config (.conf)
@@ -408,7 +408,7 @@ document.getElementById('routes').addEventListener('change',function(e){
 var CONF_MAX=10240;
 
 /* Mirror of the server-side label rule (vpn-api "add"): the provider writes the
-   server name as the first comment under [Peer] — Proton: "# US-CA#151".
+   server name as the first comment under [Peer] — Proton: "# ZZ-EX#42".
    Purely for instant feedback; the router re-parses authoritatively on submit. */
 function peerLabel(txt){
   var sec='', lines=String(txt||'').split(/\r?\n/);
@@ -511,7 +511,7 @@ document.getElementById('addBtn').addEventListener('click',function(){
         document.getElementById('aconf').value='';
         document.getElementById('fileName').textContent='or drag a file onto the box, or paste it';
         document.getElementById('nameHint').innerHTML='Leave blank and the server name from the config '+
-          'is used (e.g. <code>US-CA#151</code>).';
+          'is used (e.g. <code>ZZ-EX#42</code>).';
         load();
       } else msg.textContent='Failed: '+(j.error||'unknown');
     })

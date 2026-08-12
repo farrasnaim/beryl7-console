@@ -581,7 +581,7 @@ function adapt(D){
         rxb:(st.rx&&st.rx.bytes)||0, txb:(st.tx&&st.tx.bytes)||0, st:st, ifname:a.ifname};
       if(!g.clients[m]){
         var cm=(D.classmap||{})[m]||{}, L=(D.leases||{})[m]||null;
-        // vpn holds the tunnel LABEL (e.g. "UK#640") when pbr is actively routing
+        // vpn holds the tunnel LABEL (e.g. "ZZ-EX#42") when pbr is actively routing
         // this MAC, or '' otherwise — the API only lists live, enabled policies.
         var _h=(D.hosts||{})[m]||{};
         g.clients[m]={mac:m,name:nameOf(m,D),ip:ipOf(m,D),
