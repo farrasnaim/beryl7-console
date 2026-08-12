@@ -64,6 +64,57 @@ jbool() { case "$1" in 1|true) printf 'true' ;; *) printf 'false' ;; esac; }
 
 fail() { printf '{"ok":false,"error":"%s"}' "$(esc "$1")"; exit 0; }
 
+# --------------------------------------------------------------- firewall ---
+# Is there an fw4 ruleset loaded at all? Prints ok | absent | unknown.
+#
+# This matters far beyond the VPN pages. fw4 loads its whole ruleset in ONE nft
+# transaction, so a single malformed file anywhere in /etc/nftables.d/ — from any
+# package, not just this console — means nothing loads. Measured on this router
+# by planting a broken file and rebooting: `nft list tables` came back completely
+# empty. No zone policies, no WAN input filtering, nothing. The console has no
+# login and relies entirely on the firewall to keep it off the internet, so that
+# is the whole security model absent, silently, from boot.
+#
+# THE TABLE EXISTING IS NOT THE QUESTION. The first version of this asked
+# whether `nft list tables` mentioned `table inet fw4`, and that was a false
+# NEGATIVE on the real condition — the worst possible failure for a security
+# alarm. Measured across two induced boots with a broken foreign file:
+#
+#   boot A   nft list tables came back completely empty
+#   boot B   `table inet fw4` was listed, but the table held 0 rules, had no
+#            input chain at all, and was every bit as open as boot A
+#
+# Something else (the https-dns-proxy post-include) can leave the fw4 table
+# existing as an empty shell after fw4 itself fails to load. So the question has
+# to be "is there a WORKING ruleset", not "does the name exist".
+#
+# Two queries, in this order, and the order is the point:
+#
+#   1. `nft list tables` purely for its EXIT CODE — it establishes that nft is
+#      usable at all. This is the only way to tell "nft is broken" from "the
+#      thing I asked about is missing", because a missing chain and a missing
+#      table produce the SAME message ("Error: No such file or directory") and
+#      the same exit 1. Parsing that error text would be a fragile contract;
+#      the exit code of a query that must succeed is a stable one.
+#   2. `nft list chain inet fw4 input` for the fact. fw4 always builds an input
+#      chain with a policy, so its presence is the honest test of a loaded
+#      ruleset, and it fails identically whether the table or the chain is gone
+#      — which is correct here, because both mean the same thing to the owner:
+#      nothing is being filtered.
+#
+# ~14ms for the pair. Call it once per request, never in a loop. Anything that
+# is not a confirmed absence reports unknown, and callers must stay silent on
+# unknown: a false alarm would train the owner to dismiss the one message that
+# means their router is open.
+fw_table_state() {
+    nft list tables >/dev/null 2>&1 || { printf 'unknown'; return 0; }
+    _fwi=$(nft list chain inet fw4 input 2>/dev/null) || { printf 'absent'; return 0; }
+    case "$_fwi" in
+        *policy*) printf 'ok' ;;
+        *) printf 'absent' ;;
+    esac
+}
+
 # ---------------------------------------------------------------- address ---
 # A literal unicast IPv4 address and nothing else.
 #

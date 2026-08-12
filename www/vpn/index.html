@@ -944,7 +944,16 @@ function render(d) {
        policy: releasing a device to the home uplink is the OPEN fail mode, and
        applying it unasked would swap a partial leak for a total one. */
     var vd = d.vpndns;
-    if (vd && vd.state === 'unprotected') {
+    if (vd && vd.state === 'nofirewall') {
+        /* Not a VPN fault at all. Saying "check the tunnel DNS values" here
+           would send someone to the one place that cannot be the cause. */
+        var n6 = OS.note('There is no firewall ruleset loaded on this router at all, so ' +
+            'nothing is being filtered — including the IPv6 rules that keep routed devices ' +
+            'inside their tunnel. This is device-wide and is not a VPN problem. ' +
+            'Fix it with:  /etc/init.d/firewall restart', 'bad');
+        n6.style.marginBottom = '12px';
+        alerts.appendChild(n6);
+    } else if (vd && vd.state === 'unprotected') {
         var n3 = OS.note('IPv6 leak protection is NOT in force. ' + vd.routed +
             (vd.routed > 1 ? ' devices are' : ' device is') + ' routed through a tunnel, ' +
             'but the firewall is carrying no IPv6 rules for them — their IPv6 traffic is ' +

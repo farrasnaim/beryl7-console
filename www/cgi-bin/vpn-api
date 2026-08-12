@@ -646,8 +646,10 @@ AUTOP=$(grep -c . /etc/dashboard/vpn-autopaused 2>/dev/null); case "$AUTOP" in '
 # thing that knows WHY a policy got no rules: a tunnel with no usable resolver
 # and a ruleset fw4 refused both end in "fewer rules than expected", and they
 # have different remedies. Distinguishing them was the whole point.
-V6RULES=$(nft list chain inet fw4 beryl_vpndns6_fw 2>/dev/null | grep -c 'saddr')
+V6OUT=$(nft list chain inet fw4 beryl_vpndns6_fw 2>/dev/null); V6RC=$?
+V6RULES=$(printf '%s' "$V6OUT" | grep -c 'saddr')
 case "$V6RULES" in ''|*[!0-9]*) V6RULES=0 ;; esac
+V6CHAIN=false; [ "$V6RC" = 0 ] && V6CHAIN=true
 ROUTED=$(printf '%s' "$POLS" | grep -o '"enabled":true' | grep -c .)
 case "$ROUTED" in ''|*[!0-9]*) ROUTED=0 ;; esac
 VSTATE=ok; VNODNS=""
@@ -656,9 +658,25 @@ if [ -r /etc/dashboard/vpndns-state ]; then
     VNODNS=$(sed -n 's/^nodns=//p' /etc/dashboard/vpndns-state | head -1)
     case "$VSTATE" in ok|nodns|rejected|rejected-v6only|external) ;; *) VSTATE=ok ;; esac
 fi
-# The kernel overrules the marker: no live v6 rules while devices are routed is
-# "unprotected" whatever the marker last recorded.
-[ "$ROUTED" -gt 0 ] && [ "$V6RULES" = 0 ] && VSTATE=unprotected
+# The kernel overrules the marker: no live v6 rules while devices are routed
+# means the protection is not in force, whatever the marker last recorded.
+#
+# But WHY it is not in force decides what the page should say, and the two causes
+# have nothing in common. Our rules can be missing because the ruleset we
+# generated was refused — that is ours, and the remedy is the tunnel DNS. Or
+# there can be no fw4 table at all, in which case nothing anywhere is filtering,
+# the cause is device-wide, and telling someone to check their tunnel DNS sends
+# them to the wrong place entirely.
+#
+# The table query only runs when something already looks wrong, so the healthy
+# path still costs one chain read rather than two.
+if [ "$ROUTED" -gt 0 ] && [ "$V6RULES" = 0 ]; then
+    case "$(fw_table_state)" in
+        absent)  VSTATE=nofirewall ;;
+        ok)      VSTATE=unprotected ;;
+        *)       VSTATE=unknown ;;      # say nothing rather than guess
+    esac
+fi
 [ "$ROUTED" = 0 ] && VSTATE=idle
 VN=""
 for _p in $VNODNS; do VN="$VN${VN:+,}\"$(esc "$_p")\""; done
@@ -668,5 +686,5 @@ printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"failmode":"%s","autopaused":%s,"tun
     "$( [ "$(uci -q get pbr.config.enabled)" = "1" ] && echo true || echo false )" \
     "$FM" "$AUTOP" \
     "$TUNS" "$POLS"
-printf '"vpndns":{"state":"%s","v6_rules":%s,"routed":%s,"nodns":[%s]}}' \
-    "$VSTATE" "$(jnum "$V6RULES")" "$(jnum "$ROUTED")" "$VN"
+printf '"vpndns":{"state":"%s","v6_rules":%s,"routed":%s,"chain":%s,"nodns":[%s]}}' \
+    "$VSTATE" "$(jnum "$V6RULES")" "$(jnum "$ROUTED")" "$V6CHAIN" "$VN"
