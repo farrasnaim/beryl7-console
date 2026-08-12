@@ -724,6 +724,26 @@ fi
 case "$NLJ" in '{'*'}') ;; *) NLJ='null' ;; esac
 
 printf '{"ok":true,"ts":%s,' "$NOW"
+
+# ---- is there a firewall at all ---------------------------------------------
+# Device-wide, so it belongs on the Overview rather than buried in the VPN page,
+# which until now was the only place in the whole console that could tell you the
+# firewall was missing — and it said so as though a tunnel were misconfigured.
+#
+# Every bullet of this project's stated security model rests on the firewall
+# being loaded: WAN input DROP/REJECT is the only thing keeping a console with no
+# login off the internet. fw4 loads in one nft transaction, so any malformed file
+# under /etc/nftables.d/, from any package, means nothing loads at all.
+#
+# On dashboard-api and NOT rate-api on purpose. This endpoint already costs
+# ~455ms at a 5s poll, so a ~5.6ms read is close to 1% of it. rate-api costs
+# ~9ms at a 1s poll and does not even source this library; the same read there
+# would roughly double the cheapest endpoint on the console, and that cost is
+# the whole reason the 1-second charts are affordable.
+#
+# Once per request, never in a per-device loop. `unknown` is reported rather than
+# guessed, and the page stays silent on it.
+FWSTATE=$(fw_table_state)
 # IPv6 reachability, written by dashmon. Reported separately from the v4 probe
 # because they fail independently — the 2026-08-10 outage took v6 down while v4
 # stayed perfect. -1 means dashmon has not sampled yet.
@@ -761,8 +781,8 @@ case "$OVLU" in ''|*[!0-9]*) OVLU=0 ;; esac
 
 printf '"sys":{"host":"%s","uptime":%s,"temp":%s,"fan_rpm":%s,"load":"%s","mem_total":%s,"mem_avail":%s,"v6_loss":%s,' \
     "$(esc "$HOST")" "$UP" "$TEMP" "$FAN" "$(esc "$LOAD")" "$(jnum "$MEMT")" "$(jnum "$MEMA")" "$V6LOSS"
-printf '"ovl_total":%s,"ovl_used":%s,"wan_uptime":%s},' \
-    "$OVLT" "$OVLU" "${UPSECS:--1}"
+printf '"ovl_total":%s,"ovl_used":%s,"wan_uptime":%s,"firewall":"%s"},' \
+    "$OVLT" "$OVLU" "${UPSECS:--1}" "$FWSTATE"
 # ---- per-lane byte counters -------------------------------------------------
 # Every lane drawn on the topology is exactly one netdev: each AP has its own
 # wireless interface, and the wired lane is the LAN bridge's non-wireless port(s). One

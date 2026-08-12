@@ -20,6 +20,11 @@
       </div>
     </header>
 
+    <!-- Device-wide alarms only. Anything scoped to a single panel belongs in
+         that panel; this is for conditions that make the rest of the page
+         beside the point, which today means "there is no firewall". -->
+    <div id="alerts"></div>
+
     <!-- THE HERO: the network, drawn directly on the page. No container —
          the topology is the product, not a widget inside it. -->
     <div class="face--open">
@@ -1626,10 +1631,37 @@ function trafRow() {
 }
 
 /* ----------------------------------------------------------------- boot -- */
+/* The only device-wide alarm on this page, and the reason #alerts exists.
+   fw4 loads its whole ruleset in one transaction, so one malformed file under
+   /etc/nftables.d/ — from any package — leaves the router with NO ruleset. The
+   console has no login and depends entirely on the firewall to stay off the
+   internet, so this is the security model absent rather than a feature degraded.
+
+   Silence unless the router positively said "absent". 'unknown' means the read
+   itself could not be trusted, and claiming the firewall is down when it may not
+   be would teach the owner to ignore the one message that means they are open. */
+function renderFirewall(d) {
+    var box = $('#alerts');
+    if (!box) return;
+    clear(box);
+    if (!d.sys || d.sys.firewall !== 'absent') return;
+    var n = OS.note('No firewall is loaded. Nothing on this router is being filtered, ' +
+        'and this console has no login — anything that can reach the router can read it ' +
+        'and change its settings, including from the internet side. ' +
+        'Fix it over SSH with:  /etc/init.d/firewall restart', 'bad');
+    /* `restart`, not `start`. Measured: after a failed boot-time load procd
+       already considers the service started, so `start` prints nothing and does
+       nothing. Sending someone to a command that silently no-ops is worse than
+       giving them none. */
+    n.style.marginBottom = '14px';
+    box.appendChild(n);
+}
+
 function render(d) {
     if (!d || !d.ok) return;
     last = d;
     var M = model(d);
+    renderFirewall(d);
     renderTopo(d, M);
     renderSys(d);
     renderClients(d, M);
