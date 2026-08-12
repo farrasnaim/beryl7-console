@@ -9,11 +9,22 @@ backups/
 *.tar.gz
 *.packages
 
-# Runtime state that holds secrets, in case a copy is ever pulled off the router
-# into this tree for inspection. repeater-known stores the passphrases of every
-# Wi-Fi uplink that has been joined; classmap and the vpndns ruleset carry device
-# names and tunnel resolvers. Only the .example files belong here.
-etc/dashboard/repeater-known
-etc/dashboard/classmap
-etc/dashboard/vpn-*
+# Live router state, in case a copy is ever pulled off the device into this tree
+# to look at. DENY BY DEFAULT, allow the few files that genuinely belong here.
+#
+# This was a list of names, and a list of names goes stale the moment anything is
+# added — which it did, inside a single session: repeater-known (Wi-Fi passphrases)
+# had to be remembered by hand, while oui and nlbw-daily were simply missed, and
+# so was every /etc/config file. The worst of those is etc/config/network, which
+# is where WireGuard private keys live, with etc/config/wireless holding the
+# Wi-Fi passphrases beside it.
+#
+# Written as "ignore the directory, then re-admit what is tracked" so that a file
+# added later is private unless someone deliberately says otherwise. That is the
+# safe direction for a public repository: the failure mode of the old form was a
+# silent publish, the failure mode of this one is a file that needs an explicit
+# exception before it can be committed.
+etc/config/
+etc/dashboard/*
+!etc/dashboard/classmap.example
 etc/nftables.d/
