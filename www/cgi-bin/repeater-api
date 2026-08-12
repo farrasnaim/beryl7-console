@@ -342,6 +342,68 @@ radio_for_band() {   # $1 = 2g | 5g | 6g
     [ -n "$_any" ] || printf '%s' "$_first"
 }
 
+# What the driver's cached BSS table says about a network's encryption.
+#
+# Prints 1 when every BSS it holds for this SSID is encrypted, 0 when any of them
+# is open, and NOTHING AT ALL when the network is not in the table. That empty
+# answer is load-bearing rather than an oversight: the cache is regularly cold —
+# scanning the 5 GHz radio returns nothing while its own AP is up, and the 2.4 GHz
+# half is whatever was last swept — so a network we cannot currently see must be
+# joined as asked. Absence of evidence is not evidence of encryption.
+#
+# `scan dump` reads the cache the driver already holds; it starts no sweep, so
+# this cannot collide with a scan in flight or delay the join.
+#
+# Not a guarantee, and not meant as one: it catches the case where the cache is
+# warm, which is exactly the flow the page produces — scan, then tap a result.
+scan_says_encrypted() {
+    _ss_want="$1"
+    # Interface per band, discovered by the frequency each one runs on. Same
+    # method as the scan action, deliberately duplicated rather than lifted out
+    # of it: this check must not be able to alter how scanning behaves.
+    _ss_i24=$(iw dev 2>/dev/null | awk '
+        /^\tInterface / { ifc=$2 }
+        /^\t\tchannel / { f=$3; sub(/\(/,"",f); if (f+0 <  3000) { print ifc; exit } }')
+    _ss_i5=$(iw dev 2>/dev/null | awk '
+        /^\tInterface / { ifc=$2 }
+        /^\t\tchannel / { f=$3; sub(/\(/,"",f); if (f+0 >= 3000) { print ifc; exit } }')
+    { [ -n "$_ss_i24" ] && iw dev "$_ss_i24" scan dump 2>/dev/null
+      [ -n "$_ss_i5"  ] && iw dev "$_ss_i5"  scan dump 2>/dev/null; } | awk -v want="$_ss_want" '
+        BEGIN { for (i=0; i<16; i++) { h=sprintf("%X",i); HX[h]=i; HX[tolower(h)]=i } }
+        # iw renders every non-ASCII SSID byte as the literal text \xNN, so a
+        # hotspot named with a curly apostrophe arrives here in a form that never
+        # equals the decoded string the form submitted. Decoding it is what makes
+        # the comparison work at all; the scan action does the same, for the same
+        # reason.
+        function unhex(s,   out,i,n,c,a,b) {
+            out=""; n=length(s)
+            for (i=1; i<=n; i++) {
+                c=substr(s,i,1)
+                if (c=="\\" && substr(s,i+1,1)=="x" && i+3<=n) {
+                    a=substr(s,i+2,1); b=substr(s,i+3,1)
+                    if ((a in HX) && (b in HX)) {
+                        out = out sprintf("%c", HX[a]*16 + HX[b]); i+=3; continue
+                    }
+                }
+                out = out c
+            }
+            return out
+        }
+        function flush_bss() {
+            if (bssid != "" && ssid != "" && unhex(ssid) == want) {
+                found=1; if (!enc) open=1
+            }
+            bssid=""; ssid=""; enc=0
+        }
+        /^BSS /    { flush_bss(); bssid=$2; sub(/\(.*/, "", bssid); next }
+        /^\tSSID:/ { s=$0; sub(/^\tSSID: ?/, "", s); ssid=s; next }
+        /^\tRSN:/  { enc=1; next }
+        /^\tWPA:/  { enc=1; next }
+        /capability:.*Privacy/ { enc=1; next }
+        END { flush_bss(); if (found) print (open ? 0 : 1) }
+    '
+}
+
 # ============================ ADD UPLINK ============================
 if [ "$ACTION" = "add" ]; then
     # No router password anywhere in this console, by explicit user choice:
@@ -375,6 +437,23 @@ if [ "$ACTION" = "add" ]; then
         *)    ENCV=$([ -n "$KEY" ] && echo 'psk2' || echo 'none') ;;
     esac
     [ "$ENCV" != "none" ] && [ -z "$KEY" ] && { printf '{"ok":false,"error":"password required for encrypted network"}'; exit 0; }
+    # The opposite direction of the guard above. A network declared open, when
+    # the driver's scan cache says it is encrypted, is written as an open STA:
+    # it associates, never gets a lease, and the watchdog undoes it twenty
+    # seconds later. Saying so now costs nothing and is far more use than a
+    # timeout to somebody standing in a hotel lobby.
+    #
+    # Placed AFTER the saved-credential fallback on purpose. Rejoining a
+    # remembered network supplies its key up there, which makes ENCV psk2, so
+    # this cannot fire on it. Only a request that actually asks for an open join
+    # reaches the test.
+    if [ "$ENCV" = "none" ]; then
+        SEEN_ENC=$(scan_says_encrypted "$SSID")
+        [ "$SEEN_ENC" = "1" ] && {
+            printf '{"ok":false,"error":"This network was scanned as encrypted, so joining it without a password would fail. Enter its password and try again."}'
+            exit 0
+        }
+    fi
 
     ensure_wwan
     # a single uplink section, replaced each time
