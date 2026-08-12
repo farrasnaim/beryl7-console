@@ -647,7 +647,14 @@ EVJ="[$EVJ]"
 # would be paid forever for a value already in hand. (Every nlbw call measured
 # ~1.3-2.7 ms with `time` over 30 iterations; busybox `date` has no %N, so
 # subtracting timestamps reports 0 and cannot measure anything at this scale.)
-NLLIST=$(nlbw -c list 2>/dev/null)
+# The exit status separates "the accounting daemon is not answering" from "the
+# day is young and nothing has been recorded yet". Both produce an empty table,
+# and the panel said "No per-device accounting YET today" for both — true in the
+# second case, and in the first a quiet network reported where a missing
+# measurement should be. Measured: nlbwmon running gives exit 0 and a list of
+# periods; stopped gives exit 247 and no output. Free, because this call was
+# already being made.
+NLLIST=$(nlbw -c list 2>/dev/null); NLOK=$?
 NLPER=$(printf '%s\n' "$NLLIST" | head -1)
 NLPREV=$(printf '%s\n' "$NLLIST" | sed -n '2p')
 case "$NLPER" in
@@ -907,8 +914,9 @@ printf '"air":%s,"sta":%s,"neigh":%s,"oui":%s,"wired":%s,"events":%s,"nlbw":%s,'
     "$AIRJ" "$STAJ" "$NBJ" "$OUIJ" "$WIREDJ" "$EVJ" "$NLJ"
 printf '"probe":{"loss":%s,"ping":%s,"jit":%s,"state":"%s","online":%s},' \
     "$PROBE_LOSS" "$PROBE_PING" "$PROBE_JIT" "$(esc "$PROBE_STATE")" "$ONLINE"
-printf '"nlbw_period":%s,"nlbw_daily":%s,' \
-    "$( [ -n "$NLPER" ] && printf '"%s"' "$NLPER" || echo null )" "$NLDAILY"
+printf '"nlbw_period":%s,"nlbw_daily":%s,"nlbw_up":%s,' \
+    "$( [ -n "$NLPER" ] && printf '"%s"' "$NLPER" || echo null )" "$NLDAILY" \
+    "$( [ "${NLOK:-1}" = 0 ] && echo true || echo false )"
 printf '"classmap":%s,' "$CMJ"
 printf '"vpn":%s,' "$VPNJ"
 printf '"vpn_stale":%s,' "$VPNSTALE"

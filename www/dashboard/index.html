@@ -1571,6 +1571,8 @@ function renderTraffic(d, M) {
        same element it was a poll ago. */
     if (!box._grid) {
         clear(box);
+        /* Text is set per poll below: an empty table means two different things
+           and the wording has to say which. */
         box._hint = el('div', 'hint', 'No per-device accounting yet today.');
         box.appendChild(box._hint);
         /* full-width panel: two columns of meters on desktop, one on a phone —
@@ -1595,6 +1597,13 @@ function renderTraffic(d, M) {
     var grand = 0;
     all.forEach(function (v) { grand += v.traffic.dn + v.traffic.up; });
     setTxt($('#trafTotal'), grand ? OS.bytes(grand) + ' total' : '');
+    /* "Nothing has used the network yet" and "nothing is counting" look
+       identical from here — an empty table either way — and the old wording
+       claimed the first for both. The router can tell them apart (nlbw exits
+       non-zero when the daemon is not answering), so the panel says which. */
+    box._hint.textContent = (d.nlbw_up === false)
+        ? 'Per-device accounting is not running, so nothing is being counted.'
+        : 'No per-device accounting yet today.';
     box._hint.hidden = !!all.length;
 
     all.sort(function (a, b) { return (b.traffic.dn + b.traffic.up) - (a.traffic.dn + a.traffic.up); });
