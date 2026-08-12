@@ -129,6 +129,7 @@ etc/
   hotplug.d/usb/40-usbmuxd             disabled stub (see its header for why)
   init.d/cpugovernor         schedutil instead of a pinned 2.0 GHz
   init.d/pingmon             keeps pingmon running (procd, not cron)
+  init.d/beryl-vpndns        recompute the VPN rules at boot, before fw4 (S18)
   sysctl.d/99-local.conf     TCP MTU probing for hotel/tunnel PMTU black holes
 ```
 

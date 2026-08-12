@@ -82,7 +82,7 @@ ssh -n "$TARGET" 'chmod 755 /www/cgi-bin/*-api 2>/dev/null
     chmod 755 /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch \
               /usr/sbin/beryl-vpndns /usr/sbin/beryl-pbrtbl /usr/sbin/pingmon 2>/dev/null
     chmod 755 /etc/hotplug.d/iface/* /etc/hotplug.d/net/* /etc/hotplug.d/usb/* 2>/dev/null
-    chmod 755 /etc/init.d/cpugovernor /etc/init.d/pingmon 2>/dev/null
+    chmod 755 /etc/init.d/cpugovernor /etc/init.d/pingmon /etc/init.d/beryl-vpndns 2>/dev/null
     true'
 ok "executable bits reapplied"
 
@@ -91,7 +91,7 @@ ok "executable bits reapplied"
 # backup. Enabling here does not depend on the bundle carrying symlinks at all,
 # which is the more robust of the two answers — `enable` is idempotent, so it
 # costs nothing when they did come back.
-ssh -n "$TARGET" 'for s in pingmon cpugovernor; do
+ssh -n "$TARGET" 'for s in pingmon cpugovernor beryl-vpndns; do
         [ -x "/etc/init.d/$s" ] || continue
         /etc/init.d/$s enable >/dev/null 2>&1
     done

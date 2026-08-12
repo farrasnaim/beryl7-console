@@ -30,6 +30,15 @@
 NFT=/etc/nftables.d/30-beryl-vpndns.nft
 TMP="$NFT.$$"
 
+# --no-reload: write the file, do not touch the firewall service. Used by the
+# boot regeneration, which runs BEFORE the firewall starts (S18 against its S19)
+# precisely so fw4 reads a freshly computed file on its own first load. Asking a
+# service that has not started yet to reload is either a no-op or an early
+# start, and both are worse than letting S19 do its job.
+RELOAD=1
+[ "$1" = "--no-reload" ] && RELOAD=0
+fw_reload() { [ "$RELOAD" = 1 ] && /etc/init.d/firewall reload >/dev/null 2>&1; return 0; }
+
 # valid_ip4 comes from the console's shared library. This is not a CGI, but the
 # check has to be the SAME one vpn-api applies at the boundary — two validators
 # that disagree is how a value passes one gate and fails the next.
@@ -149,7 +158,7 @@ emit "$body" > "$TMP" 2>/dev/null
 cmp -s "$TMP" "$NFT" 2>/dev/null && { rm -f "$TMP"; write_state "$(base_state)"; exit 0; }
 mv "$TMP" "$NFT"
 if fw4 check >/dev/null 2>&1; then
-    /etc/init.d/firewall reload >/dev/null 2>&1
+    fw_reload
     write_state "$(base_state)"
 else
     # The old behaviour was to discard EVERYTHING here — the v6 reject chains
@@ -165,7 +174,7 @@ else
     emit "" > "$NFT"
     if fw4 check >/dev/null 2>&1; then
         logger -t beryl-vpndns "IPv6 protection retained; DNS redirect dropped"
-        /etc/init.d/firewall reload >/dev/null 2>&1
+        fw_reload
         write_state rejected-v6only
     else
         # Still refused with nothing of ours but three chain headers. Then the

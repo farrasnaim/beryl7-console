@@ -1,0 +1,44 @@
+#!/bin/sh /etc/rc.common
+# /etc/init.d/beryl-vpndns
+#
+# Recompute the per-device VPN nftables rules at boot, before the firewall
+# loads them.
+#
+# WHY THIS EXISTS. beryl-vpndns is only ever called when something changes — a
+# route added or removed from the VPN page, or vpnwatch pausing a dead tunnel.
+# Nothing called it at boot. But the file it writes lives in /etc/nftables.d/
+# and fw4 reads it on every load, so whatever that file happened to contain the
+# last time the generator ran was reinstalled at every boot, forever.
+#
+# That made a degraded ruleset permanent rather than transient: if the generator
+# had once fallen back, the fallback was what came back after a reboot, with
+# nothing to regenerate it until the owner happened to add or re-route a tunnel.
+# Recomputing here means the file is derived from the current pbr policies
+# rather than trusted, so once the underlying cause is fixed the next boot heals
+# by itself.
+#
+# ORDERING. The firewall is S19 (and the network is S20 — fw4 loads before
+# either). This is S18 so the file is already correct when fw4 first reads it:
+# no reload, no race, and no second load of the same ruleset. `--no-reload` is
+# what keeps this from asking a service that has not started yet to reload,
+# which would be either a no-op or an early start, both worse than letting S19
+# do its job.
+#
+# FAILING SAFE. This only writes a file. It returns 0 whatever happens, so a
+# problem here cannot stop the firewall from coming up at S19 — a router that
+# boots without its firewall because a helper script failed would be a far worse
+# outcome than the leak this whole mechanism guards against.
+
+START=18
+
+boot()  { start; }
+
+start() {
+    [ -x /usr/sbin/beryl-vpndns ] || return 0
+    /usr/sbin/beryl-vpndns --no-reload >/dev/null 2>&1
+    return 0
+}
+
+# Nothing to stop: this owns no process. The rules belong to fw4, and removing
+# them on shutdown would only mean booting without them.
+stop() { return 0; }

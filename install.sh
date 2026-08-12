@@ -90,7 +90,7 @@ mkdir -p /etc/hotplug.d/iface /etc/hotplug.d/net /etc/hotplug.d/usb /etc/sysctl.
 cp $S/etc/hotplug.d/iface/* /etc/hotplug.d/iface/
 cp $S/etc/hotplug.d/net/30-tethering /etc/hotplug.d/net/
 cp $S/etc/hotplug.d/usb/40-usbmuxd /etc/hotplug.d/usb/
-cp $S/etc/init.d/cpugovernor $S/etc/init.d/pingmon /etc/init.d/
+cp $S/etc/init.d/cpugovernor $S/etc/init.d/pingmon $S/etc/init.d/beryl-vpndns /etc/init.d/
 cp $S/etc/sysctl.d/99-local.conf /etc/sysctl.d/
 
 # cp does not carry the exec bit reliably across filesystems; CGI that is not
@@ -106,7 +106,8 @@ chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api 
           /etc/hotplug.d/iface/33-uplink-width \
           /etc/hotplug.d/iface/34-vpn-resume \
           /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
-          /etc/init.d/cpugovernor /usr/sbin/pingmon /etc/init.d/pingmon
+          /etc/init.d/cpugovernor /usr/sbin/pingmon /etc/init.d/pingmon \
+          /etc/init.d/beryl-vpndns
 echo "  . files installed"
 
 # Device name/class map: seed it once, never overwrite an edited one.
@@ -136,6 +137,16 @@ echo "  . cron entries present"
 /etc/init.d/pingmon restart >/dev/null 2>&1 || true
 echo "  . pingmon running"
 
+# Recomputes the VPN nftables rules at boot, BEFORE fw4 loads them: S18 against
+# S19 for the firewall. Without it the last generated file — including a
+# degraded one — is what comes back after every reboot. It owns no process, so
+# there is nothing to start here beyond registering the boot link.
+#
+# NOTE: no apostrophes anywhere in this block. It lives inside a single-quoted
+# ssh argument, and one apostrophe ends the quote and breaks the installer.
+/etc/init.d/beryl-vpndns enable >/dev/null 2>&1 || true
+echo "  . vpn rules regenerate at boot"
+
 # cpugovernor was copied and made executable but never enabled, so on a fresh
 # install it sat there doing nothing: the governor tuning is silent either way,
 # which is exactly why nobody noticed. It is only running on the router it was
@@ -160,7 +171,8 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/hotplug.d/iface/34-vpn-resume \
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
          /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
-         /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api; do
+         /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api \
+         /etc/init.d/beryl-vpndns; do
     grep -qxF "$p" /etc/sysupgrade.conf || echo "$p" >> /etc/sysupgrade.conf
 done
 echo "  . sysupgrade.conf updated"
