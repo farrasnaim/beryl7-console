@@ -721,6 +721,64 @@ function act(btn, url, params, opts) {
     });
 }
 
+/* --------------------------------------------------- the firewall alarm --- */
+/* Shared because two pages can reach the same condition: the Overview detects it
+   device-wide, and the VPN page's "no IPv6 protection" resolves to the same
+   cause. One implementation so the wording and the remedy cannot drift apart.
+
+   The remedy is a BUTTON, not an SSH command, and that is the whole point. This
+   is a travel router; it exists to be operable from a phone in a hotel room,
+   which is exactly why apwatch exists — "with only a phone has no way in: no AP,
+   no dashboard, no SSH". A remedy that needs a terminal is not a remedy in the
+   situation the device is for. The SSH line stays underneath for whoever does
+   have a laptop; demoting it is the change, not removing it.
+
+   Handing this action to whoever can reach the console is safe in a way almost
+   nothing else is: it RESTORES filtering, so an attacker who presses it locks
+   themselves out, and in this state every other write the console offers is
+   equally reachable and strictly more dangerous. */
+function firewallAlert(onDone) {
+    var wrap = el('div');
+    var n = note('No firewall is loaded. Nothing on this router is being filtered, and this ' +
+        'console has no login — anything that can reach the router can read it and change ' +
+        'its settings.', 'bad');
+    wrap.appendChild(n);
+
+    var row = el('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:10px 0 0 30px';
+    var b = el('button', 'btn btn--sm btn--danger', 'Restart the firewall');
+    b.addEventListener('click', function () {
+        dialog({
+            title: 'Restart the firewall',
+            body: 'This reloads the firewall ruleset. Connections in flight may drop for a ' +
+                  'moment. It cannot make things less safe than they are now — right now ' +
+                  'nothing is being filtered at all.',
+            okText: 'Restart'
+        }).then(function (go) {
+            if (!go) return;
+            act(b, '/cgi-bin/settings-api', { action: 'fwrestart' }, {
+                ok: 'Firewall reloaded. Filtering is back on.',
+                failPrefix: 'Could not reload it'
+            }).then(function (j) {
+                if (j && j.ok && typeof onDone === 'function') onDone();
+            });
+        });
+    });
+    row.appendChild(b);
+
+    /* Kept, deliberately demoted. Someone with a laptop should still be told the
+       exact command — and `restart`, never `start`: after a failed boot-time
+       load procd already considers the service started, so `start` replies "The
+       fw4 firewall appears to be already loaded." and exits 0 while the ruleset
+       stays empty. */
+    var hint = el('div', null, 'Over SSH instead:  /etc/init.d/firewall restart');
+    hint.style.cssText = 'font:400 12px/1.5 var(--mono,monospace);opacity:.65';
+    row.appendChild(hint);
+
+    wrap.appendChild(row);
+    return wrap;
+}
+
 /* ----------------------------------------------------------- navigation --- */
 /* Stage order is the path a packet takes. The nav is the topology.            */
 /* Internet and Router are omitted deliberately: the Overview topology already
@@ -1357,7 +1415,7 @@ global.OS = {
     sv: sv, svtext: svtext, gem: gem, quality: quality, stateWord: stateWord,
     scale: scale, scaleSet: scaleSet, rssiScale: rssiScale, rssiScaleSet: rssiScaleSet,
     spectrum: spectrum, topology: topology,
-    toast: toast, dialog: dialog, askConfirm: askConfirm,
+    toast: toast, dialog: dialog, askConfirm: askConfirm, firewallAlert: firewallAlert,
     Transport: Transport, post: post, act: act,
     buildShell: buildShell, stage: stage, flagTab: flagTab, dockAction: dockAction,
     tp: null

@@ -137,7 +137,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=be3f6430"></script>
+<script src="/os.js?v=4cb8ec6f"></script>
 <script>
 (function () {
 'use strict';
@@ -1645,14 +1645,10 @@ function renderFirewall(d) {
     if (!box) return;
     clear(box);
     if (!d.sys || d.sys.firewall !== 'absent') return;
-    var n = OS.note('No firewall is loaded. Nothing on this router is being filtered, ' +
-        'and this console has no login — anything that can reach the router can read it ' +
-        'and change its settings, including from the internet side. ' +
-        'Fix it over SSH with:  /etc/init.d/firewall restart', 'bad');
-    /* `restart`, not `start`. Measured: after a failed boot-time load procd
-       already considers the service started, so `start` prints nothing and does
-       nothing. Sending someone to a command that silently no-ops is worse than
-       giving them none. */
+    /* Actionable from the console, not from a terminal. The shared builder owns
+       the wording, the confirm and the SSH fallback line — the VPN page reaches
+       the same condition and must not grow a second version of them. */
+    var n = OS.firewallAlert(function () { OS.tp.refresh(500); });
     n.style.marginBottom = '14px';
     box.appendChild(n);
 }

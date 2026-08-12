@@ -619,6 +619,53 @@ if [ "$ACTION" = "reboot" ]; then
     exit 0
 fi
 
+# ---- reload a firewall that failed to load -----------------------------------
+# One malformed file anywhere under /etc/nftables.d/, from any package, takes the
+# whole fw4 ruleset down: nft loads it in a single transaction. The router then
+# runs with nothing filtered, and the console — which has no login — is protected
+# only by uhttpd being bound to the LAN address.
+#
+# Why this is a button and not an SSH instruction. This is a travel router. It
+# exists to be operable from a phone in a hotel room, which is the same reason
+# apwatch exists ("with only a phone has no way in: no AP, no dashboard, no
+# SSH"). Telling someone to open a terminal is not a remedy in the situation the
+# device is FOR.
+#
+# Why handing this to whoever can reach the console is acceptable:
+#   - the action closes its own door. It RESTORES filtering; there is no attack
+#     whose payload is "make the victim's firewall work".
+#   - it creates no new exposure. In this state every other write here is
+#     equally reachable and strictly more dangerous — reboot is directly above.
+#   - the worst case is bounded by the rate limit below: repeated presses mean
+#     repeated restarts of a firewall that is already down.
+#
+# `restart`, never `start`. Measured: after a failed boot-time load procd already
+# considers the service started, so `start` answers "The fw4 firewall appears to
+# be already loaded." and exits 0 while the ruleset stays empty.
+FWSTAMP=/tmp/.fwrestart
+if [ "$ACTION" = "fwrestart" ]; then
+    _now=$(date +%s)
+    _last=$(cat "$FWSTAMP" 2>/dev/null); case "$_last" in ''|*[!0-9]*) _last=0 ;; esac
+    if [ $((_now - _last)) -lt 20 ]; then
+        fail "just tried that — give it a few seconds before trying again"
+    fi
+    printf '%s' "$_now" > "$FWSTAMP" 2>/dev/null
+    logger -t settings "firewall restart requested via web UI"
+    /etc/init.d/firewall restart >/dev/null 2>&1
+    # Report what actually happened, not that the command was issued. A restart
+    # cannot succeed while the broken file is still there, and saying "done"
+    # when nothing changed is the failure this whole surface exists to correct.
+    _st=$(fw_table_state)
+    if [ "$_st" = "ok" ]; then
+        logger -t settings "firewall reloaded successfully"
+        printf '{"ok":true,"firewall":"ok"}'
+    else
+        logger -t settings "firewall still not loaded after restart"
+        printf '{"ok":false,"firewall":"%s","error":"the firewall still will not load. A file under /etc/nftables.d/ is broken and has to be removed — that needs SSH."}' "$_st"
+    fi
+    exit 0
+fi
+
 [ -n "$ACTION" ] && fail "unknown action"
 
 # --------------------------------------------------------------------- read --

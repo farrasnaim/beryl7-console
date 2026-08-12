@@ -69,7 +69,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=be3f6430"></script>
+<script src="/os.js?v=4cb8ec6f"></script>
 <script>
 (function () {
 'use strict';
@@ -947,12 +947,17 @@ function render(d) {
     if (vd && vd.state === 'nofirewall') {
         /* Not a VPN fault at all. Saying "check the tunnel DNS values" here
            would send someone to the one place that cannot be the cause. */
-        var n6 = OS.note('There is no firewall ruleset loaded on this router at all, so ' +
-            'nothing is being filtered — including the IPv6 rules that keep routed devices ' +
-            'inside their tunnel. This is device-wide and is not a VPN problem. ' +
-            'Fix it with:  /etc/init.d/firewall restart', 'bad');
+        /* Same condition, same remedy, same builder as the Overview. A traveller
+           who opened this page because their VPN looks wrong should not have to
+           find another page to fix it. */
+        var n6 = OS.firewallAlert(function () { OS.tp.refresh(500); });
+        var lead = OS.note('The IPv6 rules that keep routed devices inside their tunnel are ' +
+            'part of that missing ruleset, so this is not a VPN fault and nothing about your ' +
+            'tunnels needs changing.', 'warn');
+        lead.style.marginBottom = '8px';
         n6.style.marginBottom = '12px';
         alerts.appendChild(n6);
+        alerts.appendChild(lead);
     } else if (vd && vd.state === 'unprotected') {
         var n3 = OS.note('IPv6 leak protection is NOT in force. ' + vd.routed +
             (vd.routed > 1 ? ' devices are' : ' device is') + ' routed through a tunnel, ' +
