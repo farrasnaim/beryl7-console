@@ -103,6 +103,10 @@ var routeOpen = {};      /* mac -> selector expanded (mobile), survives polls */
 var devicesLoaded = false;
 var expanded = {};
 var last = null;
+/* Was per-device routing down on the PREVIOUS poll? Adding a route restarts pbr
+   in the background, so a single sample can land in that gap; the alarm needs to
+   see the condition twice, 5s apart, before it says anything. */
+var pbrWasDown = false;
 
 $('#addBtn').appendChild(OS.icon('plus'));
 $('#addBtn').appendChild(document.createTextNode('Add tunnel'));
@@ -930,12 +934,66 @@ function render(d) {
        a normal idle page look broken. Only warn when something actually needs
        pbr and it is not running. */
     var wantsPbr = (d.policies || []).some(function (p) { return p.enabled; });
-    if (d.pbr_enabled === false && wantsPbr) {
+    /* KEYED ON pbr_active, NOT pbr_enabled. The latter is the UCI flag — intent,
+       not evidence. They diverge in the direction that hides the fault: this
+       router ran for forty minutes with the flag set, pbr dead, no fwmark rules
+       and one device silently unrouted, and this alarm stayed quiet because the
+       flag still said 1. pbr_active counts the routing rules actually in the
+       kernel.
+
+       Two consecutive polls before alarming. Adding a route restarts pbr in the
+       background, so a single poll can land in the gap while it comes back up —
+       and an alarm that flashes during normal use is one nobody reads. */
+    var pbrDown = wantsPbr && d.pbr_active === false;
+    if (pbrDown && pbrWasDown) {
         var n = OS.note('Per-device routing is not running, so tunnel rules are not being ' +
             'applied. Every device is going out through the normal uplink.', 'bad');
+        var prow = el('div');
+        prow.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:10px 0 0 30px';
+        var pb2 = el('button', 'btn btn--sm btn--danger', 'Start per-device routing');
+        pb2.addEventListener('click', function () {
+            /* The consequence is read from live state, not described in the
+               abstract. Starting pbr APPLIES the policies, and with the closed
+               fail mode a device pinned to a tunnel that is down loses its
+               internet entirely — the opposite of the firewall button, which
+               cannot make anything worse. Say which devices, by name. */
+            var now = d.ts || Math.floor(Date.now() / 1e3);
+            var byIface = {};
+            (d.tunnels || []).forEach(function (t) {
+                byIface[t.iface] = !t.disabled && t.up && t.handshake && (now - t.handshake) <= 200;
+            });
+            var stranded = (d.policies || []).filter(function (p) {
+                return p.enabled && byIface[p.iface] === false;
+            }).map(function (p) { return nameOf(p.mac.toUpperCase()); });
+            var body = 'Routing policies start being applied immediately.';
+            if (stranded.length && d.failmode !== 'open') {
+                body += ' ' + stranded.join(', ') + (stranded.length > 1 ? ' are' : ' is') +
+                        ' pinned to a tunnel that is not passing traffic, and the fail mode is ' +
+                        'set to closed — so ' + (stranded.length > 1 ? 'they' : 'it') +
+                        ' will have NO internet until that tunnel recovers. ' +
+                        'Switch the fail mode to open first if you would rather ' +
+                        (stranded.length > 1 ? 'they' : 'it') + ' fell back to the normal uplink.';
+            } else if (stranded.length) {
+                body += ' ' + stranded.join(', ') + ' will fall back to the normal uplink, ' +
+                        'because the tunnel is down and the fail mode is open.';
+            } else {
+                body += ' Every routed device has a tunnel that is currently up.';
+            }
+            OS.dialog({ title: 'Start per-device routing', body: body, okText: 'Start' })
+              .then(function (go) {
+                if (!go) return;
+                OS.act(pb2, API, { action: 'pbrstart' }, {
+                    ok: 'Per-device routing is running again.',
+                    failPrefix: 'Could not start it'
+                });
+              });
+        });
+        prow.appendChild(pb2);
+        n.appendChild(prow);
         n.style.marginBottom = '12px';
         alerts.appendChild(n);
     }
+    pbrWasDown = pbrDown;
     /* IPv6 leak protection: three states that all look like "routed and fine"
        on this page, and each has a different remedy. The fact comes from the
        live kernel ruleset, the reason from what the generator recorded — a

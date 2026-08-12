@@ -188,6 +188,50 @@ if [ "$ACTION" = "pauseall" ]; then
     exit 0
 fi
 
+# ============ START PER-DEVICE ROUTING (pbr died, policies want it) ============
+# pbr's lifecycle already belongs to this file — sync_pbr enables, restarts and
+# stops it — so the restart lives here rather than on settings-api, unlike the
+# firewall action which had no owner.
+#
+# NOT the same safety argument as the firewall button, and the confirm text must
+# not borrow it. Restarting the firewall can only restore filtering. Starting
+# pbr APPLIES routing policy, and with the default closed fail mode a device
+# pinned to a tunnel that is down goes from working on the normal uplink to
+# having no internet at all. That is a real consequence and the page states it
+# from live data rather than in the abstract.
+PBRSTAMP=/tmp/.pbrstart
+if [ "$ACTION" = "pbrstart" ]; then
+    _now=$(date +%s)
+    _last=$(cat "$PBRSTAMP" 2>/dev/null); case "$_last" in ''|*[!0-9]*) _last=0 ;; esac
+    if [ $((_now - _last)) -lt 20 ]; then
+        printf '{"ok":false,"error":"just tried that — give it a few seconds before trying again"}'
+        exit 0
+    fi
+    printf '%s' "$_now" > "$PBRSTAMP" 2>/dev/null
+    logger -t vpn-api "per-device routing start requested via web UI"
+    uci set pbr.config.enabled='1'; uci commit pbr
+    /etc/init.d/pbr enable >/dev/null 2>&1
+    /etc/init.d/pbr restart >/dev/null 2>&1
+    # Report what happened, not that the command was issued. pbr sets its flag
+    # and still fails to start — that is exactly how this router spent 40 minutes
+    # reporting healthy while nothing was routed. The honest question is whether
+    # the fwmark rules are in the kernel, so wait briefly and then ask it.
+    _i=0
+    while [ "$_i" -lt 8 ]; do
+        [ "$(ip rule show 2>/dev/null | grep -c 'lookup pbr_')" -gt 0 ] && break
+        sleep 1; _i=$((_i + 1))
+    done
+    _act=$(ip rule show 2>/dev/null | grep -c 'lookup pbr_')
+    if [ "$_act" -gt 0 ]; then
+        logger -t vpn-api "per-device routing started ($_act rule(s))"
+        printf '{"ok":true,"action":"pbrstart","rules":%s}' "$(jnum "$_act")"
+    else
+        logger -t vpn-api "per-device routing still not applying after restart"
+        printf '{"ok":false,"error":"pbr started but is not applying any routing rules. Its usual cause is the firewall: pbr hooks into fw4 mangle chains and cannot install marks if the ruleset is missing."}'
+    fi
+    exit 0
+fi
+
 # ============================ ADD ============================
 if [ "$ACTION" = "add" ]; then
     # No password here, by explicit user choice (same call as the dashboard's VPN
@@ -681,9 +725,26 @@ fi
 VN=""
 for _p in $VNODNS; do VN="$VN${VN:+,}\"$(esc "$_p")\""; done
 
-printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"failmode":"%s","autopaused":%s,"tunnels":[%s],"policies":[%s],' \
+# ---- is per-device routing actually happening? ----
+# pbr_enabled below reads pbr.config.enabled, which is INTENT — a UCI flag saying
+# routing is wanted. It is not evidence that any routing is occurring, and the
+# two diverge in the direction that hides the fault: this very router spent forty
+# minutes with the flag at 1, pbr dead after `FAILED TO START`, zero fwmark rules
+# in the kernel, one device configured to use a tunnel and none of its traffic
+# going anywhere near one — and the VPN page showed no alarm at all, because the
+# flag still said 1.
+#
+# Same shape as the firewall detector, and the same lesson: ask the kernel. pbr
+# works by fwmark plus a routing rule per uplink, so `lookup pbr_` appearing in
+# `ip rule` is the fact. ~3.2ms.
+PBRACT=$(ip rule show 2>/dev/null | grep -c 'lookup pbr_')
+case "$PBRACT" in ''|*[!0-9]*) PBRACT=0 ;; esac
+
+printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"pbr_active":%s,"pbr_rules":%s,"failmode":"%s","autopaused":%s,"tunnels":[%s],"policies":[%s],' \
     "$(date +%s)" \
     "$( [ "$(uci -q get pbr.config.enabled)" = "1" ] && echo true || echo false )" \
+    "$( [ "$PBRACT" -gt 0 ] && echo true || echo false )" \
+    "$(jnum "$PBRACT")" \
     "$FM" "$AUTOP" \
     "$TUNS" "$POLS"
 printf '"vpndns":{"state":"%s","v6_rules":%s,"routed":%s,"chain":%s,"nodns":[%s]}}' \
