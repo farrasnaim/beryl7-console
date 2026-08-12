@@ -721,6 +721,62 @@ function act(btn, url, params, opts) {
     });
 }
 
+/* ------------------------------------------------------- stale page check --- */
+/* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
+   change confined to one page's inline script moves it — that being the whole
+   point, and the change class that produced two wasted debugging sessions. */
+var CONSOLE_VERSION = 'cc77c0961e';
+
+/* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
+   inside a page, so a changed asset can never be served stale. Nothing versions
+   the page. uhttpd sends no Cache-Control, so a browser applies heuristic
+   freshness — roughly a tenth of the file's age — and a page untouched for a
+   month can be served from cache for days after the router starts serving a new
+   one. Measured on this router, not reasoned: a page aged 30 days and then
+   changed was still returned stale by a plain fetch.
+
+   And a stale page poisons everything downstream, because it carries the OLD
+   asset references: the page and its assets go stale together, which is exactly
+   why the stamping mechanism cannot rescue this case. Reaching /dashboard/ from
+   a bookmark — the ordinary way in — bypasses every link that mechanism touches.
+
+   ONCE, AT LOAD. Not on the poll. The failure being caught is "the page I just
+   opened is stale", which is entirely observable at load; watching for a deploy
+   that happens mid-session is a different and far less valuable feature, and
+   buying it would cost a request every few seconds forever. A prompt that
+   reappears after being dismissed is worse than no prompt. */
+function checkStale() {
+    if (!CONSOLE_VERSION || CONSOLE_VERSION === 'dev') return;   /* unstamped tree */
+    fetch('/cgi-bin/version-api', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            if (!j || !j.ok || !j.v || j.v === CONSOLE_VERSION) return;
+            var n = note('This page is an old copy held by your browser — the router is ' +
+                'serving a newer one. Nothing here is wrong, it is just out of date.', 'warn');
+            var b = el('button', 'btn btn--sm', 'Reload');
+            b.style.marginLeft = 'auto';
+            b.addEventListener('click', function () {
+                b.disabled = true;
+                /* Priming the HTTP cache first, THEN reloading. A plain reload
+                   was measured to fetch fresh content on this engine, so the
+                   second call alone would do — but "measured on one engine" is
+                   not "true everywhere", and a Reload button that reloads the
+                   same stale page would be the `/etc/init.d/firewall start`
+                   trap in a new costume: a remedy that silently does nothing.
+                   cache:'reload' was measured to bypass the cache AND replace
+                   the stored entry, so the reload after it cannot lose. */
+                fetch(location.href, { cache: 'reload' })
+                    .catch(function () {})
+                    .then(function () { location.reload(); });
+            });
+            n.appendChild(b);
+            n.style.marginBottom = '12px';
+            var host = $('#alerts') || $('.main');
+            if (host) host.insertBefore(n, host.firstChild);
+        })
+        .catch(function () { /* an older router has no endpoint: say nothing */ });
+}
+
 /* --------------------------------------------------- the firewall alarm --- */
 /* Shared because two pages can reach the same condition: the Overview detects it
    device-wide, and the VPN page's "no IPv6 protection" resolves to the same
@@ -876,6 +932,11 @@ function buildShell(activeHref) {
             mb.appendChild(a);
         });
     }
+
+    /* Every page calls buildShell exactly once at load, which is precisely the
+       moment and the frequency this check wants — so it hooks here rather than
+       asking five pages to remember to call it. */
+    checkStale();
 }
 function transportEl() {
     var t = el('div', 'tp');

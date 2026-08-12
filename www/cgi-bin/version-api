@@ -1,0 +1,33 @@
+#!/bin/sh
+# /www/cgi-bin/version-api  —  which build of the console this router is serving.
+#
+# Exists because nothing versions the PAGES. bump-assets.sh rewrites the os.css
+# and os.js references inside them, so a changed asset is a changed URL and can
+# never be served stale — but the page carrying those references has no version
+# of its own, uhttpd sends no Cache-Control, and a browser therefore applies
+# heuristic freshness and can serve a page from its cache for hours after the
+# router started serving a new one. Measured, not assumed: a page aged 30 days
+# and then changed was still returned from cache by a plain fetch.
+#
+# A stale page is worse than a stale asset because the whole chain hangs off it —
+# it carries the OLD asset references too, so the page and its assets go stale
+# together and the stamping mechanism cannot help.
+#
+# So os.js carries the version it was built with, this reports the version the
+# router has, and the two disagreeing is the definition of a stale page. The
+# comparison lives in os.js; all this has to do is answer honestly and not be
+# cacheable itself.
+#
+# CONSOLE_VERSION is rewritten by bump-assets.sh — do not edit it by hand. It is
+# a hash over os.css, os.js AND every page, normalised to exclude the stamps that
+# are derived from it. Covering the pages is the entire point: a version built
+# from the shared assets alone would not move when a page's own inline script
+# changed, which is precisely the case this exists to catch.
+CONSOLE_VERSION='cc77c0961e'
+
+# no-store, not merely no-cache: a check that can itself be answered from cache
+# inherits the problem it was added to detect. Verified by reading the response
+# headers rather than by trusting this line.
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+printf '{"ok":true,"v":"%s"}' "$CONSOLE_VERSION"

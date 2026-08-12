@@ -78,3 +78,32 @@ for page in */index.html; do
 done
 
 echo "  os.css=$CSS  os.js=$JS  ($changed page(s) rewritten)"
+
+# ---------------------------------------------------------------------------
+# CONSOLE VERSION — covers the PAGES, which the stamping above cannot.
+#
+# The whole reason this exists: a change confined to a page's own inline script
+# moves neither os.css nor os.js, so the asset hashes above stay identical and a
+# browser holding that page has no way to learn it is stale. That is the change
+# class most of this console's recent work lives in. A version derived only from
+# the shared assets would be silent on exactly the failure it was built for, so
+# this one is computed over every page as well.
+#
+# NORMALISED before hashing, or it could never settle: the `?v=` stamps written
+# above and the CONSOLE_VERSION line written below are both derived FROM this
+# value, so feeding them back in would make the hash chase its own tail. Strip
+# both, and the version depends only on content a human actually edited.
+norm() { sed -e 's/?v=[0-9a-f]*//g' -e '/^var CONSOLE_VERSION/d' "$@"; }
+VER=$( { norm os.css os.js; for p in */index.html; do
+             case "$p" in legacy/*) continue ;; esac; norm "$p"; done
+       } | md5sum | cut -c1-10 )
+
+# Stamped into os.js, so a page that arrived from cache carries the version it
+# was built with, and into the endpoint, which reports what the router actually
+# has. The two disagreeing IS the staleness.
+for f in os.js cgi-bin/version-api; do
+    [ -f "$f" ] || continue
+    sed -i "s|^var CONSOLE_VERSION = '[^']*';|var CONSOLE_VERSION = '$VER';|; \
+            s|^CONSOLE_VERSION='[^']*'|CONSOLE_VERSION='$VER'|" "$f"
+done
+echo "  console version=$VER  (covers os.css, os.js and $(ls -d */index.html 2>/dev/null | grep -vc '^legacy/') pages)"

@@ -98,7 +98,7 @@ cp $S/etc/sysctl.d/99-local.conf /etc/sysctl.d/
 # silently, so set it explicitly rather than hoping.
 chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
           /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
-          /www/cgi-bin/probe-api \
+          /www/cgi-bin/probe-api /www/cgi-bin/version-api \
           /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
           /usr/sbin/beryl-pbrtbl \
           /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
@@ -171,7 +171,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/hotplug.d/iface/34-vpn-resume \
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
          /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
-         /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api \
+         /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api \n         /www/cgi-bin/version-api \
          /etc/init.d/beryl-vpndns; do
     grep -qxF "$p" /etc/sysupgrade.conf || echo "$p" >> /etc/sysupgrade.conf
 done
