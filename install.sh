@@ -129,6 +129,15 @@ echo "  . cron entries present"
 /etc/init.d/pingmon restart >/dev/null 2>&1 || true
 echo "  . pingmon running"
 
+# cpugovernor was copied and made executable but never enabled, so on a fresh
+# install it sat there doing nothing: the governor tuning is silent either way,
+# which is exactly why nobody noticed. It is only running on the router it was
+# developed on because an /etc/rc.d symlink was registered for backup by hand.
+# Enabling it here is what makes a clean install match that state.
+/etc/init.d/cpugovernor enable  >/dev/null 2>&1 || true
+/etc/init.d/cpugovernor restart >/dev/null 2>&1 || true
+echo "  . cpugovernor running"
+
 # Keep everything across a sysupgrade.
 touch /etc/sysupgrade.conf
 for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/vpn \

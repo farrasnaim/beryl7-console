@@ -71,11 +71,32 @@ ok "configuration and console files written"
 
 # The CGI exec bits do not survive every transport; a non-executable CGI is a
 # 403 with nothing in the log to explain it.
+#
+# Directories are globbed rather than listed file by file. Every name spelled out
+# here is a name that has to be remembered again the next time something is
+# added, and it was not: pingmon, beryl-pbrtbl and the usb hotplug had all been
+# added to install.sh and never to this list, so a restored router came back
+# with them non-executable — no ping history, no fwmark helper, no iPhone
+# tethering, and nothing anywhere saying why.
 ssh -n "$TARGET" 'chmod 755 /www/cgi-bin/*-api 2>/dev/null
-    chmod 755 /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns 2>/dev/null
-    chmod 755 /etc/hotplug.d/iface/* /etc/hotplug.d/net/30-tethering /etc/init.d/cpugovernor 2>/dev/null
+    chmod 755 /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch \
+              /usr/sbin/beryl-vpndns /usr/sbin/beryl-pbrtbl /usr/sbin/pingmon 2>/dev/null
+    chmod 755 /etc/hotplug.d/iface/* /etc/hotplug.d/net/* /etc/hotplug.d/usb/* 2>/dev/null
+    chmod 755 /etc/init.d/cpugovernor /etc/init.d/pingmon 2>/dev/null
     true'
 ok "executable bits reapplied"
+
+# A restored /etc/init.d script is not a running service: what starts it at boot
+# is the /etc/rc.d symlink, and only cpugovernor's was ever registered for the
+# backup. Enabling here does not depend on the bundle carrying symlinks at all,
+# which is the more robust of the two answers — `enable` is idempotent, so it
+# costs nothing when they did come back.
+ssh -n "$TARGET" 'for s in pingmon cpugovernor; do
+        [ -x "/etc/init.d/$s" ] || continue
+        /etc/init.d/$s enable >/dev/null 2>&1
+    done
+    true'
+ok "services enabled for boot"
 
 say "Rebooting"
 ssh -n "$TARGET" 'reboot' || true
