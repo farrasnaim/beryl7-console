@@ -224,7 +224,37 @@ qs_get_dec() { urldec "$(qs_get "$1")"; }
 guard_post() {
     [ "$REQUEST_METHOD" = "POST" ] || fail "POST required"
     gp_src="${HTTP_ORIGIN:-$HTTP_REFERER}"
-    gp_src="${gp_src#*://}"; gp_src="${gp_src%%[:/]*}"
+    # Reduce the header to a bare host, in RFC 3986 order. This used to be one
+    # line that cut at the first ":" or "/", and the ORDER was the whole bug:
+    # `http://<router-address>:80@attacker.example` truncated at the colon,
+    # yielded the router's OWN address, and passed the allowlist below. Every
+    # write endpoint was reachable that way — measured across all six, not
+    # theorised.
+    #
+    # 1. scheme.  2. path — the authority ends at the first "/", and taking the
+    # path off FIRST means a "@" or ":" inside a path can never be misread as
+    # userinfo or a port delimiter.
+    gp_src="${gp_src#*://}"
+    gp_src="${gp_src%%/*}"
+    # 3. userinfo. A serialised Origin is scheme://host[:port] and never carries
+    # userinfo, so its presence means the header is malformed or forged: refuse
+    # outright rather than parse it out. Deliberately stricter than RFC authority
+    # parsing, which takes the host after the LAST "@" and would therefore accept
+    # `http://attacker:80@<router-address>` — a form whose host really is this
+    # router, but which no legitimate client would ever send. This cannot
+    # over-refuse, precisely because browsers never emit userinfo.
+    case "$gp_src" in *@*) gp_src="" ;; esac
+    # 4. port, bracket-aware. `ip -o addr` prints IPv6 unbracketed, so brackets
+    # have to come off for a match to be possible at all; the old cut landed on
+    # the first colon INSIDE them and produced a fragment ("[fdf4") that could
+    # never match anything. That direction failed closed, so it was not a hole —
+    # but it did mean an IPv6 literal could never be a valid origin. An
+    # unterminated bracket is refused rather than guessed at.
+    case "$gp_src" in
+        \[*\]*) gp_src="${gp_src#\[}"; gp_src="${gp_src%%\]*}" ;;
+        \[*)    gp_src="" ;;
+        *)      gp_src="${gp_src%%:*}" ;;
+    esac
     # DNS is case-insensitive and a browser echoes back whatever was typed
     # in the address bar, so Beryl7.lan and beryl7.lan are one host. The
     # address list is already lowercase, so this cannot affect IP matching.
