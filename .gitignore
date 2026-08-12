@@ -10,21 +10,51 @@ backups/
 *.packages
 
 # Live router state, in case a copy is ever pulled off the device into this tree
-# to look at. DENY BY DEFAULT, allow the few files that genuinely belong here.
+# to look at. DENY BY DEFAULT under etc/, then re-admit the tracked files by name.
 #
-# This was a list of names, and a list of names goes stale the moment anything is
-# added — which it did, inside a single session: repeater-known (Wi-Fi passphrases)
-# had to be remembered by hand, while oui and nlbw-daily were simply missed, and
-# so was every /etc/config file. The worst of those is etc/config/network, which
-# is where WireGuard private keys live, with etc/config/wireless holding the
-# Wi-Fi passphrases beside it.
+# This block used to be a list of directories to deny, and a list of names goes
+# stale the moment anything is added — which it did, inside a single session:
+# repeater-known (Wi-Fi passphrases) had to be remembered by hand, while oui and
+# nlbw-daily were simply missed, and so was every /etc/config file. The worst of
+# those is etc/config/network, which is where WireGuard private keys live, with
+# etc/config/wireless holding the Wi-Fi passphrases beside it.
 #
-# Written as "ignore the directory, then re-admit what is tracked" so that a file
-# added later is private unless someone deliberately says otherwise. That is the
-# safe direction for a public repository: the failure mode of the old form was a
-# silent publish, the failure mode of this one is a file that needs an explicit
-# exception before it can be committed.
-etc/config/
-etc/dashboard/*
+# Naming the dangerous directories was still the wrong SHAPE, and that is what
+# this rewrite fixes. Denying three subtrees left the SSH host keys and
+# authorized_keys, the root password hash, the uhttpd TLS key, the iOS pairing
+# records and both traffic-accounting databases all trackable — every one of them
+# present on a live router — along with any directory nobody has thought of yet.
+# One `git add -A` after copying a file in to look at it would have published
+# them, irreversibly, to a public repository.
+#
+# So the rule is inverted rather than extended. Everything under etc/ is private;
+# a file becomes committable only by being named below. Adding a directory to a
+# deny list is what failed twice now, so it is no longer possible to fail that
+# way: a path nobody anticipated is private by default, not public by default.
+#
+# ADDING A CONSOLE FILE UNDER etc/? It will not be staged until you give it a `!`
+# line here. That is the point. The old form failed by publishing silently; this
+# one fails by leaving out a file you can see is missing.
+#
+# `!etc/**/` IS LOAD-BEARING, NOT DECORATION. Git never descends into an excluded
+# directory, so without it every exception below is dead — the parent is already
+# excluded and the re-inclusion can never be evaluated. Verified rather than
+# assumed: with the exceptions but no `!etc/**/`, `git add -A` over a tree holding
+# an SSH host key, a shadow file and a TLS key stages nothing whatsoever — not
+# the secrets, and not the console files it was supposed to keep.
+etc/**
+!etc/**/
+!etc/crontabs/root
 !etc/dashboard/classmap.example
-etc/nftables.d/
+!etc/hotplug.d/iface/15-travel-dns
+!etc/hotplug.d/iface/31-tethering-clash
+!etc/hotplug.d/iface/32-pbr-uplink
+!etc/hotplug.d/iface/33-uplink-width
+!etc/hotplug.d/iface/34-vpn-resume
+!etc/hotplug.d/iface/99-repeater-iot
+!etc/hotplug.d/net/30-tethering
+!etc/hotplug.d/usb/40-usbmuxd
+!etc/init.d/beryl-vpndns
+!etc/init.d/cpugovernor
+!etc/init.d/pingmon
+!etc/sysctl.d/99-local.conf
