@@ -32,7 +32,18 @@ echo "${_u%.*} $loss" > /tmp/.wanreach
 # nothing here noticed. One line of state, same shape as $LAT.
 v6=$(ping6 -c1 -W2 -q 2606:4700:4700::1111 2>/dev/null | awk -F, '/packet loss/{gsub(/[^0-9]/,"",$3); print $3}')
 [ -n "$v6" ] || v6=100
-echo "$now $v6" > /tmp/.wanlat6
+# UPTIME, not wall clock. This line used to write $now, which is `date +%s`, and
+# that was wrong twice over. The reader could not age-check it against its own
+# uptime clock without comparing 44,000 to 1.79 billion — so it did not age-check
+# it at all, and a dead dashmon left the Overview reporting IPv6 REACHABLE for as
+# long as the router stayed up. And it carried the NTP bug the .wanreach line
+# eight lines above deliberately designed out: a clock step could make a fresh
+# sample look ancient, or an ancient one look fresh.
+#
+# Re-read rather than reusing $_u from above, so this stays correct if the two
+# probes are ever reordered or separated.
+read -r _u6 _rest6 < /proc/uptime 2>/dev/null
+echo "${_u6%.*} $v6" > /tmp/.wanlat6
 
 # ---- internet-status LED (white:status) ----
 # At-a-glance health with no phone needed: DARK when the internet is fine, BLINK

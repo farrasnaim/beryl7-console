@@ -747,7 +747,27 @@ FWSTATE=$(fw_table_state)
 # IPv6 reachability, written by dashmon. Reported separately from the v4 probe
 # because they fail independently — the 2026-08-10 outage took v6 down while v4
 # stayed perfect. -1 means dashmon has not sampled yet.
-V6LOSS=$(awk 'NF>=2 {print $2+0; exit}' /tmp/.wanlat6 2>/dev/null); [ -n "$V6LOSS" ] || V6LOSS=-1
+# AGE-CHECKED, like .wanreach and for the same reason. Without this the last
+# sample was believed forever: stop cron and the Overview went on printing IPv6
+# REACHABLE in the ok tone from a measurement that had stopped being taken. A
+# dead gauge reading "fine" is worse than no gauge.
+#
+# 150s covers two missed cron cycles, matching the .wanreach guard. Both sides
+# are now uptime, so the comparison is like-for-like; the negative test catches a
+# file written before a reboot, which tmpfs makes theoretical but costs nothing.
+#
+# -1 means "not measured recently" and the page HIDES the row rather than
+# claiming anything — the same path a router takes in its first minute of
+# uptime. Deliberately not rendered as a fault: "nobody is measuring" and
+# "IPv6 is down" are different facts and only one of them is about the network.
+V6LOSS=-1
+if [ -f /tmp/.wanlat6 ]; then
+    read -r _v6u _v6l < /tmp/.wanlat6 2>/dev/null
+    case "$_v6u" in ''|*[!0-9]*) _v6u=-1 ;; esac
+    case "$_v6l" in ''|*[!0-9]*) _v6l=-1 ;; esac
+    _v6age=$(( _upnow - _v6u ))
+    [ "$_v6u" -ge 0 ] && [ "$_v6age" -ge 0 ] && [ "$_v6age" -le 150 ] && V6LOSS=$_v6l
+fi
 
 # ---- which uplink owns the default route, and how long it has owned it ------
 # Sits here rather than beside the "uplink" key below because sys.wan_uptime
