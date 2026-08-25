@@ -53,6 +53,7 @@ etc/**
 !etc/hotplug.d/iface/34-vpn-resume
 !etc/hotplug.d/iface/99-repeater-iot
 !etc/hotplug.d/net/30-tethering
+!etc/hotplug.d/net/40-rrm-neighbors
 !etc/hotplug.d/usb/40-usbmuxd
 !etc/init.d/beryl-vpndns
 !etc/init.d/cpugovernor

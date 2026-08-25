@@ -126,6 +126,7 @@ etc/
   hotplug.d/iface/34-vpn-resume        resume a paused tunnel when a link returns
   hotplug.d/iface/99-repeater-iot      IoT SSID off while repeating
   hotplug.d/net/30-tethering           bind any tethering netdev name
+  hotplug.d/net/40-rrm-neighbors       cross-band 802.11k neighbour reports
   hotplug.d/usb/40-usbmuxd             disabled stub (see its header for why)
   init.d/cpugovernor         schedutil instead of a pinned 2.0 GHz
   init.d/pingmon             keeps pingmon running (procd, not cron)
@@ -244,6 +245,65 @@ A full recovery from bare firmware is then:
 3. The router reboots onto your old address with your configuration and the console already in place.
 
 If you only want the console back and not the old configuration, run `./install.sh <router>` instead — that is the clean-slate path.
+
+**Two things `restore.sh` handles that are easy to get wrong**, both learned by being bitten:
+
+- **The bundle contains the SSH host keys**, so restoring it changes the router's identity *mid-run*. Unhandled, the next `ssh` aborts with `REMOTE HOST IDENTIFICATION HAS CHANGED` after the config is written but before permissions are fixed — leaving a console that answers 403 with nothing in the log to explain it. The script uses a throwaway `known_hosts` for the run and never touches yours.
+- **User-installed kernel modules are part of your setup.** An earlier version filtered out every `kmod-*` on the reasoning that modules ship with the image; that quietly removed the USB tethering drivers on restore. Re-adding an already-present package is a no-op, so the filter cost a feature and bought nothing.
+
+Note that a `sysupgrade -b` bundle only ever holds what `/etc/sysupgrade.conf` lists. Anything you installed outside the package manager — a rebuilt kernel module, a replaced firmware blob — is **not** in it and needs its own copy.
+
+## Band roaming (802.11r / 802.11k)
+
+Optional, and off unless you configure it. On a single-radio-pair router the two
+same-SSID APs are served by one `hostapd` process, which makes fast transition
+straightforward — and hides one thing that is not obvious.
+
+Enable FT and RRM on both APs of the shared SSID:
+
+```sh
+for i in main2g main5g; do
+    uci set wireless.$i.ieee80211r='1'
+    uci set wireless.$i.mobility_domain='be07'   # any 4 hex digits, same on both
+    uci set wireless.$i.ft_over_ds='0'           # over-the-air; more compatible
+    uci set wireless.$i.ft_psk_generate_local='1'
+    uci set wireless.$i.ieee80211k='1'
+    uci set wireless.$i.rrm_neighbor_report='1'
+    uci set wireless.$i.rrm_beacon_report='1'
+done
+uci commit wireless && wifi reload
+```
+
+Confirm hostapd took it — the generated config should list the FT key-management
+suites, not just the plain ones:
+
+```
+$ grep wpa_key_mgmt /var/run/hostapd-phy0.1.conf
+wpa_key_mgmt=SAE FT-SAE WPA-PSK WPA-PSK-SHA256 FT-PSK
+```
+
+**The part that surprises people: `hostapd` does not share neighbour reports
+between its own BSSes.** With `rrm_neighbor_report=1` on both APs,
+`ubus call hostapd.<ap> rrm_nr_list` still returns an empty list on each — so a
+client is told nothing about the other band, and 802.11r can only assist a roam
+the client worked out by itself. `etc/hotplug.d/net/40-rrm-neighbors` fixes that:
+it reads each AP's own element via `rrm_nr_get_own` and installs it on the other,
+in both directions.
+
+It hooks the netdev appearing rather than running at boot, because that fires on
+a cold boot and the list is runtime state. Note that a plain `wifi reload` does
+**not** clear it — the interfaces are not recreated, so their ifindexes are
+unchanged and the BSS is never torn down. Only a reboot loses it.
+
+Two things worth knowing before you spend time on this:
+
+- **FT only engages on a roam**, so a fresh association shows `auth_alg=sae`, not
+  `auth_alg=ft`. Watch `logread` for the latter to confirm it is really being used.
+- Forcing a roam from the router needs 802.11v `bss_transition_request`, which
+  **`wpad-basic-mbedtls` does not register on ubus** — `bss_mgmt_enable` does not
+  add it. So there is no way to command a client to roam from here; confirmation
+  has to come from a real one.
+
 
 ## Security model
 

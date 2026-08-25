@@ -94,7 +94,7 @@ cp $S/usr/sbin/dashmon $S/usr/sbin/apwatch $S/usr/sbin/vpnwatch $S/usr/sbin/bery
 # Hotplug automation and system tunables.
 mkdir -p /etc/hotplug.d/iface /etc/hotplug.d/net /etc/hotplug.d/usb /etc/sysctl.d
 cp $S/etc/hotplug.d/iface/* /etc/hotplug.d/iface/
-cp $S/etc/hotplug.d/net/30-tethering /etc/hotplug.d/net/
+cp $S/etc/hotplug.d/net/* /etc/hotplug.d/net/
 cp $S/etc/hotplug.d/usb/40-usbmuxd /etc/hotplug.d/usb/
 cp $S/etc/init.d/cpugovernor $S/etc/init.d/pingmon $S/etc/init.d/beryl-vpndns /etc/init.d/
 cp $S/etc/sysctl.d/99-local.conf /etc/sysctl.d/
@@ -112,6 +112,7 @@ chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api 
           /etc/hotplug.d/iface/33-uplink-width \
           /etc/hotplug.d/iface/34-vpn-resume \
           /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
+          /etc/hotplug.d/net/40-rrm-neighbors \
           /etc/init.d/cpugovernor /usr/sbin/pingmon /etc/init.d/pingmon \
           /etc/init.d/beryl-vpndns
 echo "  . files installed"
@@ -176,6 +177,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/hotplug.d/iface/33-uplink-width \
          /etc/hotplug.d/iface/34-vpn-resume \
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
+         /etc/hotplug.d/net/40-rrm-neighbors \
          /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
          /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api \
          /www/cgi-bin/version-api \
