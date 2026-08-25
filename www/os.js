@@ -725,7 +725,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '8c3f484294';
+var CONSOLE_VERSION = '6b74319560';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1182,7 +1182,7 @@ function gem() {
 function quality(dbm) {
     if (dbm == null || dbm === 0) return { word: 'NO SIGNAL', tone: 'idle', f: 0 };
     if (dbm >= -55) return { word: 'EXCELLENT', tone: 'ok',   f: 1 };
-    if (dbm >= -67) return { word: 'GOOD',      tone: 'ok',   f: .72 };
+    if (dbm >= -67) return { word: 'GOOD',      tone: 'fair', f: .72 };
     if (dbm >= -75) return { word: 'WEAK',      tone: 'warn', f: .45 };
     return                 { word: 'POOR',      tone: 'bad',  f: .2 };
 }

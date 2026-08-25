@@ -56,6 +56,7 @@
        for graphics in both themes — and light --good rose from 2.67 to 3.45,
        clearing a floor it used to miss. */
     --good:#63b381;    --good-fg:#83c79c;
+    --fair:#8fa855;    --fair-fg:#aec283;
     --caution:#c9a468; --caution-fg:#dcbb8b;
     --fault:#d97b74;   --fault-fg:#e8988f;
     --idle:#5a5955;
@@ -76,6 +77,7 @@
     --sig:#0b8e7c; --sig-fg:#0a6f61; --sig-solid:#0a6f61; --sig-ink:#ffffff;
     --sig-dim:rgba(11,142,124,.13); --sig-line:rgba(11,142,124,.32);
     --good:#4a8760; --good-fg:#356b48;
+    --fair:#6f8438; --fair-fg:#4f6127;
     --caution:#94743f; --caution-fg:#6b5324;
     --fault:#a85a53; --fault-fg:#8c4a44; --idle:#a5a29a;
   }
@@ -87,6 +89,7 @@
   --sig:#3fd9be; --sig-fg:#55e2ca; --sig-solid:#3fd9be; --sig-ink:#04231f;
   --sig-dim:rgba(63,217,190,.15); --sig-line:rgba(63,217,190,.34);
   --good:#63b381; --good-fg:#83c79c;
+  --fair:#8fa855; --fair-fg:#aec283;
   --caution:#c9a468; --caution-fg:#dcbb8b; --fault:#d97b74; --fault-fg:#e8988f; --idle:#5a5955;
 }
 :root[data-theme="light"]{
@@ -96,6 +99,7 @@
   --sig:#0b8e7c; --sig-fg:#0a6f61; --sig-solid:#0a6f61; --sig-ink:#ffffff;
   --sig-dim:rgba(11,142,124,.13); --sig-line:rgba(11,142,124,.32);
   --good:#4a8760; --good-fg:#356b48;
+    --fair:#6f8438; --fair-fg:#4f6127;
   --caution:#94743f; --caution-fg:#6b5324; --fault:#a85a53; --fault-fg:#8c4a44; --idle:#a5a29a;
 }
 /* aliases: page code written against the old names keeps resolving */
@@ -352,7 +356,8 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 /* ---- state word: the only uppercase in the interface -------------------- */
 .sw{font-size:10px;font-weight:650;letter-spacing:.13em;text-transform:uppercase;
     color:var(--ink-4);white-space:nowrap}
-.sw--ok{color:var(--good-fg)} .sw--warn{color:var(--caution-fg)}
+.sw--ok{color:var(--good-fg)} .sw--fair{color:var(--fair-fg)}
+.sw--warn{color:var(--caution-fg)}
 .sw--bad{color:var(--fault-fg)} .sw--idle{color:var(--ink-4)}
 
 /* ---- readout ------------------------------------------------------------ */
@@ -388,6 +393,10 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
    drew a RED bar next to the word EXCELLENT in green. Semantic tones must not
    inherit the accent. */
 .scale[data-tone="ok"] .scale__fill{background:var(--good)}
+/* GOOD (-55..-67 dBm) is its own band: still fine, but visibly not top. A
+   dimmer, yellower green - never brighter than --good, or "good" would shout
+   louder than "excellent". */
+.scale[data-tone="fair"] .scale__fill{background:var(--fair)}
 .scale[data-tone="warn"] .scale__fill{background:var(--caution)}
 .scale[data-tone="bad"] .scale__fill{background:var(--fault)}
 .scale[data-tone="idle"] .scale__fill{background:var(--idle)}
@@ -396,6 +405,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
     transform:rotate(45deg);transition:left 400ms var(--ease);box-shadow:0 0 0 2px var(--face)}
 .row:hover .scale__m,.row[aria-expanded="true"] .scale__m{box-shadow:0 0 0 2px var(--face-2)}
 .scale[data-tone="ok"] .scale__m{background:var(--good)}
+.scale[data-tone="fair"] .scale__m{background:var(--fair)}
 .scale[data-tone="warn"] .scale__m{background:var(--caution)}
 .scale[data-tone="bad"] .scale__m{background:var(--fault)}
 .scale[data-tone="idle"] .scale__m{background:var(--idle)}
@@ -706,6 +716,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .meter i{flex:1;background:var(--rule);transition:background var(--t) var(--ease)}
 .meter i.on{background:var(--sig)}
 .meter[data-tone="ok"] i.on{background:var(--good)}
+.meter[data-tone="fair"] i.on{background:var(--fair)}
 .meter[data-tone="warn"] i.on{background:var(--caution)}
 .meter[data-tone="bad"] i.on{background:var(--fault)}
 .meter[data-tone="idle"] i.on{background:var(--idle)}

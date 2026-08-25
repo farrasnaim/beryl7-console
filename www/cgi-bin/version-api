@@ -23,7 +23,7 @@
 # are derived from it. Covering the pages is the entire point: a version built
 # from the shared assets alone would not move when a page's own inline script
 # changed, which is precisely the case this exists to catch.
-CONSOLE_VERSION='8c3f484294'
+CONSOLE_VERSION='6b74319560'
 
 # no-store, not merely no-cache: a check that can itself be answered from cache
 # inherits the problem it was added to detect. Verified by reading the response

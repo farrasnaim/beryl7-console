@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=945714b0">
+<link rel="stylesheet" href="/os.css?v=c99f4a27">
 </head>
 <body>
 <div class="shell">
@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=61d00e89"></script>
+<script src="/os.js?v=3f07f066"></script>
 <script>
 (function () {
 'use strict';
@@ -1213,10 +1213,15 @@ function rowFor(mac) {
 
         clear(r._word);
         if (wifi) {
-            var active = v.idleMs < 3000;
+            /* Always the signal word, always coloured to match its own bar.
+               ACTIVE used to pre-empt it whenever the client had transmitted in
+               the last 3s, so on a busy network most rows never showed their
+               signal at all - and ACTIVE was green no matter how weak the link
+               was, which is the opposite of what the column is for. The word and
+               the bar now agree: EXCELLENT green, GOOD fair, WEAK amber, POOR
+               red. */
             var q = OS.quality(v.signal);
-            r._word.appendChild(OS.stateWord(active ? 'ACTIVE' : q.word,
-                active ? 'ok' : q.tone === 'ok' ? null : q.tone));
+            r._word.appendChild(OS.stateWord(q.word, q.tone));
         } else if (v.medium === 'eth') {
             r._word.appendChild(OS.stateWord('WIRED', 'ok'));
         } else if (v.medium === 'blocked') {
