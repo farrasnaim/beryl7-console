@@ -381,6 +381,13 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .scale__track{position:absolute;left:0;right:0;top:6px;height:2px;background:var(--rule-2)}
 .scale__fill{position:absolute;left:0;top:6px;height:2px;background:var(--sig);
     transition:width 400ms var(--ease)}
+/* "ok" was missing here while .meter had it, so every healthy signal fell
+   through to var(--sig) - the ACCENT colour. Two consequences: good, weak and
+   excellent were indistinguishable (quality() calls everything >= -67 dBm "ok",
+   which is most of a normal house), and under the red accent a perfect signal
+   drew a RED bar next to the word EXCELLENT in green. Semantic tones must not
+   inherit the accent. */
+.scale[data-tone="ok"] .scale__fill{background:var(--good)}
 .scale[data-tone="warn"] .scale__fill{background:var(--caution)}
 .scale[data-tone="bad"] .scale__fill{background:var(--fault)}
 .scale[data-tone="idle"] .scale__fill{background:var(--idle)}
@@ -388,6 +395,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .scale__m{position:absolute;top:2px;width:9px;height:9px;margin-left:-4.5px;background:var(--sig);
     transform:rotate(45deg);transition:left 400ms var(--ease);box-shadow:0 0 0 2px var(--face)}
 .row:hover .scale__m,.row[aria-expanded="true"] .scale__m{box-shadow:0 0 0 2px var(--face-2)}
+.scale[data-tone="ok"] .scale__m{background:var(--good)}
 .scale[data-tone="warn"] .scale__m{background:var(--caution)}
 .scale[data-tone="bad"] .scale__m{background:var(--fault)}
 .scale[data-tone="idle"] .scale__m{background:var(--idle)}

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=25886136">
+<link rel="stylesheet" href="/os.css?v=945714b0">
 </head>
 <body>
 <div class="shell">
@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=f6fee9b6"></script>
+<script src="/os.js?v=61d00e89"></script>
 <script>
 (function () {
 'use strict';
@@ -1040,7 +1040,7 @@ function renderClients(d, M) {
     var box = $('#clients');
     var devs = M.devices;
     var onlineN = devs.filter(function (v) { return v.medium !== 'idle' && v.medium !== 'blocked'; }).length;
-    setTxt($('#cliCount'), onlineN + ' online · ' + devs.length + ' known');
+    setTxt($('#cliCount'), onlineN + ' online');
 
     var K = OS.keyed(box);
     if (!devs.length) {
