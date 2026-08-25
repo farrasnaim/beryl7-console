@@ -139,5 +139,96 @@ if [ "$_snapday" != "$_today" ]; then
     fi
 fi
 
+# ---- uplink data usage ------------------------------------------------------
+# Two different questions, kept deliberately apart because they have opposite
+# lifetimes:
+#
+#   wan                -> how much this MONTH. Must survive a reboot, so a
+#                         checkpoint goes to flash; netdev counters do not.
+#   wwan / tethering   -> how much THIS SESSION. Lives in /tmp only, because a
+#                         session ends when the link drops or the router
+#                         reboots and both of those should zero it. No flash
+#                         write at all.
+#
+# Both accumulate DELTAS rather than reporting a counter: a netdev counter
+# restarts at zero on reboot, and a tethered phone gets a brand-new netdev each
+# time it is plugged in. Reading the counter directly would show a total that
+# silently jumps backwards.
+#
+# The live figure is written to /tmp every minute (free) and only checkpointed
+# to flash every FLUSH seconds. Worst case an unclean power loss costs the last
+# few minutes of the month's total — cheap, against writing flash 1440 times a
+# day for a number that only ever grows.
+UMON=/etc/dashboard/uplink-month
+ULIVE=/tmp/.uplink-month
+USESS=/tmp/.uplink-session
+UFLUSH=600
+
+_udev=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+_ukind=none
+if [ -n "$_udev" ]; then
+    for _n in wan wwan tethering; do
+        _l=$(ubus call network.interface.$_n status 2>/dev/null |
+             awk -F'"' '/"l3_device"/{print $4; exit}')
+        [ "$_l" = "$_udev" ] && { _ukind=$_n; break; }
+    done
+fi
+
+_ucur=0
+if [ -n "$_udev" ] && [ -d "/sys/class/net/$_udev/statistics" ]; then
+    _urx=$(cat "/sys/class/net/$_udev/statistics/rx_bytes" 2>/dev/null)
+    _utx=$(cat "/sys/class/net/$_udev/statistics/tx_bytes" 2>/dev/null)
+    case "$_urx" in ''|*[!0-9]*) _urx=0 ;; esac
+    case "$_utx" in ''|*[!0-9]*) _utx=0 ;; esac
+    _ucur=$((_urx + _utx))
+fi
+
+_uget() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1; }
+_unum() { case "$1" in ''|*[!0-9]*) echo 0 ;; *) echo "$1" ;; esac; }
+
+if [ "$_ukind" = wan ] && [ "$_ucur" -gt 0 ]; then
+    _umonth=$(date +%Y-%m)
+    # /tmp first: it is the live value. Flash is only the boot seed.
+    _src=$ULIVE; [ -s "$ULIVE" ] || _src=$UMON
+    _pm=$(_uget "$_src" month); _pd=$(_uget "$_src" dev)
+    _pt=$(_unum "$(_uget "$_src" total)"); _pl=$(_unum "$(_uget "$_src" last)")
+    _pw=$(_unum "$(_uget "$UMON" wrote)")
+    if [ "$_pm" != "$_umonth" ] || [ "$_pd" != "$_udev" ]; then
+        # New month, or the uplink moved to a different netdev: start clean
+        # rather than inheriting a delta that belongs to something else.
+        _pt=0; _pl=$_ucur; _pw=0
+    fi
+    # A counter that went backwards means the interface was recreated, so the
+    # whole current reading is new traffic.
+    if [ "$_ucur" -lt "$_pl" ]; then _pt=$((_pt + _ucur)); else _pt=$((_pt + _ucur - _pl)); fi
+    _now=$(date +%s)
+    printf 'month=%s\ndev=%s\ntotal=%s\nlast=%s\n' "$_umonth" "$_udev" "$_pt" "$_ucur" > "$ULIVE" 2>/dev/null
+    if [ $((_now - _pw)) -ge "$UFLUSH" ] || [ "$_pw" -eq 0 ]; then
+        mkdir -p /etc/dashboard 2>/dev/null
+        printf 'month=%s\ndev=%s\ntotal=%s\nlast=%s\nwrote=%s\n' \
+            "$_umonth" "$_udev" "$_pt" "$_ucur" "$_now" > "$UMON.tmp" 2>/dev/null
+        if [ -s "$UMON.tmp" ] && grep -q '^total=' "$UMON.tmp"; then
+            mv "$UMON.tmp" "$UMON"
+        else
+            rm -f "$UMON.tmp"
+        fi
+    fi
+    rm -f "$USESS"
+elif [ "$_ukind" = wwan ] || [ "$_ukind" = tethering ]; then
+    _sk=$(_uget "$USESS" kind); _sd=$(_uget "$USESS" dev)
+    _st=$(_unum "$(_uget "$USESS" total)"); _sl=$(_unum "$(_uget "$USESS" last)")
+    _ss=$(_unum "$(_uget "$USESS" since)")
+    if [ "$_sk" != "$_ukind" ] || [ "$_sd" != "$_udev" ]; then
+        _st=0; _sl=$_ucur; _ss=$(date +%s)
+    fi
+    if [ "$_ucur" -lt "$_sl" ]; then _st=$((_st + _ucur)); else _st=$((_st + _ucur - _sl)); fi
+    printf 'kind=%s\ndev=%s\nsince=%s\ntotal=%s\nlast=%s\n' \
+        "$_ukind" "$_udev" "$_ss" "$_st" "$_ucur" > "$USESS" 2>/dev/null
+else
+    # No default route at all: end any session rather than resuming it later
+    # with a gap silently folded in.
+    rm -f "$USESS"
+fi
+
 # Reached the end of every probe and every write above.
 beat

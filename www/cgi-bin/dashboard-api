@@ -909,7 +909,29 @@ printf '"lanebytes":{%s},' "$LBJ"
 printf '"wan":{"ip":"%s","rx_rate":%s,"tx_rate":%s,"rx_bytes":%s,"tx_bytes":%s},' \
     "$(esc "$WANIP")" "$WRX" "$WTX" "$RXB" "$TXB"
 
+
+# ---- uplink data usage, as dashmon accumulated it ---------------------------
+# Read, never computed here: this endpoint is polled from every open tab, and a
+# counter that advanced once per reader would count the same bytes many times.
+# dashmon owns the arithmetic and runs once a minute; this only reports.
+#
+# "month" is the calendar month for a wan uplink. On a repeater or a tethered
+# phone the question is a different one — how much has THIS session used — so
+# the payload carries `since` instead and the client titles it accordingly.
+UUKIND="$UPACT"; UUTOTAL=0; UUMONTH=""; UUSINCE=0; UUOK=false
+_uu_get() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1; }
+if [ "$UPACT" = "wan" ]; then
+    _uf=/tmp/.uplink-month; [ -s "$_uf" ] || _uf=/etc/dashboard/uplink-month
+    _t=$(_uu_get "$_uf" total); _m=$(_uu_get "$_uf" month)
+    case "$_t" in ''|*[!0-9]*) ;; *) UUTOTAL=$_t; UUMONTH=$_m; UUOK=true ;; esac
+elif [ "$UPACT" = "wwan" ] || [ "$UPACT" = "tethering" ]; then
+    _t=$(_uu_get /tmp/.uplink-session total); _s=$(_uu_get /tmp/.uplink-session since)
+    case "$_t" in ''|*[!0-9]*) ;; *) UUTOTAL=$_t; UUOK=true ;; esac
+    case "$_s" in ''|*[!0-9]*) UUSINCE=0 ;; *) UUSINCE=$_s ;; esac
+fi
+
 printf '"uplink":{"active":"%s","dev":"%s"},' "$UPACT" "$(esc "$ACTDEV")"
+printf '"uplink_usage":{"kind":"%s","total":%s,"month":"%s","since":%s,"ok":%s},' "$(esc "$UUKIND")" "$UUTOTAL" "$(esc "$UUMONTH")" "$UUSINCE" "$UUOK"
 printf '"air":%s,"sta":%s,"neigh":%s,"oui":%s,"wired":%s,"events":%s,"nlbw":%s,' \
     "$AIRJ" "$STAJ" "$NBJ" "$OUIJ" "$WIREDJ" "$EVJ" "$NLJ"
 printf '"probe":{"loss":%s,"ping":%s,"jit":%s,"state":"%s","online":%s},' \

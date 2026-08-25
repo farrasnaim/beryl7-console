@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=3f07f066"></script>
+<script src="/os.js?v=159bdb45"></script>
 <script>
 (function () {
 'use strict';
@@ -1568,6 +1568,20 @@ function trafficHeading(period, daily) {
     return 'Traffic since ' + start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
+/* The uplink line under the device list. "August total usage:" on the WAN,
+   because a calendar month is the unit a data plan is sold in. On a repeater or
+   a tethered phone that unit means nothing — the link did not exist for most of
+   the month — so the question becomes how much THIS session has carried, and it
+   starts again when the link drops. */
+function uplinkUsageLabel(uu) {
+    if (uu.kind === 'wwan')      return 'Current repeater total usage:';
+    if (uu.kind === 'tethering') return 'Current tethering total usage:';
+    var m = /^\d{4}-\d{2}$/.test(uu.month || '')
+        ? new Date(+uu.month.slice(0, 4), +uu.month.slice(5, 7) - 1, 1)
+              .toLocaleDateString(undefined, { month: 'long' })
+        : '';
+    return (m || 'Month') + ' total usage:';
+}
 function renderTraffic(d, M) {
     setTxt($('#trafTitle'), trafficHeading(d.nlbw_period, d.nlbw_daily));
     var box = $('#traffic');
@@ -1627,6 +1641,22 @@ function renderTraffic(d, M) {
         OS.meterSet(r._meter, (v.traffic.dn + v.traffic.up) / top);
     });
     K.commit();
+
+    /* Uplink total, below the devices, and deliberately a DIFFERENT number from
+       the rows above: those are LAN devices this accounting period, this is what
+       the uplink itself carried. They are not meant to agree — traffic the router
+       originates, and anything nlbwmon was not running for, lands here and not
+       there. Built once and kept, like the grid. */
+    if (!box._uplink) {
+        box._uplink = el('div', 'hint');
+        box._uplink.style.cssText = 'margin-top:12px;padding-top:10px;border-top:1px solid var(--rule)';
+        box.appendChild(box._uplink);
+    }
+    var uu = d.uplink_usage;
+    /* Hidden rather than shown empty when dashmon has not written a figure yet:
+       a label with no number reads as a fault. */
+    box._uplink.hidden = !(uu && uu.ok);
+    if (uu && uu.ok) setTxt(box._uplink, uplinkUsageLabel(uu) + '  ' + OS.bytes(uu.total));
 }
 function trafRow() {
     var r = el('div'); r.style.marginBottom = '9px';
