@@ -14,8 +14,21 @@
 # A fresh router is usually at 192.168.1.1 with no password and no SSH key
 # installed, so expect to be prompted for the root password a few times unless
 # you run ssh-copy-id first.
+#
+# NOTE ON HOST KEYS: the bundle contains /etc/dropbear/dropbear_*_host_key, so
+# restoring it swaps the router's SSH identity MID-RUN. Without the handling
+# below the next ssh aborts with REMOTE HOST IDENTIFICATION HAS CHANGED - after
+# the config is written but before permissions are fixed, leaving a console that
+# answers 403 with nothing in the log to say why. This run therefore uses a
+# throwaway known_hosts and never touches yours. A deliberate trade: you are on
+# the LAN, deliberately restoring a router you own, and the host key is expected
+# to change because you are the one changing it.
 
 set -e
+
+KH=$(mktemp 2>/dev/null || echo /tmp/.beryl7-restore-kh.$$)
+trap 'rm -f "$KH"' EXIT INT TERM
+SSHOPT="-o StrictHostKeyChecking=no -o UserKnownHostsFile=$KH -o LogLevel=ERROR"
 
 ROUTER=${1:-192.168.1.1}
 BUNDLE=$2
@@ -32,7 +45,7 @@ warn() { printf '  ! %s\n' "$*"; }
 PKGS="${BUNDLE%.tar.gz}.packages"
 
 say "Restoring $BUNDLE -> $TARGET"
-ssh -n -o ConnectTimeout=10 "$TARGET" true || {
+ssh -n $SSHOPT -o ConnectTimeout=10 "$TARGET" true || {
     echo "cannot reach $TARGET over SSH."; exit 1; }
 ok "reachable"
 
@@ -49,8 +62,14 @@ if [ -f "$PKGS" ]; then
     # or pointlessly rewrites flash. Everything else is attempted, and failures
     # are reported rather than fatal — a package may have been renamed or
     # dropped between releases.
-    WANT=$(grep -vE '^(kmod-|base-files|busybox|libc|kernel|firmware|.*-firmware$)' "$PKGS" | tr '\n' ' ')
-    ssh -n "$TARGET" "if command -v apk >/dev/null 2>&1; then
+    # Do NOT filter out kmod-*. An earlier version did, reasoning that modules
+    # ship with the image so re-adding them is pointless - but USER-installed
+    # ones were collateral, and on one restore that silently took the USB
+    # tethering drivers (ipheth, rndis, cdc-eem, acm, sierrawireless) with it.
+    # Re-adding a package that is already present is a no-op, so the filter
+    # bought nothing and cost a feature.
+    WANT=$(grep -vE '^(base-files|busybox|libc|kernel)$' "$PKGS" | tr '\n' ' ')
+    ssh -n $SSHOPT "$TARGET" "if command -v apk >/dev/null 2>&1; then
                           apk update >/dev/null 2>&1 || true
                           for p in $WANT; do apk add --no-interactive \"\$p\" >/dev/null 2>&1 || echo \"  ! skipped \$p\"; done
                       else
@@ -65,8 +84,8 @@ fi
 
 # --- then configuration ------------------------------------------------------
 say "Restoring configuration"
-cat "$BUNDLE" | ssh "$TARGET" 'cat > /tmp/restore.tar.gz'
-ssh -n "$TARGET" 'sysupgrade -r /tmp/restore.tar.gz && rm -f /tmp/restore.tar.gz'
+cat "$BUNDLE" | ssh $SSHOPT "$TARGET" 'cat > /tmp/restore.tar.gz'
+ssh -n $SSHOPT "$TARGET" 'sysupgrade -r /tmp/restore.tar.gz && rm -f /tmp/restore.tar.gz'
 ok "configuration and console files written"
 
 # The CGI exec bits do not survive every transport; a non-executable CGI is a
@@ -78,7 +97,7 @@ ok "configuration and console files written"
 # added to install.sh and never to this list, so a restored router came back
 # with them non-executable — no ping history, no fwmark helper, no iPhone
 # tethering, and nothing anywhere saying why.
-ssh -n "$TARGET" 'chmod 755 /www/cgi-bin/*-api 2>/dev/null
+ssh -n $SSHOPT "$TARGET" 'chmod 755 /www/cgi-bin/*-api 2>/dev/null
     chmod 755 /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch \
               /usr/sbin/beryl-vpndns /usr/sbin/beryl-pbrtbl /usr/sbin/pingmon 2>/dev/null
     chmod 755 /etc/hotplug.d/iface/* /etc/hotplug.d/net/* /etc/hotplug.d/usb/* 2>/dev/null
@@ -91,7 +110,7 @@ ok "executable bits reapplied"
 # backup. Enabling here does not depend on the bundle carrying symlinks at all,
 # which is the more robust of the two answers — `enable` is idempotent, so it
 # costs nothing when they did come back.
-ssh -n "$TARGET" 'for s in pingmon cpugovernor beryl-vpndns; do
+ssh -n $SSHOPT "$TARGET" 'for s in pingmon cpugovernor beryl-vpndns; do
         [ -x "/etc/init.d/$s" ] || continue
         /etc/init.d/$s enable >/dev/null 2>&1
     done
@@ -99,7 +118,7 @@ ssh -n "$TARGET" 'for s in pingmon cpugovernor beryl-vpndns; do
 ok "services enabled for boot"
 
 say "Rebooting"
-ssh -n "$TARGET" 'reboot' || true
+ssh -n $SSHOPT "$TARGET" 'reboot' || true
 echo "  the router is coming back up — give it a minute, then open:"
 echo "     http://$ROUTER/dashboard/"
 echo
