@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=159bdb45"></script>
+<script src="/os.js?v=72b82769"></script>
 <script>
 (function () {
 'use strict';
@@ -1626,7 +1626,6 @@ function renderTraffic(d, M) {
     box._hint.hidden = !!all.length;
 
     all.sort(function (a, b) { return (b.traffic.dn + b.traffic.up) - (a.traffic.dn + a.traffic.up); });
-    var top = all.length ? (all[0].traffic.dn + all[0].traffic.up || 1) : 1;
     /* Ranked with CSS `order`, not by moving nodes. This list DOES reorder — two
        devices a few MB apart swap places all evening — and a node yanked out of
        the tree and put back loses the transition it was in the middle of. There
@@ -1636,9 +1635,15 @@ function renderTraffic(d, M) {
     all.forEach(function (v, i) {
         var r = K.want(v.mac, trafRow).node;
         r.style.order = i;
+        var sum = v.traffic.dn + v.traffic.up;
         setTxt(r._nm, v.name);
-        setTxt(r._vv, '↓ ' + OS.bytes(v.traffic.dn) + '   ↑ ' + OS.bytes(v.traffic.up));
-        OS.meterSet(r._meter, (v.traffic.dn + v.traffic.up) / top);
+        setTxt(r._tot, OS.bytes(sum));
+        setTxt(r._split, '↓ ' + OS.bytes(v.traffic.dn) + '   ↑ ' + OS.bytes(v.traffic.up));
+        /* Rounds to whole percent and floors at "<1%" rather than showing 0% —
+           a device that moved 40 MB against a 60 GB day did use the network,
+           and "0%" reads as "nothing", which is a different claim. */
+        var pct = grand ? (sum / grand) * 100 : 0;
+        setTxt(r._sh, pct >= 1 ? Math.round(pct) + '%' : (sum > 0 ? '<1%' : ''));
     });
     K.commit();
 
@@ -1659,19 +1664,34 @@ function renderTraffic(d, M) {
     if (uu && uu.ok) setTxt(box._uplink, uplinkUsageLabel(uu) + '  ' + OS.bytes(uu.total));
 }
 function trafRow() {
-    var r = el('div'); r.style.marginBottom = '9px';
-    var t = el('div'); t.style.cssText = 'display:flex;justify-content:space-between;gap:8px;margin-bottom:4px';
+    var r = el('div'); r.style.marginBottom = '11px';
+
+    var t = el('div');
+    t.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:10px';
     r._nm = el('span');
-    r._nm.style.cssText = 'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    r._nm.style.cssText = 'font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
     t.appendChild(r._nm);
-    r._vv = el('span', 'n');
-    r._vv.style.cssText = 'font-size:11px;color:var(--ink-3);flex:none';
-    t.appendChild(r._vv);
+    /* The total is the hero: "how much did this thing use" is the question the
+       panel exists to answer, and it was previously the one number you had to
+       add up yourself from the split. */
+    r._tot = el('span', 'n');
+    r._tot.style.cssText = 'font-size:12.5px;font-weight:600;flex:none;font-variant-numeric:tabular-nums';
+    t.appendChild(r._tot);
     r.appendChild(t);
-    /* value comes from the sync that follows; from then on the same 12 segments
-       are re-lit rather than replaced, which is what lets them fade */
-    r._meter = OS.meter(0, null, true);
-    r.appendChild(r._meter);
+
+    var b = el('div');
+    b.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:2px';
+    r._split = el('span', 'n');
+    r._split.style.cssText = 'font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums';
+    b.appendChild(r._split);
+    /* Share of the day, which is what the bar was reaching for and never
+       delivered: it was scaled to the busiest device, so the top row was always
+       full and the rest were fractions of something the eye could not name.
+       A percentage of the day's total is the same idea, stated. */
+    r._sh = el('span', 'n');
+    r._sh.style.cssText = 'font-size:11px;color:var(--ink-4);flex:none;font-variant-numeric:tabular-nums';
+    b.appendChild(r._sh);
+    r.appendChild(b);
     return r;
 }
 
