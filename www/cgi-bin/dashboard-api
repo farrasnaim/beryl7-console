@@ -710,7 +710,10 @@ if [ "$NLDAILY" = "true" ]; then
             for (m in seenX) {
                 r = today(rx[m], crx[m], brx[m]); t = today(tx[m], ctx[m], btx[m])
                 if (r == 0 && t == 0) continue
-                printf "%s[\"%s\",%d,%d,%d,%d,%d]", (n++ ? "," : ""), m, conns[m], r, rxp[m], t, txp[m]
+                # %.0f, never %d: busybox awk truncates %d at 2147483647, so every counter
+                # past 2 GB pinned to exactly 2.0 GB - wrong, and wrong in the
+                # believable direction. awk holds doubles and is exact to 2^53.
+                printf "%s[\"%s\",%.0f,%.0f,%.0f,%.0f,%.0f]", (n++ ? "," : ""), m, conns[m], r, rxp[m], t, txp[m]
             }
             # A device that was busy before the rollover and silent since has no
             # row in the current period at all; without this it would vanish
@@ -720,7 +723,7 @@ if [ "$NLDAILY" = "true" ]; then
                 r = crx[m] - brx[m]; t = ctx[m] - btx[m]
                 if (r < 0) r = 0; if (t < 0) t = 0
                 if (r == 0 && t == 0) continue
-                printf "%s[\"%s\",0,%d,0,%d,0]", (n++ ? "," : ""), m, r, t
+                printf "%s[\"%s\",0,%.0f,0,%.0f,0]", (n++ ? "," : ""), m, r, t
             }
             printf "]}"
         }')
