@@ -91,6 +91,131 @@ phy_of() {   # $1 = radioN
 }
 PHY=$(phy_of "$(printf '%s' "$RADIOS" | head -n1)")
 
+# -------------------------------------------------------------------- IPv6 --
+# Four modes, deliberately the same four a GL.iNet router offers, because that
+# is the vocabulary the owner already has. What differs is that this file will
+# not offer a mode the uplink cannot actually deliver — see v6_can_native.
+#
+#   off          LAN devices get no IPv6 at all. The router keeps its own v6
+#                uplink (DoH resolvers and ping targets use it), so this is
+#                "my devices have no IPv6", not "the router has none".
+#   passthrough  odhcpd relays the uplink's RA/DHCPv6 and proxies NDP, so LAN
+#                clients take addresses straight out of the ISP's /64. The only
+#                mode that yields real public IPv6 without prefix delegation.
+#   native       odhcpd serves a subnet of a DELEGATED prefix. Needs the ISP to
+#                hand out a prefix; Indosat does not, hence the capability probe.
+#   nat6         LAN uses the ULA and the uplink zone masquerades v6. Works with
+#                no delegation, but every client is behind a v6 NAT.
+#
+# Nothing below hardcodes "wan6", "br-lan" or a zone index: the v6 uplink is
+# whichever dhcp section declares itself master, the LAN device comes from ubus,
+# and the firewall zone is found by name because @zone[N] shifts when a zone is
+# added.
+v6_master() {
+    uci -q show dhcp 2>/dev/null | sed -n "s/^dhcp\.\([^.=]*\)\.master='1'$/\1/p" | head -n1
+}
+wan_zone_idx() {
+    _i=0
+    while :; do
+        _zn=$(uci -q get firewall.@zone[$_i].name 2>/dev/null)
+        [ -n "$_zn" ] || break
+        [ "$_zn" = "wan" ] && { printf '%s' "$_i"; return 0; }
+        _i=$((_i+1))
+        [ "$_i" -gt 32 ] && break
+    done
+    printf ''
+}
+lan_dev() {
+    _d=$(ubus call network.interface.$LANNET status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+    [ -n "$_d" ] && printf '%s' "$_d" || printf 'br-%s' "$LANNET"
+}
+v6_mode() {
+    _ra=$(uci -q get dhcp.$LANNET.ra 2>/dev/null)
+    _z=$(wan_zone_idx); _m6=""
+    [ -n "$_z" ] && _m6=$(uci -q get firewall.@zone[$_z].masq6 2>/dev/null)
+    case "$_ra" in
+        relay)  printf 'passthrough' ;;
+        server) [ "$_m6" = "1" ] && printf 'nat6' || printf 'native' ;;
+        *)      printf 'off' ;;
+    esac
+}
+# A delegated prefix is what separates "native will work" from "native gives
+# your devices a ULA and no route out". Read live, never assumed.
+v6_can_native() {
+    _m=$(v6_master); [ -n "$_m" ] || { printf 'false'; return; }
+    _pd=$(ubus call network.interface.$_m status 2>/dev/null |
+          jsonfilter -e '@["ipv6-prefix"][*].address' 2>/dev/null | head -n1)
+    [ -n "$_pd" ] && printf 'true' || printf 'false'
+}
+v6_uplink_up() {
+    _m=$(v6_master); [ -n "$_m" ] || { printf 'false'; return; }
+    _a=$(ubus call network.interface.$_m status 2>/dev/null |
+         jsonfilter -e '@["ipv6-address"][*].address' 2>/dev/null | head -n1)
+    [ -n "$_a" ] && printf 'true' || printf 'false'
+}
+
+# ---- the RA DNS on-link check ------------------------------------------------
+# Why this exists: in relay mode odhcpd copies the uplink's RA verbatim, RDNSS
+# option included. Indosat advertises fe80::1 — its own link-local, meaningful
+# only on the WAN link. Relayed onto the LAN it names an address no host there
+# holds, so every client is told to use a DNS server that can never answer.
+# Android treats an RA-learned DNS server going unreachable as loss of
+# provisioning and restarts its whole stack, which cost a day to find by packet
+# capture. A link-local that the router does not itself hold is the signature,
+# and it is decidable from configuration alone — no probing, no packets, cheap
+# enough to run on every poll.
+ra6_json() {
+    _mode=$(v6_mode)
+    if [ "$_mode" = "off" ]; then
+        printf '{"verdict":"off","source":null,"servers":[]}'; return
+    fi
+    _dev=$(lan_dev)
+    # What the router itself holds on the LAN link. An advertised address in
+    # this set is answerable by definition.
+    _own=$(ip -6 addr show dev "$_dev" 2>/dev/null | sed -n 's#^ *inet6 \([^/ ]*\)/.*#\1#p')
+    # Precedence matches odhcpd's: an explicit list wins; otherwise relay hands
+    # on whatever the uplink said; otherwise odhcpd announces itself.
+    _src=override
+    _list=$(uci -q get dhcp.$LANNET.dns 2>/dev/null)
+    if [ -z "$_list" ]; then
+        if [ "$_mode" = "passthrough" ]; then
+            _src=upstream
+            _m=$(v6_master)
+            [ -n "$_m" ] && _list=$(ubus call network.interface.$_m status 2>/dev/null |
+                jsonfilter -e '@["dns-server"][*]' 2>/dev/null | tr '\n' ' ')
+        else
+            _src=router
+            _list=$(printf '%s' "$_own" | grep -v '^fe80' | head -n1)
+        fi
+    fi
+    _bad=0; _n=0; _out=""
+    for _a in $_list; do
+        [ -n "$_a" ] || continue
+        _cls=remote
+        if printf '%s\n' "$_own" | grep -qx "$_a"; then
+            _cls=router
+        else
+            case "$_a" in
+                fe80:*|FE80:*)
+                    # A foreign link-local on this link. Nothing can make this
+                    # work: link-local scope does not cross the router.
+                    _cls=offlink; _bad=1 ;;
+            esac
+        fi
+        _out="$_out${_out:+,}{\"addr\":\"$(esc "$_a")\",\"class\":\"$_cls\"}"
+        _n=$((_n+1))
+    done
+    if [ "$_n" = 0 ]; then
+        _v=none
+    elif [ "$_bad" = 1 ]; then
+        _v=fault
+    else
+        _v=ok
+    fi
+    printf '{"verdict":"%s","source":"%s","device":"%s","servers":[%s]}' \
+        "$_v" "$_src" "$(esc "$_dev")" "$_out"
+}
+
 # ------------------------------------------------------------------ backup --
 # Handled before the JSON headers because this response is a file, not JSON.
 # A GET, like `logs`: it reads configuration and changes nothing. The archive
@@ -682,6 +807,85 @@ if [ "$ACTION" = "fwrestart" ]; then
     exit 0
 fi
 
+# ---- IPv6 mode ---------------------------------------------------------------
+# Validation is here rather than only in the browser, for the usual reason: the
+# UI greys out a mode the uplink cannot deliver, but nothing stops a hand-made
+# POST, and picking `native` with no delegated prefix leaves every device on the
+# LAN with a ULA and no way out — a failure that looks like "IPv6 is broken"
+# long after anyone remembers changing this.
+if [ "$ACTION" = "setipv6" ]; then
+    MODE=$(qs_get mode)
+    ZI=$(wan_zone_idx)
+    case "$MODE" in
+        off)
+            uci set dhcp.$LANNET.ra='disabled'
+            uci set dhcp.$LANNET.dhcpv6='disabled'
+            uci set dhcp.$LANNET.ndp='disabled'
+            uci -q delete dhcp.$LANNET.ra_default
+            [ -n "$ZI" ] && uci -q delete firewall.@zone[$ZI].masq6
+            ;;
+        passthrough)
+            uci set dhcp.$LANNET.ra='relay'
+            uci set dhcp.$LANNET.dhcpv6='relay'
+            uci set dhcp.$LANNET.ndp='relay'
+            uci -q delete dhcp.$LANNET.ra_default
+            [ -n "$ZI" ] && uci -q delete firewall.@zone[$ZI].masq6
+            ;;
+        native)
+            [ "$(v6_can_native)" = "true" ] || \
+                fail "this uplink delegates no prefix, so native would leave your devices without a route out"
+            uci set dhcp.$LANNET.ra='server'
+            uci set dhcp.$LANNET.dhcpv6='server'
+            uci -q delete dhcp.$LANNET.ndp
+            uci -q delete dhcp.$LANNET.ra_default
+            [ -n "$ZI" ] && uci -q delete firewall.@zone[$ZI].masq6
+            ;;
+        nat6)
+            uci set dhcp.$LANNET.ra='server'
+            uci set dhcp.$LANNET.dhcpv6='server'
+            uci -q delete dhcp.$LANNET.ndp
+            # Without ra_default odhcpd advertises no default route when the
+            # only prefix it serves is a ULA, and the LAN gets addresses that
+            # go nowhere. This is what makes nat6 differ from a broken native.
+            uci set dhcp.$LANNET.ra_default='1'
+            [ -n "$ZI" ] || fail "no firewall zone named 'wan' — cannot masquerade IPv6"
+            uci set firewall.@zone[$ZI].masq6='1'
+            ;;
+        *) fail "unknown IPv6 mode" ;;
+    esac
+    uci commit dhcp
+    uci commit firewall
+    # odhcpd is the ipv6-only build here, so this cannot disturb IPv4 DHCP —
+    # dnsmasq owns that and is not touched.
+    /etc/init.d/odhcpd restart >/dev/null 2>&1
+    /etc/init.d/firewall reload >/dev/null 2>&1
+    logger -t settings "IPv6 mode set to $MODE via web UI"
+    printf '{"ok":true,"mode":"%s"}' "$(esc "$MODE")"
+    exit 0
+fi
+
+# ---- repair a poisoned RA DNS ------------------------------------------------
+# Points the advertised RDNSS at the router's own LAN address, which is both
+# reachable and the resolver you actually want (dnsmasq -> DoH -> banip).
+# Prefers the ULA: it is stable in /etc/config/network, whereas a WAN-derived
+# global address changes when the ISP rotates the prefix.
+if [ "$ACTION" = "ra6fix" ]; then
+    DEV=$(lan_dev)
+    ADDR=$(ip -6 addr show dev "$DEV" 2>/dev/null |
+           sed -n 's#^ *inet6 \(f[cd][0-9a-f:]*\)/.*#\1#p' | head -n1)
+    [ -n "$ADDR" ] || ADDR=$(ip -6 addr show dev "$DEV" 2>/dev/null |
+           sed -n 's#^ *inet6 \([^/ ]*\)/.*#\1#p' | grep -v '^fe80' | head -n1)
+    [ -n "$ADDR" ] || fail "the LAN has no usable IPv6 address to advertise"
+    uci -q delete dhcp.$LANNET.dns
+    uci set dhcp.$LANNET.ra_dns='1'
+    uci add_list dhcp.$LANNET.dns="$ADDR"
+    uci commit dhcp
+    /etc/init.d/odhcpd restart >/dev/null 2>&1
+    logger -t settings "RA DNS pinned to $ADDR via web UI"
+    printf '{"ok":true,"addr":"%s"}' "$(esc "$ADDR")"
+    exit 0
+fi
+
 [ -n "$ACTION" ] && fail "unknown action"
 
 # --------------------------------------------------------------------- read --
@@ -757,6 +961,11 @@ printf '"system":{"hostname":"%s","zonename":"%s","uptime":%s,"ntp":%s},' \
     "$(esc "$(uci -q get system.@system[0].zonename)")" \
     "$(jnum "$UP")" \
     "$([ "$(uci -q get system.ntp.enabled)" = "1" ] && echo true || echo false)"
+
+printf '"ipv6":{"mode":"%s","can_native":%s,"uplink":%s,"master":"%s","ula":"%s","radns":%s},' \
+    "$(v6_mode)" "$(v6_can_native)" "$(v6_uplink_up)" \
+    "$(esc "$(v6_master)")" "$(esc "$(uci -q get network.globals.ula_prefix)")" \
+    "$(ra6_json)"
 
 # Whatever the last check found, plus the running firmware read locally so the
 # panel can state that much even if nothing has ever been checked. `null` means

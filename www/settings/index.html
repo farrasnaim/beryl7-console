@@ -56,6 +56,11 @@
           <div class="panel__aside" id="st-lan"></div></div>
         <div class="panel__b" id="b-lan"></div>
       </section>
+      <section class="panel" style="border-top:1px solid var(--line)">
+        <div class="panel__h"><span class="panel__t">IPv6</span>
+          <div class="panel__aside" id="st-ipv6"></div></div>
+        <div class="panel__b" id="b-ipv6"></div>
+      </section>
       <!-- Phone only: on a wide screen this lives with the sources list it
            governs, on the two uplink pages. -->
       <section class="panel mob-only">
@@ -877,6 +882,144 @@ var ZONES = [
     ['America/New_York', 'New York (ET)'], ['America/Los_Angeles', 'Los Angeles (PT)'],
     ['Australia/Sydney', 'Sydney (AEST/AEDT)'], ['UTC', 'UTC']
 ];
+/* IPv6 - the same four modes a GL.iNet router offers, because that is the
+   vocabulary the owner already has. A mode the uplink cannot deliver is shown
+   but disabled, with the reason on it: offering `native` on a link that
+   delegates no prefix would hand every device a ULA and no route out, and the
+   failure would surface days later as "IPv6 is broken". */
+var V6MODES = [
+    ['passthrough', 'Passthrough',
+     'Devices take their address straight from the ISP prefix and the router proxies NDP. ' +
+     'Real public IPv6 with no NAT, and the only mode that works when the ISP delegates no prefix.'],
+    ['native', 'Native',
+     'The router hands out subnets of a prefix the ISP delegates to it. Needs that delegation.'],
+    ['nat6', 'NAT6',
+     'Devices use a private ULA address and the router masquerades IPv6 on the way out. ' +
+     'Works without a delegated prefix, at the cost of putting every device behind a v6 NAT.'],
+    ['off', 'Disabled',
+     'Your devices get no IPv6 at all. The router keeps its own IPv6 uplink, so encrypted DNS ' +
+     'and ping targets still use it.']
+];
+function v6Label(m) {
+    for (var i = 0; i < V6MODES.length; i++) if (V6MODES[i][0] === m) return V6MODES[i][1];
+    return m;
+}
+/* The RA DNS check. In relay mode odhcpd copies the uplink advertisement
+   verbatim, RDNSS included - and an ISP that advertises its own link-local
+   names an address nothing on this LAN holds. Clients are then told to use a
+   DNS server that can never answer; Android restarts its whole network stack
+   over it. Decidable from configuration alone, so it runs on every poll. */
+function renderRaDns(box, v6) {
+    var r = v6.radns; if (!r || r.verdict === 'off') return;
+    var wrap = el('div');
+    wrap.style.cssText = 'margin-top:18px;padding-top:16px;border-top:1px solid var(--line)';
+
+    var head = el('div', 'inline');
+    head.style.cssText = 'justify-content:space-between;align-items:baseline;margin-bottom:10px';
+    head.appendChild(el('span', 'label', 'DNS advertised to your devices'));
+    head.appendChild(r.verdict === 'fault' ? OS.stateWord('UNREACHABLE', 'bad')
+                   : r.verdict === 'none'  ? OS.stateWord('NONE', null)
+                                           : OS.stateWord('ON-LINK', 'ok'));
+    wrap.appendChild(head);
+
+    (r.servers || []).forEach(function (s) {
+        var row = el('div', 'inline');
+        row.style.cssText = 'justify-content:space-between;gap:12px;margin-bottom:6px';
+        var a = el('span', null, s.addr);
+        a.style.cssText = 'font-size:12px;word-break:break-all;color:var(--ink)';
+        row.appendChild(a);
+        row.appendChild(s['class'] === 'router'  ? OS.stateWord('THIS ROUTER', 'ok')
+                      : s['class'] === 'offlink' ? OS.stateWord('NOT ON THIS LINK', 'bad')
+                                                 : OS.stateWord('REMOTE', 'fair'));
+        wrap.appendChild(row);
+    });
+
+    var srcTxt = { override: 'Set explicitly on this router.',
+                   upstream: 'Relayed from the uplink, exactly as the ISP sent it.',
+                   router:   'The router advertises itself.' }[r.source] || '';
+    wrap.appendChild(el('div', 'hint', srcTxt));
+
+    if (r.verdict === 'fault') {
+        var why = el('div', 'hint');
+        why.style.cssText = 'margin-top:8px;color:var(--fault-fg)';
+        why.textContent = 'A link-local address only means anything on the link it came from. ' +
+            'Relayed onto your LAN it names a host that does not exist here, so every device is ' +
+            'told to use a DNS server that can never answer. Some devices shrug this off; Android ' +
+            'treats it as losing its connection and restarts its network stack in a loop.';
+        wrap.appendChild(why);
+        var b = el('button', 'btn btn--primary btn--sm', 'Point it at this router');
+        b.type = 'button'; b.style.marginTop = '12px';
+        b.addEventListener('click', function () {
+            OS.act(b, API, { action: 'ra6fix' },
+                { ok: 'Fixed.', delay: 1200, failPrefix: 'Not fixed' });
+        });
+        wrap.appendChild(b);
+    }
+    box.appendChild(wrap);
+}
+function renderIpv6(d) {
+    if (dirty.ipv6) return;
+    var v6 = d.ipv6; if (!v6) return;
+    var box = $('#b-ipv6'); clear(box);
+    var st = $('#st-ipv6'); if (st) clear(st);
+    if (st) {
+        st.appendChild(v6.radns && v6.radns.verdict === 'fault'
+            ? OS.stateWord('DNS FAULT', 'bad')
+            : OS.stateWord(v6Label(v6.mode).toUpperCase(), v6.mode === 'off' ? null : 'ok'));
+    }
+
+    var form = el('div');
+    var sel = el('select', 'select');
+    V6MODES.forEach(function (m) {
+        var op = el('option', null, m[1]); op.value = m[0];
+        if (m[0] === 'native' && !v6.can_native) {
+            op.disabled = true;
+            op.textContent = m[1] + ' — unavailable, this uplink delegates no prefix';
+        }
+        if (m[0] === v6.mode) op.selected = true;
+        sel.appendChild(op);
+    });
+    var hint = el('div', 'hint');
+    function updHint() {
+        for (var i = 0; i < V6MODES.length; i++) {
+            if (V6MODES[i][0] === sel.value) { hint.textContent = V6MODES[i][2]; return; }
+        }
+    }
+    updHint();
+    sel.addEventListener('change', updHint);
+    form.appendChild(field('Mode', sel));
+    form.appendChild(hint);
+
+    var facts = [];
+    if (v6.master) facts.push('uplink ' + v6.master + (v6.uplink ? '' : ' (no address)'));
+    facts.push(v6.can_native ? 'prefix delegated' : 'no prefix delegated');
+    if (v6.ula) facts.push('ULA ' + v6.ula);
+    var f = el('div', 'hint');
+    f.style.cssText = 'margin-top:10px;color:var(--ink-3)';
+    f.textContent = facts.join('  ·  ');
+    form.appendChild(f);
+
+    var ar = applyRow();
+    ar.row.style.marginTop = '14px';
+    form.appendChild(ar.row);
+    box.appendChild(form);
+    watch('ipv6', form, ar.apply);
+
+    ar.reset.addEventListener('click', function () { markDirty('ipv6', false); renderIpv6(d); });
+    ar.apply.addEventListener('click', function () {
+        if (sel.value === v6.mode) { OS.toast('That is already the mode.', 'warn'); return; }
+        OS.askConfirm('Switch IPv6 to ' + v6Label(sel.value),
+            'Every device on the LAN re-does its IPv6 setup. Anything streaming over IPv6 will ' +
+            'stall for a moment. IPv4 is not touched.', 'Switch', true).then(function (go) {
+            if (!go) return;
+            OS.act(ar.apply, API, { action: 'setipv6', mode: sel.value },
+                { ok: 'Applied.', delay: 2000, failPrefix: 'Not applied' }).then(function (j) {
+                if (j && j.ok) markDirty('ipv6', false);
+            });
+        });
+    });
+    renderRaDns(box, v6);
+}
 function renderSys(d) {
     if (dirty.sys) return;
     var box = $('#b-sys'); clear(box);
@@ -1248,6 +1391,7 @@ function render(d) {
     equaliseNoteSlots();
     renderIot(d);
     renderLan(d);
+    renderIpv6(d);
     renderSys(d);
     renderSoft(d);
     renderLog();
