@@ -1,0 +1,87 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/35-nlbw-v6prefix
+#
+# Keep nlbwmon's local_network in step with the IPv6 prefix LAN clients are
+# actually using, so IPv6 traffic is attributed to a device instead of dropped.
+#
+# WHY THIS EXISTS
+# ---------------
+# nlbwmon decides which end of a flow is "the local host" by matching against
+# local_network. When neither end matches it cannot attribute the flow to
+# anyone, so it silently skips it.
+#
+# In IPv6 passthrough/relay mode the clients' addresses come from the ISP's
+# delegated /64, NOT from anything the router itself holds on the LAN: br-lan
+# carries only the ULA and a link-local. So the uci shorthand `local_network
+# 'lan'` expands to the LAN's IPv4 subnet plus the ULA and misses the one
+# prefix that every client actually uses. The result measured on 2026-08-29
+# was 51 GB of IPv6 delivered to the LAN with a grand total of 393 KB of IPv6
+# in the accounting database — a third of all WAN download attributed to
+# nobody, and worst for whoever streams most, since video is where IPv6 gets
+# used.
+#
+# Proven, not assumed: an identical 50 MB IPv6 download counted 0.13 MB before
+# adding the prefix and 54.49 MB after.
+#
+# WHY IT HAS TO BE DYNAMIC
+# ------------------------
+# The delegated prefix is not stable — this line has already moved from
+# 2407:0:3002:d19a::/64 to 2407:0:3002:bb73::/64. Hardcoding it in uci would
+# work until the ISP rotated it and then fail exactly the way it failed before,
+# silently and only in the numbers. So the prefix is re-derived whenever the v6
+# uplink comes up or changes.
+#
+# Only global-unicast (2000::/3) entries are managed here. The IPv4 ranges and
+# the ULA are left alone — they are correct and they are not ours to touch.
+
+[ "$ACTION" = "ifup" ] || [ "$ACTION" = "ifupdate" ] || exit 0
+
+# Act only for the interface that carries IPv6. Never assume it is called
+# "wan6": it is whichever dhcp section declares itself master.
+V6IF=$(uci -q show dhcp 2>/dev/null | sed -n "s/^dhcp\.\([^.=]*\)\.master='1'$/\1/p" | head -n1)
+[ -n "$V6IF" ] || V6IF=wan6
+[ "$INTERFACE" = "$V6IF" ] || exit 0
+
+command -v nlbw >/dev/null 2>&1 || exit 0
+[ -x /etc/init.d/nlbwmon ] || exit 0
+
+L3=$(ubus call network.interface."$V6IF" status 2>/dev/null |
+     jsonfilter -e '@.l3_device' 2>/dev/null)
+[ -n "$L3" ] || exit 0
+
+# The on-link /64 the uplink is part of. Clients sit in this same prefix,
+# because relay hands them addresses out of it rather than subnetting.
+WANT=$(ip -6 route show dev "$L3" 2>/dev/null |
+       awk '$1 ~ /^2[0-9a-f]*:.*\/64$/ { print $1; exit }')
+
+# What we currently have registered, restricted to global unicast so the ULA
+# and the IPv4 ranges are never candidates for removal.
+HAVE=$(uci -q get nlbwmon.@nlbwmon[0].local_network 2>/dev/null | tr ' ' '\n' |
+       awk '/^2[0-9a-f]*:/ && /\/64$/')
+
+# Nothing to do is the common case — this fires on every ifupdate, and
+# restarting nlbwmon needlessly would discard up to an hour of uncommitted
+# accounting each time.
+[ "$HAVE" = "$WANT" ] && exit 0
+
+CHANGED=0
+for old in $HAVE; do
+    [ "$old" = "$WANT" ] && continue
+    uci -q del_list nlbwmon.@nlbwmon[0].local_network="$old"
+    logger -t nlbw-v6prefix "dropped stale client prefix $old"
+    CHANGED=1
+done
+if [ -n "$WANT" ] && ! printf '%s\n' $HAVE | grep -qxF "$WANT"; then
+    uci add_list nlbwmon.@nlbwmon[0].local_network="$WANT"
+    logger -t nlbw-v6prefix "added client prefix $WANT"
+    CHANGED=1
+fi
+[ "$CHANGED" = "1" ] || exit 0
+
+uci commit nlbwmon
+
+# Flush before restarting: commit_interval is 1h, so a restart otherwise throws
+# away everything counted since the last commit.
+nlbw -c commit >/dev/null 2>&1
+/etc/init.d/nlbwmon restart >/dev/null 2>&1
+logger -t nlbw-v6prefix "nlbwmon restarted; IPv6 accounting now tracks ${WANT:-none}"
