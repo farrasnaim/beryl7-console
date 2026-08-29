@@ -111,6 +111,7 @@ chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api 
           /etc/hotplug.d/iface/32-pbr-uplink \
           /etc/hotplug.d/iface/33-uplink-width \
           /etc/hotplug.d/iface/34-vpn-resume \
+          /etc/hotplug.d/iface/35-nlbw-v6prefix \
           /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
           /etc/hotplug.d/net/40-rrm-neighbors \
           /etc/init.d/cpugovernor /usr/sbin/pingmon /etc/init.d/pingmon \
@@ -176,6 +177,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/hotplug.d/iface/32-pbr-uplink \
          /etc/hotplug.d/iface/33-uplink-width \
          /etc/hotplug.d/iface/34-vpn-resume \
+         /etc/hotplug.d/iface/35-nlbw-v6prefix \
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
          /etc/hotplug.d/net/40-rrm-neighbors \
          /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
