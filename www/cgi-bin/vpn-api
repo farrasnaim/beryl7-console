@@ -846,8 +846,32 @@ if [ -r "$AGH_AUTH" ]; then
         _bl=$(printf '%s' "$_asx" | jsonfilter -e '@.num_blocked_filtering' 2>/dev/null)
         case "$_q"  in ''|*[!0-9]*) _q=0  ;; esac
         case "$_bl" in ''|*[!0-9]*) _bl=0 ;; esac
-        AGHJ=$(printf '{"up":true,"protection":%s,"queries":%s,"blocked":%s}' \
-            "$([ "$_pe" = "true" ] && echo true || echo false)" "$_q" "$_bl")
+        # ---- recurring upstream failures (F-042) --------------------------
+        # Every process in the DNS chain stays alive while queries stall, so
+        # liveness says healthy during exactly the fault worth reporting. The
+        # recorded FACT of a failed exchange is the dnsproxy log line AdGuard
+        # writes when it gives up on an upstream — count those against the DoH
+        # proxy ports within the last 30 minutes. One is a transient and stays
+        # quiet; two or more is a pattern worth the owner's attention (same
+        # cry-wolf reasoning as the firewall detector: an indicator that fires
+        # on every blip trains the owner to ignore the one that matters).
+        # busybox date -D does the timestamp math; verified on this build.
+        _ufn=0; _ufl=""
+        _ufnow=$(date +%s)
+        logread -l 4000 2>/dev/null | grep "dnsproxy: exchange failed" | \
+            grep "upstream=127.0.0.1:50" | tail -60 | \
+            awk '{print $1" "$2" "$3" "$4" "$5}' > "/tmp/.aghuf.$$"
+        while read -r _ufts; do
+            _ufe=$(date -D "%a %b %e %T %Y" -d "$_ufts" +%s 2>/dev/null)
+            case "$_ufe" in ''|*[!0-9]*) continue ;; esac
+            if [ $((_ufnow - _ufe)) -le 1800 ]; then
+                _ufn=$((_ufn + 1))
+                _ufl=$(printf '%s' "$_ufts" | awk '{print $4}')
+            fi
+        done < "/tmp/.aghuf.$$"
+        rm -f "/tmp/.aghuf.$$"
+        AGHJ=$(printf '{"up":true,"protection":%s,"queries":%s,"blocked":%s,"upfail":{"recent":%s,"last":"%s","window":1800}}' \
+            "$([ "$_pe" = "true" ] && echo true || echo false)" "$_q" "$_bl" "$_ufn" "$(esc "$_ufl")")
     else
         AGHJ='{"up":false}'
     fi

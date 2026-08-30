@@ -953,8 +953,14 @@ function renderAdguard(d) {
             '/etc/init.d/adguardhome restart', 'bad'));
         return;
     }
-    st.appendChild(a.protection ? OS.stateWord('FILTERING', 'ok')
-                                : OS.stateWord('PAUSED', 'warn'));
+    /* Recurring upstream failures outrank the steady-state word: every
+       process stays alive while queries stall 20 seconds, so this is the one
+       state the old liveness-shaped reporting could never show. A single
+       event inside the window stays quiet on purpose. */
+    var failing = a.upfail && a.upfail.recent >= 2;
+    if (failing) st.appendChild(OS.stateWord('UPSTREAMS FAILING', 'bad'));
+    else st.appendChild(a.protection ? OS.stateWord('FILTERING', 'ok')
+                                     : OS.stateWord('PAUSED', 'warn'));
 
     var grid = el('div');
     grid.style.cssText = 'display:flex;gap:28px;flex-wrap:wrap;margin:4px 0 14px';
@@ -973,6 +979,12 @@ function renderAdguard(d) {
     if (!a.protection) {
         box.appendChild(OS.note('Filtering is paused: ads, malware and phishing domains all ' +
             'resolve normally until it is resumed.', 'warn'));
+    }
+    if (failing) {
+        box.appendChild(OS.note(a.upfail.recent + ' DNS queries in the last 30 minutes waited ' +
+            '20 seconds at the encrypted upstreams and gave up (last at ' + a.upfail.last + '). ' +
+            'Devices retry and usually get through, so this reads as slowness rather than an ' +
+            'outage - but it is the upstream path failing, not this router.', 'bad'));
     }
 
     var row = el('div', 'inline');
