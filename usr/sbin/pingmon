@@ -54,6 +54,25 @@ VERIFY_TRIES=3          # a single dropped packet must not condemn a target
 CF=1.1.1.1
 GOOGLE=8.8.8.8
 
+# ---- the IPv6 leg: record-only, and deliberately dumber than the rest -------
+# Added after the 2026-08-30 DoH stalls: both encrypted-DNS proxies talk to
+# their providers over IPv6, and when their exchanges started timing out there
+# was NO evidence anywhere of whether the v6 path was healthy — this file
+# probes over IPv4 only, and the question "was IPv6 up at 15:57?" turned out
+# to be unanswerable. This leg exists so it is answerable next time.
+#
+# It inherits the invariant at the top of this file unchanged: the only thing
+# it ever changes is which address an ICMP packet goes to. No failover, no
+# target switching, no state machine, no note, no reader depends on it yet —
+# one fixed target, one ring, written beside the main one. Cloudflare's v6
+# resolver sits in the same AS as the DoH endpoint the proxies actually use,
+# which is what makes its reachability a fair proxy for THAT path.
+# Cost: two extra forks every fifth second (ping6 + the writer).
+V6TARGET=2606:4700:4700::1111
+RING6_FILE=/tmp/.pingring6
+WINDOW6=60              # one probe per 5s, so about five minutes kept
+RING6=""; EVER6=0; V6LAST=-1
+
 LOST=-1                 # probed, no reply
 NODATA=-2               # slot never filled (prober younger than the window)
 SWITCHED=-3             # the target changed here; not a loss, not a measurement
@@ -83,6 +102,11 @@ apply_sel() {
 # --help but is honoured (verified: -W1 returns in 1.00s, -W3 in 3.00s).
 probe() {
     _o=$(ping -c1 -W1 "$1" 2>/dev/null)
+    case "$_o" in *time=*) _o=${_o##*time=}; printf '%s' "${_o%% *}" ;; esac
+}
+
+probe6() {
+    _o=$(ping6 -c1 -W1 "$1" 2>/dev/null)
     case "$_o" in *time=*) _o=${_o##*time=}; printf '%s' "${_o%% *}" ;; esac
 }
 
@@ -277,6 +301,37 @@ while :; do
     while [ $# -gt $WINDOW ]; do shift; done
     RING="$*"
     write_ring
+
+    # ---- IPv6 leg: one probe each fifth second, recorded and nothing else --
+    if [ $((UPI % 5)) -eq 0 ] && [ "$UPI" != "$V6LAST" ]; then
+        V6LAST=$UPI
+        R6=$(probe6 "$V6TARGET")
+        if [ -n "$R6" ]; then
+            RING6="$RING6 $R6"; EVER6=1
+        elif [ "$EVER6" = 1 ]; then
+            RING6="$RING6 $LOST"      # silence after a reply is loss, and counted
+        else
+            RING6="$RING6 $NODATA"    # silence before the first-ever reply is not
+        fi
+        set -- $RING6
+        while [ $# -gt $WINDOW6 ]; do shift; done
+        RING6="$*"
+        awk -v ring="$RING6" -v up="$UPI" -v target="$V6TARGET" '
+        BEGIN {
+            n = split(ring, v, " "); j = ""
+            for (i = 1; i <= n; i++) j = j (i > 1 ? "," : "") v[i]
+            for (k = 1; k <= n; k++) {
+                x = v[k] + 0
+                if (x == -2) continue
+                probes++
+                if (x < 0) { lost++; continue }
+                sum += x; ok++
+            }
+            printf "%d %d\n", up, n
+            printf "{\"up\":%d,\"target\":\"%s\",\"v\":[%s]}\n", up, target, j
+            printf "%d %.1f\n", (probes ? lost * 100 / probes : 100), (ok ? sum / ok : -1)
+        }' > "$RING6_FILE.tmp" && mv "$RING6_FILE.tmp" "$RING6_FILE"
+    fi
 
     # Pace from the CLOCK, not from whether the probe succeeded.
     #
