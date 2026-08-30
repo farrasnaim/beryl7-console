@@ -1128,6 +1128,23 @@ printf '"nlbw_period":%s,"nlbw_daily":%s,"nlbw_up":%s,' \
     "$( [ -n "$NLPER" ] && printf '"%s"' "$NLPER" || echo null )" "$NLDAILY" \
     "$( [ "${NLOK:-1}" = 0 ] && echo true || echo false )"
 printf '"classmap":%s,' "$CMJ"
+# Tunnel counts, so the shared navigation can say the same thing on every page.
+# This page previously knew only which DEVICES were routed, so its nav label and
+# the VPN page's disagreed whenever tunnels were up with nothing behind them -
+# which is the normal resting state on this router.
+#
+# "Connected" is the HANDSHAKE, not the interface: a WireGuard device stays up
+# forever once configured, so counting interfaces would report tunnels that
+# stopped answering hours ago. 180s matches vpnwatch and beryl-vpndns.
+TUN_TOTAL=0; TUN_UP=0; _tnow=$(date +%s)
+for _ti in $(uci -q show network 2>/dev/null | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+    [ "$(uci -q get network.$_ti.proto 2>/dev/null)" = "wireguard" ] || continue
+    TUN_TOTAL=$((TUN_TOTAL + 1))
+    _ths=$(wg show "$_ti" latest-handshakes 2>/dev/null | awk 'NR==1{print $2+0}')
+    case "$_ths" in ''|*[!0-9]*) _ths=0 ;; esac
+    [ "$_ths" -gt 0 ] && [ $((_tnow - _ths)) -le 200 ] && TUN_UP=$((TUN_UP + 1))
+done
+printf '"tunnels_up":%s,"tunnels_total":%s,' "$(jnum "$TUN_UP")" "$(jnum "$TUN_TOTAL")"
 printf '"vpn":%s,' "$VPNJ"
 printf '"vpn_stale":%s,' "$VPNSTALE"
 printf '"leases":%s,' "$LJ"

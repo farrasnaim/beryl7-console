@@ -725,7 +725,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '1c3603ee4f';
+var CONSOLE_VERSION = '53bd7e2ef0';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1094,6 +1094,21 @@ function dockAction(slotSel) {
 }
 
 /* Set a spine stage's live value and state: 'live' | 'warn' | 'fault' | ''. */
+/* The VPN line in the navigation. It used to read "Direct" whenever no device
+   was routed, which is the router's normal resting state - so the one word the
+   owner saw most often told him nothing, while two tunnels sat connected a few
+   pixels away. It now states both facts it has: how many tunnels are actually
+   handshaking, and how many devices are riding them.
+
+   Both pages call this so they cannot word it differently; they disagreed
+   before, because only the VPN page knew the tunnel count. */
+function routingLabel(tunUp, tunTotal, routed) {
+    if (!tunTotal) return 'No tunnels';
+    var t = (tunUp === tunTotal)
+        ? tunUp + (tunUp === 1 ? ' tunnel' : ' tunnels')
+        : tunUp + ' of ' + tunTotal + ' tunnels';
+    return t + ' \u00b7 ' + (routed ? routed + ' routed' : 'none routed');
+}
 function stage(id, value, state) {
     var s = spineNodes[id];
     if (!s) return;
@@ -1478,7 +1493,7 @@ global.OS = {
     spectrum: spectrum, topology: topology,
     toast: toast, dialog: dialog, askConfirm: askConfirm, firewallAlert: firewallAlert,
     Transport: Transport, post: post, act: act,
-    buildShell: buildShell, stage: stage, flagTab: flagTab, dockAction: dockAction,
+    buildShell: buildShell, stage: stage, routingLabel: routingLabel, flagTab: flagTab, dockAction: dockAction,
     tp: null
 };
 })(window);

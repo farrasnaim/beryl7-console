@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=72b82769"></script>
+<script src="/os.js?v=95451e8f"></script>
 <script>
 (function () {
 'use strict';
@@ -382,7 +382,7 @@ function renderTopo(d, M) {
        it passes null and the row keeps its descriptor instead of asserting a
        state this payload cannot support. */
     OS.stage('source', UPNAME[up] || up, online ? 'live' : 'fault');
-    OS.stage('routing', vpnCount ? vpnCount + ' tunnelled' : 'Direct',
+    OS.stage('routing', OS.routingLabel(d.tunnels_up || 0, d.tunnels_total || 0, vpnCount),
              staleVpn ? 'fault' : vpnCount ? 'live' : '');
     OS.stage('clients', clients + (clients === 1 ? ' device' : ' devices'), 'live');
     OS.stage('repeater', up === 'wwan' ? 'Carrying the uplink' : null,

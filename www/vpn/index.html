@@ -77,7 +77,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=72b82769"></script>
+<script src="/os.js?v=95451e8f"></script>
 <script>
 (function () {
 'use strict';
@@ -1205,7 +1205,13 @@ function render(d) {
     enabled.forEach(function (p) {
         if (presentOf(String(p.mac || '').toUpperCase())) routed++; else absent++;
     });
-    OS.stage('routing', routed ? routed + ' tunnelled' : 'Direct',
+    /* Same test the tunnel list uses at line ~170: not the interface flag,
+       which stays true forever once configured, but a recent handshake. */
+    var nowT = d.ts || Math.floor(Date.now() / 1e3);
+    var tunUp = (d.tunnels || []).filter(function (t) {
+        return !t.disabled && t.up && t.handshake && (nowT - t.handshake) <= 200;
+    }).length;
+    OS.stage('routing', OS.routingLabel(tunUp, (d.tunnels || []).length, routed),
              (dead.length || unrouted.length) ? 'fault' : routed ? 'live' : '');
     /* "through one" was hardcoded, so three devices spread across two tunnels
        still read as going through a single one. Count the tunnels actually
