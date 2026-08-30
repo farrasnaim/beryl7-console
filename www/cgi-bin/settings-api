@@ -907,6 +907,52 @@ if [ "$ACTION" = "ra6fix" ]; then
     exit 0
 fi
 
+# ---- push notifications ------------------------------------------------------
+# The URL is a shared secret in practice: on the public ntfy service anyone who
+# learns the topic can read this router's notifications. It therefore lives in
+# /etc/dashboard (0600) and never in the repo, and the only things ever sent
+# are interface and service STATES - no addresses, keys, device names or
+# traffic contents.
+NOTIFYCONF=/etc/dashboard/notify.conf
+if [ "$ACTION" = "setnotify" ]; then
+    NENABLED=$(qs_get enabled); NURL=$(qs_get_dec url)
+    case "$NENABLED" in 0|1) ;; *) fail "enabled must be 0 or 1" ;; esac
+    if [ "$NENABLED" = "1" ]; then
+        # Refused rather than escaped: this string is handed to a shell as a
+        # command argument by the monitor.
+        case "$NURL" in
+            https://*|http://*) ;;
+            *) fail "the address must start with https:// or http://" ;;
+        esac
+        case "$NURL" in *[!A-Za-z0-9:/._~-]*) fail "that address has characters this cannot pass on safely" ;; esac
+    fi
+    mkdir -p /etc/dashboard
+    printf 'NOTIFY_ENABLED=%s\nNOTIFY_URL=%s\n' "$NENABLED" "$NURL" > "$NOTIFYCONF.tmp" 2>/dev/null \
+        || fail "could not write the setting"
+    mv "$NOTIFYCONF.tmp" "$NOTIFYCONF"; chmod 600 "$NOTIFYCONF"
+    # Re-baseline so switching on does not replay whatever happened while off.
+    rm -f /tmp/.notifystate
+    logger -t settings "push notifications set to $NENABLED via web UI"
+    printf '{"ok":true,"enabled":%s}' "$([ "$NENABLED" = 1 ] && echo true || echo false)"
+    exit 0
+fi
+
+if [ "$ACTION" = "testnotify" ]; then
+    [ -r "$NOTIFYCONF" ] || fail "nothing configured yet"
+    . "$NOTIFYCONF" 2>/dev/null
+    [ "$NOTIFY_ENABLED" = "1" ] && [ -n "$NOTIFY_URL" ] || fail "notifications are switched off"
+    _hn=$(uci -q get system.@system[0].hostname); _hn=${_hn:-router}
+    if wget -q -T 8 -O /dev/null --header="Title: $_hn: test" --header="Tags: bell" \
+        --post-data="If you are reading this on your phone, the alerts work." "$NOTIFY_URL" 2>/dev/null; then
+        printf '{"ok":true}'
+    else
+        # The monitor queues a failed send and retries; a TEST must not, or the
+        # button would report failure and then the message would arrive anyway.
+        printf '{"ok":false,"error":"the router could not reach that address"}'
+    fi
+    exit 0
+fi
+
 [ -n "$ACTION" ] && fail "unknown action"
 
 # --------------------------------------------------------------------- read --
@@ -977,6 +1023,12 @@ printf '"lan":{"ipaddr":"%s","netmask":"%s","dhcp":{"start":%s,"limit":%s,"lease
     "$(esc "$(uci -q get network.lan.ipaddr)")" "$(esc "$(uci -q get network.lan.netmask)")" \
     "$(jnum "$(uci -q get dhcp.lan.start)")" "$(jnum "$(uci -q get dhcp.lan.limit)")" \
     "$(esc "$(uci -q get dhcp.lan.leasetime)")"
+NOTIFY_ENABLED=0; NOTIFY_URL=""
+[ -r /etc/dashboard/notify.conf ] && . /etc/dashboard/notify.conf 2>/dev/null
+printf '"notify":{"enabled":%s,"url":"%s","queued":%s},' \
+    "$([ "$NOTIFY_ENABLED" = 1 ] && echo true || echo false)" \
+    "$(esc "$NOTIFY_URL")" \
+    "$(jnum "$(wc -l < /tmp/.notifyq 2>/dev/null || echo 0)")"
 printf '"system":{"hostname":"%s","zonename":"%s","uptime":%s,"ntp":%s},' \
     "$(esc "$(uci -q get system.@system[0].hostname)")" \
     "$(esc "$(uci -q get system.@system[0].zonename)")" \

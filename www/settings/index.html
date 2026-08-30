@@ -61,6 +61,11 @@
           <div class="panel__aside" id="st-ipv6"></div></div>
         <div class="panel__b" id="b-ipv6"></div>
       </section>
+      <section class="panel" style="border-top:1px solid var(--line)">
+        <div class="panel__h"><span class="panel__t">Push notifications</span>
+          <div class="panel__aside" id="st-notify"></div></div>
+        <div class="panel__b" id="b-notify"></div>
+      </section>
       <!-- Phone only: on a wide screen this lives with the sources list it
            governs, on the two uplink pages. -->
       <section class="panel mob-only">
@@ -1020,6 +1025,68 @@ function renderIpv6(d) {
     });
     renderRaDns(box, v6);
 }
+/* Push notifications. The console is a PULL: it shows a fault correctly, but
+   only to someone looking. Everything that cost real time this month happened
+   silently and was found days later. This panel configures the push side.
+
+   The address is shown in full rather than masked: it is what you type into
+   the phone app to subscribe, so hiding it would make the feature unusable to
+   set up. It is a shared secret all the same - anyone who learns the topic can
+   read these notifications - which is why only interface and service STATES
+   are ever sent. */
+function renderNotify(d) {
+    if (dirty.notify) return;
+    var n = d.notify; if (!n) return;
+    var box = $('#b-notify'); clear(box);
+    var st = $('#st-notify'); if (st) clear(st);
+    if (st) st.appendChild(n.enabled ? OS.stateWord('ON', 'ok') : OS.stateWord('OFF', null));
+
+    var form = el('div');
+    var chk = checkRow('Send me a message when something changes', n.enabled);
+    form.appendChild(chk.row);
+
+    var u = el('input', 'input');
+    u.value = n.url || '';
+    u.placeholder = 'https://ntfy.sh/your-private-topic';
+    u.autocomplete = 'off'; u.spellcheck = false;
+    form.appendChild(field('Where to send it', u,
+        'Install the ntfy app, subscribe to the topic at the end of this address, and it ' +
+        'arrives on your phone. Treat the address as a password: anyone who knows it can read ' +
+        'these messages.'));
+
+    var what = el('div', 'hint');
+    what.style.cssText = 'margin-top:-6px;color:var(--ink-3)';
+    what.textContent = 'Sent: the internet link, IPv6, the firewall ruleset, encrypted DNS and ' +
+        'traffic accounting — only when one of them CHANGES, so a fault that lasts all day ' +
+        'costs two messages. Never sent: addresses, keys, device names or anything you browse.';
+    form.appendChild(what);
+
+    if (n.queued > 0) {
+        form.appendChild(OS.note(n.queued + ' message' + (n.queued === 1 ? '' : 's') +
+            ' waiting to be delivered — the router could not reach the service, usually because ' +
+            'the connection itself is down. They are sent as soon as it comes back.', 'warn'));
+    }
+
+    var ar = applyRow();
+    var tb = el('button', 'btn btn--ghost btn--sm', 'Send a test');
+    ar.row.appendChild(tb);
+    form.appendChild(ar.row);
+    box.appendChild(form);
+    watch('notify', form, ar.apply);
+
+    tb.addEventListener('click', function () {
+        OS.act(tb, API, { action: 'testnotify' },
+            { ok: 'Sent — check your phone.', failPrefix: 'Not sent' });
+    });
+    ar.reset.addEventListener('click', function () { markDirty('notify', false); renderNotify(d); });
+    ar.apply.addEventListener('click', function () {
+        OS.act(ar.apply, API, {
+            action: 'setnotify', enabled: chk.input.checked ? '1' : '0', url: u.value.trim()
+        }, { ok: 'Saved.', delay: 800, failPrefix: 'Not saved' }).then(function (j) {
+            if (j && j.ok) markDirty('notify', false);
+        });
+    });
+}
 function renderSys(d) {
     if (dirty.sys) return;
     var box = $('#b-sys'); clear(box);
@@ -1392,6 +1459,7 @@ function render(d) {
     renderIot(d);
     renderLan(d);
     renderIpv6(d);
+    renderNotify(d);
     renderSys(d);
     renderSoft(d);
     renderLog();

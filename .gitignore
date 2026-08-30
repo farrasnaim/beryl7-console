@@ -69,3 +69,7 @@ backups/
 !etc/init.d/cpugovernor
 !etc/init.d/pingmon
 !etc/sysctl.d/99-local.conf
+
+# The push topic is effectively a shared secret - anyone who knows it can read
+# the router's notifications. It lives on the router only.
+etc/dashboard/notify.conf

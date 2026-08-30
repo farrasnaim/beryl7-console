@@ -1,0 +1,165 @@
+#!/bin/sh
+# /usr/sbin/notifymon — push a message when something the console would have
+# shown you actually changes.
+#
+# WHY THIS EXISTS. Every detector on this router is a PULL: the console shows
+# the fault correctly, but only to someone looking at it. The faults that cost
+# real time this month all happened silently — IPv6 relayed a poisoned DNS
+# server for hours, accounting lost a third of all traffic for days, encrypted
+# DNS upstreams stalled twenty seconds at a time — and each was found by
+# someone going looking, days late. This is the same facts, pushed.
+#
+# WHAT IT IS ALLOWED TO DO. It sends HTTP POSTs and writes two files in /tmp.
+# It never restarts a service, never touches uci, never repairs anything. Same
+# invariant as the probe: the worst failure it can produce is a wrong message.
+# A monitor that also acts is the shape of the automation that caused the
+# 2026-08-10 incident, and this deliberately is not one.
+#
+# EDGE-TRIGGERED, NOT LEVEL-TRIGGERED. Cron runs this every minute; a state
+# that is still wrong is not news. Only transitions are sent, so a WAN that is
+# down for six hours costs exactly two messages. That is the same cry-wolf
+# reasoning already written into the firewall detector: an alert that repeats
+# is one the owner learns to swipe away, and then misses the one that mattered.
+#
+# THE QUEUE IS THE WHOLE POINT. The most important message — "the internet is
+# down" — is precisely the one that cannot be delivered when it happens. So a
+# failed send is queued and retried on later runs, and the message carries the
+# time the event HAPPENED rather than pretending it just did. Without this the
+# tool would work for everything except its headline case.
+#
+# WHAT IT SENDS: interface and service state only. No addresses, no keys, no
+# device names, no traffic contents. Assume the topic is readable by anyone who
+# learns its name (it is, on the public ntfy service) and keep it that way.
+
+CONF=/etc/dashboard/notify.conf
+STATE=/tmp/.notifystate
+QUEUE=/tmp/.notifyq
+QMAX=25
+
+[ -r "$CONF" ] || exit 0
+. "$CONF" 2>/dev/null
+[ "$NOTIFY_ENABLED" = "1" ] || exit 0
+[ -n "$NOTIFY_URL" ] || exit 0
+
+HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-router}
+
+# `|` is the field separator in the queue and nothing generated here contains
+# one — every message in this file is a literal written above.
+send() {   # $1 title  $2 body  $3 priority  $4 tags
+    wget -q -T 8 -O /dev/null \
+        --header="Title: $HOSTN: $1" \
+        --header="Priority: ${3:-default}" \
+        --header="Tags: ${4:-bell}" \
+        --post-data="$2" "$NOTIFY_URL" 2>/dev/null
+}
+
+queue() { # same args; called when send failed
+    [ -f "$QUEUE" ] && [ "$(wc -l < "$QUEUE" 2>/dev/null)" -ge "$QMAX" ] && return 0
+    printf '%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" >> "$QUEUE" 2>/dev/null
+}
+
+notify() { # $1 title $2 body $3 priority $4 tags
+    if ! send "$1" "$2" "$3" "$4"; then
+        queue "$1" "$(date '+%H:%M') — $2" "$3" "$4"
+    fi
+}
+
+# Drain anything stranded by an outage. Stop at the first failure so ordering
+# survives and the retry is not a send storm against a link that is still down.
+flush_queue() {
+    [ -s "$QUEUE" ] || return 0
+    _tmp="$QUEUE.w"; : > "$_tmp"
+    _stuck=0
+    while IFS='|' read -r _t _b _p _g; do
+        [ -n "$_t" ] || continue
+        if [ "$_stuck" = 1 ]; then
+            printf '%s|%s|%s|%s\n' "$_t" "$_b" "$_p" "$_g" >> "$_tmp"
+        elif ! send "$_t" "$_b" "$_p" "$_g"; then
+            _stuck=1
+            printf '%s|%s|%s|%s\n' "$_t" "$_b" "$_p" "$_g" >> "$_tmp"
+        fi
+    done < "$QUEUE"
+    if [ -s "$_tmp" ]; then mv "$_tmp" "$QUEUE"; else rm -f "$_tmp" "$QUEUE"; fi
+}
+
+# ---- read the facts, the same ones the console reads -----------------------
+iface_up() {  # $1 = interface
+    ubus call network.interface."$1" status 2>/dev/null | grep -q '"up": true' && echo up || echo down
+}
+
+now_wan=$(iface_up wan)
+now_wan6=$(iface_up wan6)
+
+# The firewall is read from the KERNEL, not from whether the service is
+# enabled — the console learned that distinction the hard way. This router has
+# no console login and depends entirely on fw4 to stay off the internet, so an
+# empty ruleset is the security model absent, not a feature degraded.
+_nft=$(nft list ruleset 2>/dev/null | wc -l)
+case "$_nft" in ''|*[!0-9]*) _nft=0 ;; esac
+[ "$_nft" -gt 20 ] && now_fw=ok || now_fw=absent
+
+# Per-device accounting: running is not the same as counting, but a daemon
+# that has gone away definitely is not counting.
+pgrep -f '[n]lbwmon -o' >/dev/null 2>&1 && now_acct=ok || now_acct=stopped
+
+# Encrypted-DNS upstream failures, the F-042 fact: AdGuard's own record of
+# giving up on an upstream, counted inside a 30-minute window. Two or more is
+# a pattern; one is a transient and stays quiet.
+now_dns=ok
+if [ -r /etc/dashboard/agh-auth ]; then
+    _n=0; _cut=$(( $(date +%s) - 1800 ))
+    logread -l 3000 2>/dev/null | grep 'dnsproxy: exchange failed' | grep 'upstream=127.0.0.1:50' |
+        tail -40 | awk '{print $1" "$2" "$3" "$4" "$5}' > /tmp/.nmuf.$$ 2>/dev/null
+    while read -r _ts; do
+        _e=$(date -D '%a %b %e %T %Y' -d "$_ts" +%s 2>/dev/null)
+        case "$_e" in ''|*[!0-9]*) continue ;; esac
+        [ "$_e" -ge "$_cut" ] && _n=$((_n + 1))
+    done < /tmp/.nmuf.$$
+    rm -f /tmp/.nmuf.$$
+    [ "$_n" -ge 2 ] && now_dns=failing
+fi
+
+# ---- compare with last run --------------------------------------------------
+was_wan=""; was_wan6=""; was_fw=""; was_acct=""; was_dns=""
+[ -r "$STATE" ] && . "$STATE" 2>/dev/null
+
+if [ -z "$was_wan" ]; then
+    # First run after a boot or an install: take a baseline and say so ONCE.
+    # Announcing every current state here would mean a burst of messages after
+    # every reboot, which is exactly the noise this design avoids.
+    notify "monitoring started" \
+        "Watching the internet link, IPv6, firewall, DNS upstreams and traffic accounting." \
+        low white_check_mark
+else
+    [ "$now_wan" != "$was_wan" ] && {
+        [ "$now_wan" = down ] \
+            && notify "internet is down" "The WAN interface lost its connection." high rotating_light \
+            || notify "internet is back" "The WAN interface reconnected." default white_check_mark; }
+
+    [ "$now_wan6" != "$was_wan6" ] && {
+        [ "$now_wan6" = down ] \
+            && notify "IPv6 is down" "IPv4 is unaffected. A third of this line's traffic normally goes over IPv6." default warning \
+            || notify "IPv6 is back" "The IPv6 uplink recovered." low white_check_mark; }
+
+    [ "$now_fw" != "$was_fw" ] && {
+        [ "$now_fw" = absent ] \
+            && notify "FIREWALL IS NOT LOADED" "The kernel has no ruleset. The console has no password and relies on the firewall — treat this as urgent." urgent rotating_light \
+            || notify "firewall reloaded" "The ruleset is back in the kernel." default white_check_mark; }
+
+    [ "$now_acct" != "$was_acct" ] && {
+        [ "$now_acct" = stopped ] \
+            && notify "traffic accounting stopped" "Per-device usage is no longer being counted." default warning \
+            || notify "traffic accounting running" "Per-device usage is being counted again." low white_check_mark; }
+
+    [ "$now_dns" != "$was_dns" ] && {
+        [ "$now_dns" = failing ] \
+            && notify "encrypted DNS is stalling" "Two or more upstream lookups timed out in the last half hour. Pages may load slowly; retries usually succeed." default warning \
+            || notify "encrypted DNS recovered" "Upstream lookups are answering again." low white_check_mark; }
+fi
+
+printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\n' \
+    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" > "$STATE.tmp" 2>/dev/null &&
+    mv "$STATE.tmp" "$STATE" 2>/dev/null
+
+flush_queue
+exit 0
