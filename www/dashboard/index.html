@@ -905,9 +905,29 @@ function paintSys(sys) {
         r._meta.hidden = !meta;
         OS.meterSet(r._meter, frac, tone);
     }
-    bar('Load average', load.toFixed(2), Math.min(1, load / cores),
-        load > cores ? 'bad' : load > cores * 0.7 ? 'warn' : 'ok',
-        (load / cores * 100).toFixed(0) + '% of ' + cores + ' cores, 1 min average');
+    /* "0.78" and "20% of 4 cores" is the sysadmin's phrasing of this, and it
+       answers a question the owner is not asking. What he wants to know is
+       whether the router is coping. Every other bar in this panel already
+       reads in units people hold intuitions about - MB, degrees - and this one
+       was the outlier.
+
+       So the headline becomes the same measure in plain terms ("0.8 of 4
+       cores"), and the line under it carries the verdict. The raw load average
+       is not hidden - it IS that number - but it no longer has to be decoded.
+
+       Deliberately says "about": load average counts work waiting as well as
+       work running, so it is a good indicator of pressure and a rough one for
+       utilisation. Printing it as an exact percentage claimed a precision it
+       does not have. */
+    var perCore = cores ? load / cores : 0;
+    bar('Processor', load.toFixed(1) + ' of ' + cores + ' cores',
+        Math.min(1, perCore),
+        perCore >= 1 ? 'bad' : perCore > 0.7 ? 'warn' : 'ok',
+        perCore >= 1
+            ? 'More work than the ' + cores + ' cores can run at once — things may feel slow.'
+            : perCore > 0.7 ? 'Working hard, but keeping up.'
+            : perCore > 0.25 ? 'Working normally, with room to spare.'
+            : 'Barely working — plenty of headroom.');
     bar('Memory', Math.round(memUsed / 1024) + ' / ' + Math.round((sys.mem_total || 0) / 1024) + ' MB',
         memPct, memPct > 0.9 ? 'bad' : memPct > 0.75 ? 'warn' : 'ok',
         Math.round((sys.mem_avail || 0) / 1024) + ' MB available');
