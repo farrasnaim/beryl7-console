@@ -62,6 +62,62 @@ QMAX=25
 
 HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-router}
 
+# ---- wording ---------------------------------------------------------------
+# Every line below can be overridden in notify.conf without touching this file,
+# which matters because a console reinstall replaces this script and never
+# touches that config. Set any of these there to reword a message:
+#
+#     MSG_WAN_DOWN_T="internet mati"
+#     MSG_WAN_DOWN_B="Koneksi WAN terputus."
+#
+# %s in a body is filled with live values where the comment says so; a message
+# with no %s is used verbatim. Never put a | in one - it separates fields in
+# the retry queue.
+M_HELLO_T=${MSG_HELLO_T:-"monitoring started"}
+M_HELLO_B=${MSG_HELLO_B:-"Watching the internet link, connection quality, VPN tunnels, Wi-Fi devices, IPv6, firewall, DNS upstreams and traffic accounting."}
+M_WAN_DOWN_T=${MSG_WAN_DOWN_T:-"internet is down"}
+M_WAN_DOWN_B=${MSG_WAN_DOWN_B:-"The WAN interface lost its connection."}
+M_WAN_UP_T=${MSG_WAN_UP_T:-"internet is back"}
+M_WAN_UP_B=${MSG_WAN_UP_B:-"The WAN interface reconnected."}
+M_V6_DOWN_T=${MSG_V6_DOWN_T:-"IPv6 is down"}
+M_V6_DOWN_B=${MSG_V6_DOWN_B:-"IPv4 is unaffected. A third of this line's traffic normally goes over IPv6."}
+M_V6_UP_T=${MSG_V6_UP_T:-"IPv6 is back"}
+M_V6_UP_B=${MSG_V6_UP_B:-"The IPv6 uplink recovered."}
+M_FW_DOWN_T=${MSG_FW_DOWN_T:-"FIREWALL IS NOT LOADED"}
+M_FW_DOWN_B=${MSG_FW_DOWN_B:-"The kernel has no ruleset. The console has no password and relies on the firewall - treat this as urgent."}
+M_FW_UP_T=${MSG_FW_UP_T:-"firewall reloaded"}
+M_FW_UP_B=${MSG_FW_UP_B:-"The ruleset is back in the kernel."}
+M_ACCT_DOWN_T=${MSG_ACCT_DOWN_T:-"traffic accounting stopped"}
+M_ACCT_DOWN_B=${MSG_ACCT_DOWN_B:-"Per-device usage is no longer being counted."}
+M_ACCT_UP_T=${MSG_ACCT_UP_T:-"traffic accounting running"}
+M_ACCT_UP_B=${MSG_ACCT_UP_B:-"Per-device usage is being counted again."}
+M_DNS_BAD_T=${MSG_DNS_BAD_T:-"encrypted DNS is stalling"}
+M_DNS_BAD_B=${MSG_DNS_BAD_B:-"Two or more upstream lookups timed out in the last half hour. Pages may load slowly; retries usually succeed."}
+M_DNS_OK_T=${MSG_DNS_OK_T:-"encrypted DNS recovered"}
+M_DNS_OK_B=${MSG_DNS_OK_B:-"Upstream lookups are answering again."}
+# %s = rtt, %s = loss
+M_LINK_BAD_T=${MSG_LINK_BAD_T:-"connection is struggling"}
+M_LINK_BAD_B=${MSG_LINK_BAD_B:-"Latency %s ms and %s%% packet loss, held for several minutes. Calls and games will feel it."}
+M_LINK_OK_T=${MSG_LINK_OK_T:-"connection is steady again"}
+M_LINK_OK_B=${MSG_LINK_OK_B:-"Back to %s ms with %s%% loss."}
+# %s = tunnel name
+M_VPN_DOWN_T=${MSG_VPN_DOWN_T:-"VPN tunnel is down"}
+M_VPN_DOWN_B=${MSG_VPN_DOWN_B:-"%s stopped answering. Devices routed through it are affected."}
+M_VPN_UP_T=${MSG_VPN_UP_T:-"VPN tunnel is back"}
+M_VPN_UP_B=${MSG_VPN_UP_B:-"%s is handshaking again."}
+# %s = device name, %s = tunnel name
+M_VPNDEV_ON_T=${MSG_VPNDEV_ON_T:-"device now on the VPN"}
+M_VPNDEV_ON_B=${MSG_VPNDEV_ON_B:-"%s is being routed through %s."}
+M_VPNDEV_OFF_T=${MSG_VPNDEV_OFF_T:-"device left the VPN"}
+M_VPNDEV_OFF_B=${MSG_VPNDEV_OFF_B:-"%s is back on the normal uplink."}
+M_VPNDEV_PAUSE_T=${MSG_VPNDEV_PAUSE_T:-"VPN routing auto-paused"}
+M_VPNDEV_PAUSE_B=${MSG_VPNDEV_PAUSE_B:-"A tunnel stopped answering, so routed devices were released to the normal uplink to keep them online. Their traffic is not private until it returns."}
+# %s = device name, %s = SSID, %s = band
+M_WIFI_JOIN_T=${MSG_WIFI_JOIN_T:-"device joined Wi-Fi"}
+M_WIFI_JOIN_B=${MSG_WIFI_JOIN_B:-"%s connected to %s on %s GHz."}
+M_WIFI_LEAVE_T=${MSG_WIFI_LEAVE_T:-"device left Wi-Fi"}
+M_WIFI_LEAVE_B=${MSG_WIFI_LEAVE_B:-"%s disconnected from %s GHz."}
+
 # `|` is the field separator in the queue and nothing generated here contains
 # one — every message in this file is a literal written above.
 send() {   # $1 title  $2 body  $3 priority  $4 tags
@@ -162,38 +218,118 @@ if [ -r /tmp/.pingring ]; then
     fi
 fi
 
+# ---- VPN tunnels -----------------------------------------------------------
+# Liveness is the HANDSHAKE AGE, not whether the interface exists: a WireGuard
+# device stays "up" forever once configured, so the interface says nothing.
+# 180s matches vpnwatch's own STALE_AFTER, deliberately - two components
+# disagreeing about whether a tunnel is alive is worse than either threshold.
+#
+# Only tunnels a policy actually ROUTES THROUGH are judged. An idle tunnel with
+# no device behind it legitimately stops handshaking, and alerting on that
+# would fire every night on a tunnel nobody is using.
+VPN_STALE=180
+now_vpn=""
+_vnow=$(date +%s)
+_i=0
+while [ "$_i" -lt 64 ]; do
+    _pn=$(uci -q get pbr.@policy[$_i].name 2>/dev/null) || break
+    [ -n "$_pn" ] || break
+    case "$_pn" in
+        dash_*)
+            _pif=$(uci -q get pbr.@policy[$_i].interface 2>/dev/null)
+            _pen=$(uci -q get pbr.@policy[$_i].enabled 2>/dev/null)
+            if [ "$_pen" = "1" ] && [ -n "$_pif" ]; then
+                case " $now_vpn " in
+                    *" $_pif:"*) ;;
+                    *)
+                        _hs=$(wg show "$_pif" latest-handshakes 2>/dev/null | awk 'NR==1{print $2+0}')
+                        case "$_hs" in ''|*[!0-9]*) _hs=0 ;; esac
+                        if [ "$_hs" -eq 0 ] || [ $((_vnow - _hs)) -gt "$VPN_STALE" ]; then
+                            now_vpn="$now_vpn $_pif:down"
+                        else
+                            now_vpn="$now_vpn $_pif:up"
+                        fi ;;
+                esac
+            fi ;;
+    esac
+    _i=$((_i + 1))
+done
+now_vpn=$(printf '%s' "$now_vpn" | tr -s ' ' | sed 's/^ //;s/ $//')
+
+# ---- which devices are routed through a tunnel -----------------------------
+# The set of enabled dash_ policies, as "MAC>tunnel" pairs. A change here is
+# either the owner routing a device from the console or vpnwatch releasing one,
+# and the two are told apart by the autopause flag below.
+now_vdev=""
+_i=0
+while [ "$_i" -lt 64 ]; do
+    _pn=$(uci -q get pbr.@policy[$_i].name 2>/dev/null) || break
+    [ -n "$_pn" ] || break
+    case "$_pn" in
+        dash_*)
+            if [ "$(uci -q get pbr.@policy[$_i].enabled 2>/dev/null)" = "1" ]; then
+                _sa=$(uci -q get pbr.@policy[$_i].src_addr 2>/dev/null | tr 'A-F' 'a-f')
+                _pif=$(uci -q get pbr.@policy[$_i].interface 2>/dev/null)
+                [ -n "$_sa" ] && now_vdev="$now_vdev $_sa>$_pif"
+            fi ;;
+    esac
+    _i=$((_i + 1))
+done
+now_vdev=$(printf '%s' "$now_vdev" | tr -s ' ' | sed 's/^ //;s/ $//')
+now_vpause=no
+[ -s /etc/dashboard/vpn-autopaused ] && now_vpause=yes
+
+# A device's name, for messages. The class map is what the console shows, so
+# the phone and the screen agree; the MAC is the honest fallback.
+dev_name() {
+    _n=$(awk -F'|' -v m="$1" '!/^#/ && tolower($1)==m {print $2; exit}' \
+         /etc/dashboard/classmap 2>/dev/null)
+    [ -n "$_n" ] || _n=$(awk -v m="$1" '$2==m {print $4; exit}' /tmp/dhcp.leases 2>/dev/null)
+    [ -n "$_n" ] && [ "$_n" != "*" ] || _n="$1"
+    printf '%s' "$_n"
+}
+
+# ---- Wi-Fi arrivals and departures -----------------------------------------
+# Read from the presence file apwatch maintains, NOT from hostapd's log. That
+# distinction is the whole reason this is usable: the raw log carried 22
+# connect/disconnect lines in one hour on this router - roaming between bands,
+# power-save wakeups, a phone with a weak link retrying - while the debounced
+# presence file recorded 2 real arrivals in the same hour. Alerting on the raw
+# stream would train the owner to silence the app within a day.
+now_pres=$(wc -l < /tmp/.presence 2>/dev/null)
+case "$now_pres" in ''|*[!0-9]*) now_pres=0 ;; esac
+
 # ---- compare with last run --------------------------------------------------
 was_wan=""; was_wan6=""; was_fw=""; was_acct=""; was_dns=""
 was_link="ok"; bad_run=0; good_run=0
+was_vpn=""; was_vdev=""; was_vpause="no"; was_pres=""
 [ -r "$STATE" ] && . "$STATE" 2>/dev/null
 
 if [ -z "$was_wan" ]; then
     # First run after a boot or an install: take a baseline and say so ONCE.
     # Announcing every current state here would mean a burst of messages after
     # every reboot, which is exactly the noise this design avoids.
-    notify "monitoring started" \
-        "Watching the internet link, connection quality, IPv6, firewall, DNS upstreams and traffic accounting." \
-        low white_check_mark
+    notify "$M_HELLO_T" "$M_HELLO_B" low white_check_mark
 else
     [ "$now_wan" != "$was_wan" ] && {
         [ "$now_wan" = down ] \
-            && notify "internet is down" "The WAN interface lost its connection." high rotating_light \
-            || notify "internet is back" "The WAN interface reconnected." default white_check_mark; }
+            && notify "$M_WAN_DOWN_T" "$M_WAN_DOWN_B" high rotating_light \
+            || notify "$M_WAN_UP_T" "$M_WAN_UP_B" default white_check_mark; }
 
     [ "$now_wan6" != "$was_wan6" ] && {
         [ "$now_wan6" = down ] \
-            && notify "IPv6 is down" "IPv4 is unaffected. A third of this line's traffic normally goes over IPv6." default warning \
-            || notify "IPv6 is back" "The IPv6 uplink recovered." low white_check_mark; }
+            && notify "$M_V6_DOWN_T" "$M_V6_DOWN_B" default warning \
+            || notify "$M_V6_UP_T" "$M_V6_UP_B" low white_check_mark; }
 
     [ "$now_fw" != "$was_fw" ] && {
         [ "$now_fw" = absent ] \
-            && notify "FIREWALL IS NOT LOADED" "The kernel has no ruleset. The console has no password and relies on the firewall — treat this as urgent." urgent rotating_light \
-            || notify "firewall reloaded" "The ruleset is back in the kernel." default white_check_mark; }
+            && notify "$M_FW_DOWN_T" "$M_FW_DOWN_B" urgent rotating_light \
+            || notify "$M_FW_UP_T" "$M_FW_UP_B" default white_check_mark; }
 
     [ "$now_acct" != "$was_acct" ] && {
         [ "$now_acct" = stopped ] \
-            && notify "traffic accounting stopped" "Per-device usage is no longer being counted." default warning \
-            || notify "traffic accounting running" "Per-device usage is being counted again." low white_check_mark; }
+            && notify "$M_ACCT_DOWN_T" "$M_ACCT_DOWN_B" default warning \
+            || notify "$M_ACCT_UP_T" "$M_ACCT_UP_B" low white_check_mark; }
 
     # Counters rather than a straight comparison: this is the one signal where
     # the interesting state is "has been true for a while", not "changed".
@@ -204,23 +340,89 @@ else
     esac
     if [ "$was_link" = "ok" ] && [ "$bad_run" -ge "$NEED" ]; then
         was_link=bad
-        notify "connection is struggling" \
-            "Latency ${q_rtt} ms and ${q_loss}% packet loss, held for ${NEED} minutes. Calls and games will feel it." \
-            high warning
+        notify "$M_LINK_BAD_T" "$(printf "$M_LINK_BAD_B" "$q_rtt" "$q_loss")" high warning
     elif [ "$was_link" = "bad" ] && [ "$good_run" -ge "$NEED" ]; then
         was_link=ok
-        notify "connection is steady again" \
-            "Back to ${q_rtt} ms with ${q_loss}% loss." default white_check_mark
+        notify "$M_LINK_OK_T" "$(printf "$M_LINK_OK_B" "$q_rtt" "$q_loss")" default white_check_mark
+    fi
+
+    # VPN tunnels, per tunnel, edge-triggered like everything else
+    for _t in $now_vpn; do
+        _tn=${_t%%:*}; _ts=${_t##*:}
+        case " $was_vpn " in
+            *" $_tn:$_ts "*) ;;
+            *" $_tn:"*)
+                if [ "$_ts" = down ]; then
+                    notify "$M_VPN_DOWN_T" "$(printf "$M_VPN_DOWN_B" "$_tn")" high warning
+                else
+                    notify "$M_VPN_UP_T" "$(printf "$M_VPN_UP_B" "$_tn")" default white_check_mark
+                fi ;;
+            *) ;;   # newly routed tunnel: the device message below covers it
+        esac
+    done
+
+    # devices entering or leaving the tunnel
+    for _p in $now_vdev; do
+        case " $was_vdev " in
+            *" $_p "*) ;;
+            *) notify "$M_VPNDEV_ON_T" \
+                   "$(printf "$M_VPNDEV_ON_B" "$(dev_name "${_p%%>*}")" "${_p##*>}")" \
+                   default lock ;;
+        esac
+    done
+    for _p in $was_vdev; do
+        case " $now_vdev " in
+            *" $_p "*) ;;
+            *) notify "$M_VPNDEV_OFF_T" \
+                   "$(printf "$M_VPNDEV_OFF_B" "$(dev_name "${_p%%>*}")")" \
+                   default unlock ;;
+        esac
+    done
+
+    # the automatic release is its own event: it is not the owner's doing and
+    # it silently costs privacy, which is exactly the kind of thing that should
+    # not wait to be noticed
+    [ "$now_vpause" != "$was_vpause" ] && [ "$now_vpause" = yes ] && \
+        notify "$M_VPNDEV_PAUSE_T" "$M_VPNDEV_PAUSE_B" high warning
+
+    # Wi-Fi arrivals and departures, from the debounced presence file
+    if [ -n "$was_pres" ] && [ "$now_pres" -gt "$was_pres" ]; then
+        _new=$((now_pres - was_pres))
+        [ "$_new" -gt 5 ] && _new=5    # a burst after a radio restart is not news
+        tail -n "$_new" /tmp/.presence 2>/dev/null | while read -r _pt _pev _pmac _pband; do
+            [ -n "$_pmac" ] || continue
+            _dn=$(dev_name "$_pmac")
+            # The band comes from the FREQUENCY in parentheses, not from a
+            # field index: "Channel: 1 (2.412 GHz)" puts the word "Channel:"
+            # in $3, so an index-based read scored every radio as 2.4 and the
+            # SSID silently fell back to a generic word. Radio ORDER is not
+            # assumed either - phy0.1 is not guaranteed to be the 5 GHz one.
+            _ssid=$(iwinfo 2>/dev/null | awk -v b="$_pband" '
+                /ESSID/ { e=$0; sub(/.*ESSID: "/,"",e); sub(/".*/,"",e) }
+                /Channel:/ && /GHz/ {
+                    f=$0; sub(/.*\(/,"",f); sub(/ GHz.*/,"",f)
+                    g=((f+0)<3)?"2.4":"5"
+                    if (g==b && e!="") { print e; exit }
+                }')
+            if [ "$_pev" = join ]; then
+                notify "$M_WIFI_JOIN_T" \
+                    "$(printf "$M_WIFI_JOIN_B" "$_dn" "${_ssid:-Wi-Fi}" "$_pband")" low iphone
+            else
+                notify "$M_WIFI_LEAVE_T" \
+                    "$(printf "$M_WIFI_LEAVE_B" "$_dn" "$_pband")" min iphone
+            fi
+        done
     fi
 
     [ "$now_dns" != "$was_dns" ] && {
         [ "$now_dns" = failing ] \
-            && notify "encrypted DNS is stalling" "Two or more upstream lookups timed out in the last half hour. Pages may load slowly; retries usually succeed." default warning \
-            || notify "encrypted DNS recovered" "Upstream lookups are answering again." low white_check_mark; }
+            && notify "$M_DNS_BAD_T" "$M_DNS_BAD_B" default warning \
+            || notify "$M_DNS_OK_T" "$M_DNS_OK_B" low white_check_mark; }
 fi
 
-printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\nwas_link=%s\nbad_run=%s\ngood_run=%s\n' \
-    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" "$was_link" "$bad_run" "$good_run" > "$STATE.tmp" 2>/dev/null &&
+{ printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\nwas_link=%s\nbad_run=%s\ngood_run=%s\nwas_pres=%s\nwas_vpause=%s\n' \
+    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" "$was_link" "$bad_run" "$good_run" "$now_pres" "$now_vpause"
+  printf 'was_vpn="%s"\nwas_vdev="%s"\n' "$now_vpn" "$now_vdev"; } > "$STATE.tmp" 2>/dev/null &&
     mv "$STATE.tmp" "$STATE" 2>/dev/null
 
 flush_queue
