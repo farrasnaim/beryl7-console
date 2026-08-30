@@ -65,6 +65,14 @@
       </section>
     </div>
 
+    <div class="face">
+      <section class="panel" id="p-agh" hidden>
+        <div class="panel__h"><span class="panel__t">Content filtering</span>
+          <div class="panel__aside" id="aghState"></div></div>
+        <div class="panel__b" id="agh" style="padding-top:4px"></div>
+      </section>
+    </div>
+
   </main>
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
@@ -925,6 +933,72 @@ $('#rescanDev').addEventListener('click', function () {
 });
 
 /* ----------------------------------------------------------------- boot -- */
+/* AdGuard Home. On this page rather than a new one because it is network
+   policy — what leaves the LAN and what gets stopped — same as the tunnels
+   above it. The API emits null when the router has no AdGuard credentials
+   file, and the whole panel stays hidden: nothing on this console may render
+   an instrument for hardware or software the router does not have. */
+function renderAdguard(d) {
+    var a = d.adguard;
+    var sec = $('#p-agh'); if (!sec) return;
+    if (!a) { sec.hidden = true; return; }
+    sec.hidden = false;
+    var st = $('#aghState'); clear(st);
+    var box = $('#agh'); clear(box);
+
+    if (!a.up) {
+        st.appendChild(OS.stateWord('DOWN', 'bad'));
+        box.appendChild(OS.note('AdGuard Home is not answering. DNS is down with it — every ' +
+            'query goes through it. If this lasts, restart it over SSH: ' +
+            '/etc/init.d/adguardhome restart', 'bad'));
+        return;
+    }
+    st.appendChild(a.protection ? OS.stateWord('FILTERING', 'ok')
+                                : OS.stateWord('PAUSED', 'warn'));
+
+    var grid = el('div');
+    grid.style.cssText = 'display:flex;gap:28px;flex-wrap:wrap;margin:4px 0 14px';
+    function stat(num, cap) {
+        var c = el('div');
+        c.appendChild(el('div', 'row__num', num));
+        c.appendChild(el('div', 'row__cap', cap));
+        return c;
+    }
+    var pct = a.queries > 0 ? Math.round(a.blocked * 1000 / a.queries) / 10 : 0;
+    grid.appendChild(stat(OS.fmtNum ? OS.fmtNum(a.queries) : String(a.queries), 'DNS queries · 24h'));
+    grid.appendChild(stat(OS.fmtNum ? OS.fmtNum(a.blocked) : String(a.blocked), 'blocked'));
+    grid.appendChild(stat(pct + '%', 'of all queries'));
+    box.appendChild(grid);
+
+    if (!a.protection) {
+        box.appendChild(OS.note('Filtering is paused: ads, malware and phishing domains all ' +
+            'resolve normally until it is resumed.', 'warn'));
+    }
+
+    var row = el('div', 'inline');
+    row.style.cssText = 'gap:10px;flex-wrap:wrap;margin-top:4px';
+    var tb = el('button', 'btn btn--sm', a.protection ? 'Pause filtering' : 'Resume filtering');
+    tb.addEventListener('click', function () {
+        OS.post(API, { action: 'aghprot', state: a.protection ? 'off' : 'on' }).then(function (j) {
+            if (j && j.ok) { OS.toast(j.protection ? 'Filtering resumed.' : 'Filtering paused.', 'ok'); OS.tp.refresh(300); }
+            else { OS.toast('Not changed: ' + ((j && j.error) || 'unknown error') + '.', 'bad'); }
+        });
+    });
+    row.appendChild(tb);
+    /* location.hostname, not a hardcoded address: the AdGuard UI listens on
+       every interface, so this link survives a LAN renumbering. */
+    var pl = el('a', 'btn btn--ghost btn--sm', 'Open the AdGuard portal');
+    pl.href = 'http://' + location.hostname + ':3010/';
+    pl.target = '_blank'; pl.rel = 'noopener';
+    row.appendChild(pl);
+    box.appendChild(row);
+
+    var h = el('div', 'hint');
+    h.style.marginTop = '10px';
+    h.textContent = 'The portal has the query log, the filter lists and per-list settings. ' +
+        'It asks for its own sign-in.';
+    box.appendChild(h);
+}
 function render(d) {
     if (!d || !d.ok) return;
     last = d;
@@ -1138,6 +1212,7 @@ function render(d) {
     renderTunnels(d);
     renderDevices(d);
     renderFailmode(d);
+    renderAdguard(d);
 }
 
 loadDevices().then(function () { if (last) { renderDevices(last); renderMap(last); } });

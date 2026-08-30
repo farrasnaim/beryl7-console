@@ -128,6 +128,42 @@ esac
 # Deliberately a stored, explicit choice: silently switching a kill-switch off
 # would be a security change made on the owner's behalf.
 FAILMODE_FILE=/etc/dashboard/vpn-failmode
+# ---- AdGuard protection toggle -----------------------------------------------
+# The console talks to AdGuard Home with the ready-made Authorization header in
+# /etc/dashboard/agh-auth (0600). The header VALUE is stored, not user:pass,
+# because this busybox has no base64 to encode one at runtime. The file is the
+# single place the credential lives outside AGH itself — change the AGH password
+# and this file together, or the panel goes DOWN while AGH keeps working.
+AGH_AUTH=/etc/dashboard/agh-auth
+agh_get() {  # $1 = path
+    wget -q -T 3 -O - --header="Authorization: $(cat "$AGH_AUTH")" \
+        "http://127.0.0.1:3010$1" 2>/dev/null
+}
+if [ "$ACTION" = "aghprot" ]; then
+    [ -r "$AGH_AUTH" ] || { printf '{"ok":false,"error":"AdGuard credentials file is missing on the router"}'; exit 0; }
+    ST=$(qs_get state)
+    case "$ST" in
+        on)  _b='{"protection_enabled":true}' ;;
+        off) _b='{"protection_enabled":false}' ;;
+        *)   printf '{"ok":false,"error":"state must be on or off"}'; exit 0 ;;
+    esac
+    wget -q -T 5 -O /dev/null --header="Authorization: $(cat "$AGH_AUTH")" \
+        --header="Content-Type: application/json" --post-data="$_b" \
+        "http://127.0.0.1:3010/control/dns_config" 2>/dev/null
+    # Read the state back rather than trusting the write: the answer the panel
+    # shows next is AGH's own, so a silently failed POST cannot show as success.
+    _pe=$(agh_get /control/status | jsonfilter -e '@.protection_enabled' 2>/dev/null)
+    if [ "$_pe" = "true" ] && [ "$ST" = "on" ]; then
+        printf '{"ok":true,"protection":true}'
+    elif [ "$_pe" = "false" ] && [ "$ST" = "off" ]; then
+        printf '{"ok":true,"protection":false}'
+    else
+        printf '{"ok":false,"error":"AdGuard did not apply the change"}'
+    fi
+    logger -t vpn-api "AdGuard protection set to $ST via web UI"
+    exit 0
+fi
+
 if [ "$ACTION" = "failmode" ]; then
     m=$(qs_get_dec mode)
     case "$m" in
@@ -795,4 +831,26 @@ printf '{"ok":true,"ts":%s,"pbr_enabled":%s,"pbr_active":%s,"pbr_rules":%s,"fail
     "$TUNS" "$POLS"
 printf '"vpndns":{"state":"%s","v6_rules":%s,"routed":%s,"chain":%s,"nodns":[%s]},' \
     "$VSTATE" "$(jnum "$V6RULES")" "$(jnum "$ROUTED")" "$V6CHAIN" "$VN"
+# ---- AdGuard Home (optional) --------------------------------------------------
+# null when the credentials file is absent: on a router without AdGuard the
+# panel must not render at all (portability rule — nothing here may assume this
+# exact box). up:false when the file exists but AGH does not answer, which is a
+# fault worth showing, not hiding.
+AGHJ=null
+if [ -r "$AGH_AUTH" ]; then
+    _ast=$(agh_get /control/status)
+    if [ -n "$_ast" ]; then
+        _pe=$(printf '%s' "$_ast" | jsonfilter -e '@.protection_enabled' 2>/dev/null)
+        _asx=$(agh_get /control/stats)
+        _q=$(printf '%s' "$_asx" | jsonfilter -e '@.num_dns_queries' 2>/dev/null)
+        _bl=$(printf '%s' "$_asx" | jsonfilter -e '@.num_blocked_filtering' 2>/dev/null)
+        case "$_q"  in ''|*[!0-9]*) _q=0  ;; esac
+        case "$_bl" in ''|*[!0-9]*) _bl=0 ;; esac
+        AGHJ=$(printf '{"up":true,"protection":%s,"queries":%s,"blocked":%s}' \
+            "$([ "$_pe" = "true" ] && echo true || echo false)" "$_q" "$_bl")
+    else
+        AGHJ='{"up":false}'
+    fi
+fi
+printf '"adguard":%s,' "$AGHJ"
 printf '"vpnwatch":%s}' "$(jnum "$VW")"
