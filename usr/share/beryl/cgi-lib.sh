@@ -124,23 +124,41 @@ fw_table_state() {
 # resolvable one silently pins whatever it resolved to at load time. NOT
 # multicast or broadcast, which mean nothing as a round-trip target or a
 # resolver. A LAN address IS allowed: both callers have legitimate uses for one.
+# On success, IP4_CANON holds the canonical dotted quad and is what callers
+# must STORE - never the raw input. Decision, made deliberately: a leading-zero
+# octet is read as DECIMAL padding ("192.168.008.001" means .8.1), because the
+# alternative - the kernel and inet_aton reading it as OCTAL - is exactly the
+# surprise this exists to remove. Canonicalising rather than rejecting keeps a
+# provider config with zero-padded octets working instead of failing with a
+# message about an address that looks perfectly fine. Because the stored form
+# has no leading zeros, the console and the kernel cannot disagree about it.
+#
+# The old version compared the first octet as a STRING between two arithmetic
+# checks, so "00.1.2.3" walked straight past the "this network" guard that
+# visibly existed. Every octet comparison below is arithmetic on the
+# canonicalised value.
 valid_ip4() {
     case "$1" in
         ''|*[!0-9.]*|*..*|.*|*.) return 1 ;;
     esac
-    _c=0; _first=""
+    _c=0; _first=""; IP4_CANON=""
     _oldifs=$IFS; IFS=.
     for _o in $1; do
         case "$_o" in ''|*[!0-9]*) IFS=$_oldifs; return 1 ;; esac
         [ "${#_o}" -gt 3 ] && { IFS=$_oldifs; return 1; }
+        # strip leading zeros textually - $((...)) would read them as octal
+        while [ "${#_o}" -gt 1 ]; do
+            case "$_o" in 0*) _o=${_o#0} ;; *) break ;; esac
+        done
         [ "$_o" -gt 255 ] && { IFS=$_oldifs; return 1; }
         _c=$((_c + 1))
-        [ "$_c" = 1 ] && _first=$_o
+        [ "$_c" -eq 1 ] && _first=$_o
+        IP4_CANON="$IP4_CANON${IP4_CANON:+.}$_o"
     done
     IFS=$_oldifs
-    [ "$_c" = 4 ] || return 1
-    [ "$_first" = 0 ] && return 1            # "this network"
-    [ "$_first" -ge 224 ] && return 1        # multicast, and 255.x broadcast
+    [ "$_c" -eq 4 ] || { IP4_CANON=""; return 1; }
+    [ "$_first" -eq 0 ] && { IP4_CANON=""; return 1; }    # "this network"
+    [ "$_first" -ge 224 ] && { IP4_CANON=""; return 1; }  # multicast, 255.x broadcast
     return 0
 }
 

@@ -947,10 +947,19 @@ function renderAdguard(d) {
     var box = $('#agh'); clear(box);
 
     if (!a.up) {
-        st.appendChild(OS.stateWord('DOWN', 'bad'));
-        box.appendChild(OS.note('AdGuard Home is not answering. DNS is down with it — every ' +
-            'query goes through it. If this lasts, restart it over SSH: ' +
-            '/etc/init.d/adguardhome restart', 'bad'));
+        if (a.reason === 'auth') {
+            /* the service is fine; restarting it (the old advice) fixes nothing */
+            st.appendChild(OS.stateWord('CREDENTIAL STALE', 'warn'));
+            box.appendChild(OS.note('AdGuard is running and filtering, but it refused the ' +
+                'credential the console keeps in /etc/dashboard/agh-auth - the password was ' +
+                'probably changed without updating that file. DNS is unaffected; only this ' +
+                'panel is blind until the file matches again.', 'warn'));
+        } else {
+            st.appendChild(OS.stateWord('DOWN', 'bad'));
+            box.appendChild(OS.note('AdGuard Home is not answering. DNS is down with it - every ' +
+                'query goes through it. If this lasts, restart it over SSH: ' +
+                '/etc/init.d/adguardhome restart', 'bad'));
+        }
         return;
     }
     /* Recurring upstream failures outrank the steady-state word: every

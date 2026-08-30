@@ -98,6 +98,16 @@ while [ "$i" -lt 64 ]; do
             sa=$(uci -q get pbr.@policy[$i].src_addr 2>/dev/null | tr "A-F" "a-f")
             pif=$(uci -q get pbr.@policy[$i].interface 2>/dev/null)
             en=$(uci -q get pbr.@policy[$i].enabled 2>/dev/null)
+            # The DNS address is validated below before it becomes nft syntax;
+            # the MAC deserves the same at the same boundary. Not reachable
+            # through the console (its rename path validates MACs), but this
+            # file also consumes hand-edited policies, and it interpolates the
+            # value at several places in the ruleset.
+            case "$sa" in
+                [0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]) ;;
+                *) [ -n "$sa" ] && logger -t beryl-vpndns "policy $i: src_addr is not a MAC - rule skipped"
+                   sa="" ;;
+            esac
             if [ "$en" = "1" ] && [ -n "$pif" ] && [ -n "$sa" ]; then
                 # The first entry that is actually a usable IPv4 literal, not
                 # merely the first one that has a digit and no colon. Those are

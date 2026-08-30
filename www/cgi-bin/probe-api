@@ -102,6 +102,7 @@ add)
     IP=$(qs_get ip)
     NAME=$(clean_name "$(qs_get_dec name)")
     valid_ip4 "$IP" || fail "not a usable IPv4 address"
+    IP=$IP4_CANON
     [ -n "$NAME" ] || NAME="$IP"
     _n=$(awk -F'|' '$1 != "" && $1 !~ /^#/ && $1 != ip' ip="$IP" "$TARGETS" 2>/dev/null | wc -l)
     [ "$_n" -ge "$MAX_SAVED" ] && fail "that is as many as the list holds ($MAX_SAVED)"
@@ -131,6 +132,7 @@ set)
         cf|google|gw) LINE="$SEL" ;;
         custom)
             valid_ip4 "$IP" || fail "not a usable IPv4 address"
+    IP=$IP4_CANON
             LINE="custom $IP"
             ;;
         *) fail "unknown target" ;;

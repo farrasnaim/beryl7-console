@@ -155,12 +155,14 @@ if [ "$ACTION" = "aghprot" ]; then
     _pe=$(agh_get /control/status | jsonfilter -e '@.protection_enabled' 2>/dev/null)
     if [ "$_pe" = "true" ] && [ "$ST" = "on" ]; then
         printf '{"ok":true,"protection":true}'
+        logger -t vpn-api "AdGuard protection set to $ST via web UI"
     elif [ "$_pe" = "false" ] && [ "$ST" = "off" ]; then
         printf '{"ok":true,"protection":false}'
+        logger -t vpn-api "AdGuard protection set to $ST via web UI"
     else
         printf '{"ok":false,"error":"AdGuard did not apply the change"}'
+        logger -t vpn-api "AdGuard protection change to $ST FAILED - state unchanged"
     fi
-    logger -t vpn-api "AdGuard protection set to $ST via web UI"
     exit 0
 fi
 
@@ -427,7 +429,9 @@ if [ "$ACTION" = "add" ]; then
         old_ifs="$IFS"; IFS=', '
         for e in $IDNS; do
             [ -n "$e" ] || continue
-            if valid_ip4 "$e" || valid_ip6 "$e"; then
+            if valid_ip4 "$e"; then
+                DNSOK="$DNSOK $IP4_CANON"
+            elif valid_ip6 "$e"; then
                 DNSOK="$DNSOK $e"
             else
                 DNSBAD="$DNSBAD $e"
@@ -624,7 +628,7 @@ if [ "$ACTION" = "route" ]; then
         # was unusable reported that instead of the working one behind it.
         VDNS=""
         for _e in $(uci -q get network.$IFACE.dns 2>/dev/null | tr ' ,' '  '); do
-            if valid_ip4 "$_e"; then VDNS="$_e"; break; fi
+            if valid_ip4 "$_e"; then VDNS="$IP4_CANON"; break; fi
         done
 
         # The IPv6 bypass is closed by beryl-vpndns, called through
@@ -873,7 +877,18 @@ if [ -r "$AGH_AUTH" ]; then
         AGHJ=$(printf '{"up":true,"protection":%s,"queries":%s,"blocked":%s,"upfail":{"recent":%s,"last":"%s","window":1800}}' \
             "$([ "$_pe" = "true" ] && echo true || echo false)" "$_q" "$_bl" "$_ufn" "$(esc "$_ufl")")
     else
-        AGHJ='{"up":false}'
+        # Silence has two causes and they need DIFFERENT advice - the firewall
+        # detector split its causes for the same reason. An unauthenticated
+        # fetch of the UI root separates them: the login page answers whether
+        # or not our stored credential is any good, so an answer here means
+        # the service is alive and the credential in /etc/dashboard/agh-auth
+        # is what failed. Advising a restart for that (as this did) has the
+        # owner bouncing a healthy service.
+        if wget -q -T 3 -O /dev/null "http://127.0.0.1:3010/" 2>/dev/null; then
+            AGHJ='{"up":false,"reason":"auth"}'
+        else
+            AGHJ='{"up":false,"reason":"down"}'
+        fi
     fi
 fi
 printf '"adguard":%s,' "$AGHJ"
