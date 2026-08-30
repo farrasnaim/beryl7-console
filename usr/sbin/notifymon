@@ -296,13 +296,18 @@ dev_name() {
 # power-save wakeups, a phone with a weak link retrying - while the debounced
 # presence file recorded 2 real arrivals in the same hour. Alerting on the raw
 # stream would train the owner to silence the app within a day.
-now_pres=$(wc -l < /tmp/.presence 2>/dev/null)
-case "$now_pres" in ''|*[!0-9]*) now_pres=0 ;; esac
+# Tracked by the TIMESTAMP of the newest event, not by counting lines. dashmon
+# caps this file at 50 entries, so once it is full an appended event does not
+# change the line count - a counter-based reader goes permanently silent, and
+# does so invisibly, having worked in testing while the file was still short.
+# Timestamps only move forward and survive trimming.
+now_pts=$(awk 'END{print $1+0}' /tmp/.presence 2>/dev/null)
+case "$now_pts" in ''|*[!0-9]*) now_pts=0 ;; esac
 
 # ---- compare with last run --------------------------------------------------
 was_wan=""; was_wan6=""; was_fw=""; was_acct=""; was_dns=""
 was_link="ok"; bad_run=0; good_run=0
-was_vpn=""; was_vdev=""; was_vpause="no"; was_pres=""
+was_vpn=""; was_vdev=""; was_vpause="no"; was_pts=""
 [ -r "$STATE" ] && . "$STATE" 2>/dev/null
 
 if [ -z "$was_wan" ]; then
@@ -386,10 +391,11 @@ else
         notify "$M_VPNDEV_PAUSE_T" "$M_VPNDEV_PAUSE_B" high warning
 
     # Wi-Fi arrivals and departures, from the debounced presence file
-    if [ -n "$was_pres" ] && [ "$now_pres" -gt "$was_pres" ]; then
-        _new=$((now_pres - was_pres))
-        [ "$_new" -gt 5 ] && _new=5    # a burst after a radio restart is not news
-        tail -n "$_new" /tmp/.presence 2>/dev/null | while read -r _pt _pev _pmac _pband; do
+    if [ -n "$was_pts" ] && [ "$was_pts" -gt 0 ] && [ "$now_pts" -gt "$was_pts" ]; then
+        # everything newer than the last one reported, newest five at most: a
+        # burst after a radio restart is not news
+        awk -v since="$was_pts" '$1+0 > since' /tmp/.presence 2>/dev/null | tail -n 5 |
+        while read -r _pt _pev _pmac _pband; do
             [ -n "$_pmac" ] || continue
             _dn=$(dev_name "$_pmac")
             # The band comes from the FREQUENCY in parentheses, not from a
@@ -420,8 +426,8 @@ else
             || notify "$M_DNS_OK_T" "$M_DNS_OK_B" low white_check_mark; }
 fi
 
-{ printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\nwas_link=%s\nbad_run=%s\ngood_run=%s\nwas_pres=%s\nwas_vpause=%s\n' \
-    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" "$was_link" "$bad_run" "$good_run" "$now_pres" "$now_vpause"
+{ printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\nwas_link=%s\nbad_run=%s\ngood_run=%s\nwas_pts=%s\nwas_vpause=%s\n' \
+    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" "$was_link" "$bad_run" "$good_run" "$now_pts" "$now_vpause"
   printf 'was_vpn="%s"\nwas_vdev="%s"\n' "$now_vpn" "$now_vdev"; } > "$STATE.tmp" 2>/dev/null &&
     mv "$STATE.tmp" "$STATE" 2>/dev/null
 
