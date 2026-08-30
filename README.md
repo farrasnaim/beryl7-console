@@ -152,6 +152,10 @@ Every script carries a header comment explaining what it does and, more importan
 | Travel DNS hotplug | `https-dns-proxy` (the hotplug is a no-op without it) |
 | Everything else | stock OpenWrt (`iw`, `ubus`, `uci`, `nftables`, BusyBox) |
 
+The installer warns about any of these that are missing, except the USB-uplink
+kmods: those are per-hardware ("as needed" above), so their absence is only
+meaningful once you know which device will be plugged in.
+
 On OpenWrt 24.10 and newer (`apk`):
 
 ```sh

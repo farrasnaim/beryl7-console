@@ -50,12 +50,17 @@ MISSING=$(ssh -n "$TARGET" 'for c in uci ubus iw nft; do command -v $c >/dev/nul
 # Optional packages: report, never fail. OpenWrt moved from opkg to apk, so ask
 # whichever one this build actually has.
 #
-# This list must stay identical to the README's dependency table. It named a
+# This list must stay identical to the README's dependency table (the USB
+# kmods excepted — the README marks those per-hardware "as needed", and warning
+# about them on every install would be noise). The table once named a
 # statistics package that had been removed from the router, while the Traffic
 # panel has always read nlbwmon — so a reader following the README installed the
-# wrong thing and still got an empty panel. Each of these degrades honestly when
-# absent; the warning exists to say so before you go looking for the reason.
-for pkg in pbr wireguard-tools nlbwmon; do
+# wrong thing and still got an empty panel. Then the check itself drifted: it
+# omitted kmod-wireguard and https-dns-proxy, the two whose absence fails
+# SILENTLY (tunnels that never come up; a travel-DNS hotplug that no-ops).
+# Each of these degrades honestly when absent; the warning exists to say so
+# before you go looking for the reason.
+for pkg in pbr wireguard-tools kmod-wireguard nlbwmon https-dns-proxy; do
     ssh -n "$TARGET" "if command -v apk >/dev/null 2>&1; then apk info -e '$pkg' >/dev/null 2>&1;
                       else opkg list-installed 2>/dev/null | grep -q \"^$pkg \"; fi" \
         || warn "not installed: $pkg — the matching page will be limited (see the README)"
@@ -186,7 +191,9 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
          /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api \
          /www/cgi-bin/version-api \
-         /etc/init.d/beryl-vpndns; do
+         /etc/init.d/beryl-vpndns \
+         /etc/nftables.d/30-beryl-vpndns.nft \
+         /etc/adguardhome; do
     grep -qxF "$p" /etc/sysupgrade.conf || echo "$p" >> /etc/sysupgrade.conf
 done
 echo "  . sysupgrade.conf updated"
