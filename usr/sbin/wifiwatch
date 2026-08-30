@@ -1,0 +1,168 @@
+#!/bin/sh
+# /usr/sbin/wifiwatch — real-time Wi-Fi arrivals and departures.
+#
+# WHY THIS EXISTS SEPARATELY FROM notifymon. notifymon runs from cron, so the
+# fastest it can ever be is a minute, and the presence file it reads is written
+# by dashmon on the same minute cadence. For "is the internet down" a minute is
+# nothing. For "who just walked in" it is the whole point, and the owner said
+# so.
+#
+# WHAT IT LISTENS TO. hostapd publishes ubus notifications per AP. Verified on
+# this router rather than assumed - a subscriber was attached and one
+# association was deliberately provoked to read the names off the wire:
+#
+#   join   sta-authorized   (fires after the handshake, when the client is
+#                            actually usable - `assoc` fires earlier, before
+#                            the key exchange, and would announce a device
+#                            that may still fail to join)
+#   leave  disassoc | deauth | local-deauth
+#
+# THE HARD PART IS NOT SPEED, IT IS ROAMING. Measured here: hostapd logged 22
+# connect/disconnect lines in one hour while only 2 were real arrivals - a
+# phone hopping 2.4 <-> 5 GHz produces a disassoc and an assoc every time, and
+# announcing those would make the alerts worthless within a day. dashmon avoids
+# this by only sampling once a minute, which is exactly the latency being
+# removed here, so the debounce has to be rebuilt properly:
+#
+#   JOIN  is announced only if the device is not already associated on ANOTHER
+#         AP at that moment. A band hop therefore announces nothing.
+#   LEAVE cannot be judged instantly - "gone" and "moving" look identical for a
+#         second or two - so it is held for GRACE seconds and then confirmed
+#         against every AP. Anything that came back is silently dropped.
+#
+# So joins are instant and leaves take GRACE. That asymmetry is physics, not a
+# shortcut: no amount of engineering can tell a departure from a roam at the
+# instant the frame arrives.
+#
+# WHAT IT IS ALLOWED TO DO. It sends messages. It never restarts a service,
+# never writes uci, never touches the radios - the same invariant pingmon
+# carries. The worst failure it can produce is a wrong message.
+
+CONF=/etc/dashboard/notify.conf
+PEND=/tmp/.wifipend
+GRACE=${NOTIFY_WIFI_GRACE:-20}
+
+[ -r "$CONF" ] || exit 0
+. "$CONF" 2>/dev/null
+[ "$NOTIFY_ENABLED" = "1" ] || exit 0
+[ -n "$NOTIFY_URL" ] || exit 0
+[ "${NOTIFY_WIFI:-1}" = "1" ] || exit 0
+
+HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-router}
+M_WIFI_JOIN_T=${MSG_WIFI_JOIN_T:-"device joined Wi-Fi"}
+M_WIFI_JOIN_B=${MSG_WIFI_JOIN_B:-"%s connected to %s on %s GHz."}
+M_WIFI_LEAVE_T=${MSG_WIFI_LEAVE_T:-"device left Wi-Fi"}
+M_WIFI_LEAVE_B=${MSG_WIFI_LEAVE_B:-"%s disconnected from %s GHz."}
+
+send() {   # $1 title  $2 body  $3 priority  $4 tags
+    wget -q -T 8 -O /dev/null \
+        --header="Title: $HOSTN: $1" \
+        --header="Priority: ${3:-default}" \
+        --header="Tags: ${4:-iphone}" \
+        --post-data="$2" "$NOTIFY_URL" 2>/dev/null
+}
+
+# Names come from the class map, so the phone and the console agree on what a
+# device is called; the MAC is the honest fallback.
+dev_name() {
+    _n=$(awk -F'|' -v m="$1" '!/^#/ && tolower($1)==m {print $2; exit}' \
+         /etc/dashboard/classmap 2>/dev/null)
+    [ -n "$_n" ] || _n=$(awk -v m="$1" '$2==m {print $4; exit}' /tmp/dhcp.leases 2>/dev/null)
+    [ -n "$_n" ] && [ "$_n" != "*" ] || _n="$1"
+    printf '%s' "$_n"
+}
+
+ap_list() { iw dev 2>/dev/null | awk '/^\tInterface /{print $2}'; }
+
+# Band from the FREQUENCY, never from the interface name or its index: naming
+# is a build detail and radio order is not guaranteed.
+band_of() {   # $1 = interface
+    iw dev "$1" info 2>/dev/null | awk '/channel/ {
+        f=$0; sub(/.*\(/,"",f); sub(/ MHz.*/,"",f)
+        print ((f+0) < 3000 ? "2.4" : ((f+0) < 5955 ? "5" : "6")); exit }'
+}
+
+ssid_of() {   # $1 = interface
+    iwinfo "$1" info 2>/dev/null | sed -n 's/.*ESSID: "\(.*\)"/\1/p' | head -1
+}
+
+# Is this MAC associated anywhere right now, optionally ignoring one AP?
+assoc_anywhere() {   # $1 = mac (lower)  $2 = interface to skip (optional)
+    for _i in $(ap_list); do
+        [ "$_i" = "$2" ] && continue
+        iw dev "$_i" station dump 2>/dev/null | grep -qi "^Station $1" && return 0
+    done
+    return 1
+}
+
+# Departures that have outlived the grace period and are still gone.
+resolve_pending() {
+    [ -s "$PEND" ] || return 0
+    _now=$(date +%s); _keep="$PEND.k"; : > "$_keep"
+    while read -r _pm _pt _pb; do
+        [ -n "$_pm" ] || continue
+        if [ $((_now - _pt)) -lt "$GRACE" ]; then
+            printf '%s %s %s\n' "$_pm" "$_pt" "$_pb" >> "$_keep"
+        elif assoc_anywhere "$_pm"; then
+            :   # came back inside the window - a roam, and not news
+        else
+            send "$M_WIFI_LEAVE_T" "$(printf "$M_WIFI_LEAVE_B" "$(dev_name "$_pm")" "$_pb")" \
+                 min iphone
+        fi
+    done < "$PEND"
+    if [ -s "$_keep" ]; then mv "$_keep" "$PEND"; else rm -f "$_keep" "$PEND"; fi
+}
+
+OBJS=$(ubus list 2>/dev/null | grep '^hostapd\.')
+[ -n "$OBJS" ] || exit 0
+
+# A FIFO rather than a pipe, so the reader can WAKE ON A TIMER as well as on an
+# event. That matters: a held departure has to be confirmed after GRACE seconds
+# even if the airwaves then go completely silent, and a plain `ubus | while
+# read` only ever wakes when something arrives. Opened read-write so it never
+# sees EOF; the subscriber's death is detected explicitly instead, and ending
+# the loop lets procd restart the service - the right answer to the event
+# source disappearing.
+FIFO=/tmp/.wifiwatch.fifo
+rm -f "$FIFO"; mkfifo "$FIFO" 2>/dev/null || exit 0
+ubus subscribe $OBJS > "$FIFO" 2>/dev/null &
+UBPID=$!
+exec 3<> "$FIFO"
+trap 'kill $UBPID 2>/dev/null; rm -f "$FIFO"' EXIT INT TERM
+
+while :; do
+    kill -0 "$UBPID" 2>/dev/null || break
+    if IFS= read -r -t 5 line <&3; then
+        case "$line" in
+            *'"sta-authorized"'*|*'"disassoc"'*|*'"deauth"'*) ;;
+            *) resolve_pending; continue ;;      # probe/auth/assoc noise
+        esac
+        mac=$(printf '%s' "$line" | sed -n 's/.*"address":"\([0-9a-fA-F:]*\)".*/\1/p' | tr 'A-F' 'a-f')
+        ifc=$(printf '%s' "$line" | sed -n 's/.*"ifname":"\([^"]*\)".*/\1/p')
+        [ -n "$mac" ] && [ -n "$ifc" ] || { resolve_pending; continue; }
+        band=$(band_of "$ifc")
+
+        case "$line" in
+            *'"sta-authorized"'*)
+                # A pending departure for this MAC means it was moving, not
+                # leaving: cancel it and say nothing.
+                if [ -s "$PEND" ] && grep -q "^$mac " "$PEND" 2>/dev/null; then
+                    grep -v "^$mac " "$PEND" > "$PEND.k" 2>/dev/null
+                    if [ -s "$PEND.k" ]; then mv "$PEND.k" "$PEND"; else rm -f "$PEND.k" "$PEND"; fi
+                elif ! assoc_anywhere "$mac" "$ifc"; then
+                    send "$M_WIFI_JOIN_T" \
+                         "$(printf "$M_WIFI_JOIN_B" "$(dev_name "$mac")" "$(ssid_of "$ifc")" "$band")" \
+                         low iphone
+                fi
+                ;;
+            *)
+                grep -q "^$mac " "$PEND" 2>/dev/null || \
+                    printf '%s %s %s\n' "$mac" "$(date +%s)" "$band" >> "$PEND"
+                ;;
+        esac
+    fi
+    # runs on every event AND on every 5s timeout, so a held departure is
+    # confirmed even in total silence
+    resolve_pending
+done
+exit 0

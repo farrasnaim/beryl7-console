@@ -112,6 +112,7 @@ chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api 
           /www/cgi-bin/probe-api /www/cgi-bin/version-api \
           /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
           /usr/sbin/notifymon \
+          /usr/sbin/wifiwatch /etc/init.d/wifiwatch \
           /usr/sbin/beryl-pbrtbl \
           /etc/hotplug.d/iface/12-console-services \
           /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
@@ -149,6 +150,8 @@ echo "  . cron entries present"
 # closed. procd rather than cron, because cron floors at a minute and a
 # five-minute chart needs seconds. See the header of /usr/sbin/pingmon.
 /etc/init.d/pingmon enable  >/dev/null 2>&1 || true
+/etc/init.d/wifiwatch enable  >/dev/null 2>&1 || true
+/etc/init.d/wifiwatch restart >/dev/null 2>&1 || true
 /etc/init.d/pingmon restart >/dev/null 2>&1 || true
 echo "  . pingmon running"
 
@@ -180,6 +183,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
          /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
          /usr/sbin/notifymon \
+         /usr/sbin/wifiwatch /etc/init.d/wifiwatch \
          /usr/sbin/beryl-pbrtbl /usr/share/beryl/cgi-lib.sh \
          /etc/dashboard /etc/crontabs/root \
          /etc/hotplug.d/iface/12-console-services \

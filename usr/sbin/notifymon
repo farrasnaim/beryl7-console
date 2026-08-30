@@ -112,11 +112,6 @@ M_VPNDEV_OFF_T=${MSG_VPNDEV_OFF_T:-"device left the VPN"}
 M_VPNDEV_OFF_B=${MSG_VPNDEV_OFF_B:-"%s is back on the normal uplink."}
 M_VPNDEV_PAUSE_T=${MSG_VPNDEV_PAUSE_T:-"VPN routing auto-paused"}
 M_VPNDEV_PAUSE_B=${MSG_VPNDEV_PAUSE_B:-"A tunnel stopped answering, so routed devices were released to the normal uplink to keep them online. Their traffic is not private until it returns."}
-# %s = device name, %s = SSID, %s = band
-M_WIFI_JOIN_T=${MSG_WIFI_JOIN_T:-"device joined Wi-Fi"}
-M_WIFI_JOIN_B=${MSG_WIFI_JOIN_B:-"%s connected to %s on %s GHz."}
-M_WIFI_LEAVE_T=${MSG_WIFI_LEAVE_T:-"device left Wi-Fi"}
-M_WIFI_LEAVE_B=${MSG_WIFI_LEAVE_B:-"%s disconnected from %s GHz."}
 
 # `|` is the field separator in the queue and nothing generated here contains
 # one — every message in this file is a literal written above.
@@ -289,25 +284,16 @@ dev_name() {
     printf '%s' "$_n"
 }
 
-# ---- Wi-Fi arrivals and departures -----------------------------------------
-# Read from the presence file apwatch maintains, NOT from hostapd's log. That
-# distinction is the whole reason this is usable: the raw log carried 22
-# connect/disconnect lines in one hour on this router - roaming between bands,
-# power-save wakeups, a phone with a weak link retrying - while the debounced
-# presence file recorded 2 real arrivals in the same hour. Alerting on the raw
-# stream would train the owner to silence the app within a day.
-# Tracked by the TIMESTAMP of the newest event, not by counting lines. dashmon
-# caps this file at 50 entries, so once it is full an appended event does not
-# change the line count - a counter-based reader goes permanently silent, and
-# does so invisibly, having worked in testing while the file was still short.
-# Timestamps only move forward and survive trimming.
-now_pts=$(awk 'END{print $1+0}' /tmp/.presence 2>/dev/null)
-case "$now_pts" in ''|*[!0-9]*) now_pts=0 ;; esac
+# Wi-Fi arrivals and departures are NOT handled here. They moved to
+# /usr/sbin/wifiwatch, which subscribes to hostapd ubus notifications and
+# reports in real time - a minute of cron latency is nothing for "the internet
+# is down" and everything for "who just walked in". Two mechanisms for one job
+# is how they drift apart, so this one owns none of it.
 
 # ---- compare with last run --------------------------------------------------
 was_wan=""; was_wan6=""; was_fw=""; was_acct=""; was_dns=""
 was_link="ok"; bad_run=0; good_run=0
-was_vpn=""; was_vdev=""; was_vpause="no"; was_pts=""
+was_vpn=""; was_vdev=""; was_vpause="no"
 [ -r "$STATE" ] && . "$STATE" 2>/dev/null
 
 if [ -z "$was_wan" ]; then
@@ -390,44 +376,14 @@ else
     [ "$now_vpause" != "$was_vpause" ] && [ "$now_vpause" = yes ] && \
         notify "$M_VPNDEV_PAUSE_T" "$M_VPNDEV_PAUSE_B" high warning
 
-    # Wi-Fi arrivals and departures, from the debounced presence file
-    if [ -n "$was_pts" ] && [ "$was_pts" -gt 0 ] && [ "$now_pts" -gt "$was_pts" ]; then
-        # everything newer than the last one reported, newest five at most: a
-        # burst after a radio restart is not news
-        awk -v since="$was_pts" '$1+0 > since' /tmp/.presence 2>/dev/null | tail -n 5 |
-        while read -r _pt _pev _pmac _pband; do
-            [ -n "$_pmac" ] || continue
-            _dn=$(dev_name "$_pmac")
-            # The band comes from the FREQUENCY in parentheses, not from a
-            # field index: "Channel: 1 (2.412 GHz)" puts the word "Channel:"
-            # in $3, so an index-based read scored every radio as 2.4 and the
-            # SSID silently fell back to a generic word. Radio ORDER is not
-            # assumed either - phy0.1 is not guaranteed to be the 5 GHz one.
-            _ssid=$(iwinfo 2>/dev/null | awk -v b="$_pband" '
-                /ESSID/ { e=$0; sub(/.*ESSID: "/,"",e); sub(/".*/,"",e) }
-                /Channel:/ && /GHz/ {
-                    f=$0; sub(/.*\(/,"",f); sub(/ GHz.*/,"",f)
-                    g=((f+0)<3)?"2.4":"5"
-                    if (g==b && e!="") { print e; exit }
-                }')
-            if [ "$_pev" = join ]; then
-                notify "$M_WIFI_JOIN_T" \
-                    "$(printf "$M_WIFI_JOIN_B" "$_dn" "${_ssid:-Wi-Fi}" "$_pband")" low iphone
-            else
-                notify "$M_WIFI_LEAVE_T" \
-                    "$(printf "$M_WIFI_LEAVE_B" "$_dn" "$_pband")" min iphone
-            fi
-        done
-    fi
-
     [ "$now_dns" != "$was_dns" ] && {
         [ "$now_dns" = failing ] \
             && notify "$M_DNS_BAD_T" "$M_DNS_BAD_B" default warning \
             || notify "$M_DNS_OK_T" "$M_DNS_OK_B" low white_check_mark; }
 fi
 
-{ printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\nwas_link=%s\nbad_run=%s\ngood_run=%s\nwas_pts=%s\nwas_vpause=%s\n' \
-    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" "$was_link" "$bad_run" "$good_run" "$now_pts" "$now_vpause"
+{ printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\nwas_link=%s\nbad_run=%s\ngood_run=%s\nwas_vpause=%s\n' \
+    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" "$was_link" "$bad_run" "$good_run" "$now_vpause"
   printf 'was_vpn="%s"\nwas_vdev="%s"\n' "$now_vpn" "$now_vdev"; } > "$STATE.tmp" 2>/dev/null &&
     mv "$STATE.tmp" "$STATE" 2>/dev/null
 

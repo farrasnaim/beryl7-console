@@ -66,6 +66,7 @@ backups/
 !etc/hotplug.d/net/40-rrm-neighbors
 !etc/hotplug.d/usb/40-usbmuxd
 !etc/init.d/beryl-vpndns
+!etc/init.d/wifiwatch
 !etc/init.d/cpugovernor
 !etc/init.d/pingmon
 !etc/sysctl.d/99-local.conf
