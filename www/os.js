@@ -211,10 +211,17 @@ var CLASS_ICON = {
 function icon(name) { return svg(I[name] || I.dev); }
 
 /* --------------------------------------------------------------- widgets -- */
-/* Segmented meter. n of 12 lit, tone encodes state. */
-function meter(frac, tone, small) {
+/* Segmented meter. Ten segments by default, so each one is a clean 10% and
+   the eye can count them without trying; twelve made every reading an
+   awkward fraction. The count is a parameter and is remembered on the node,
+   because meterSet has to light the same number it was built with - a
+   mismatch would leave stale segments lit at the end of the row.
+   Signal strength passes 5, the shape everyone already reads as bars. */
+function meter(frac, tone, small, segs) {
+    var n = segs || 10;
     var m = el('div', 'meter' + (small ? ' meter--sm' : ''));
-    for (var i = 0; i < 12; i++) m.appendChild(el('i'));
+    m._segs = n;
+    for (var i = 0; i < n; i++) m.appendChild(el('i'));
     meterSet(m, frac, tone);
     return m;
 }
@@ -222,11 +229,28 @@ function meter(frac, tone, small) {
    the ones that did not are never restyled and never re-run their fade. */
 function meterSet(m, frac, tone) {
     if (tone) m.setAttribute('data-tone', tone); else m.removeAttribute('data-tone');
-    var lit = Math.max(0, Math.min(12, Math.round(frac * 12)));
-    for (var i = 0; i < 12; i++) {
+    var n = m._segs || m.children.length || 10;
+    var lit = Math.max(0, Math.min(n, Math.round(frac * n)));
+    for (var i = 0; i < n; i++) {
         var want = i < lit ? 'on' : '';
         if (m.children[i].className !== want) m.children[i].className = want;
     }
+}
+/* Signal as five bars rather than a continuous rule. The rule was precise -
+   a calibrated -90..-20 axis with tick marks - and precision is not what a
+   glance at a device list wants; five bars is the vocabulary every phone
+   already taught. The dBm figure sits beside it for anyone who does want the
+   number, so nothing is lost. Thresholds are quality()'s, so the bar count
+   and the word ("good", "weak") can never disagree. */
+function rssiBars(dbm, small) {
+    var m = meter(0, null, small, 5);
+    rssiBarsSet(m, dbm);
+    return m;
+}
+function rssiBarsSet(m, dbm) {
+    var d = (dbm == null || dbm === 0) ? -100 : dbm;
+    var lit = d >= -55 ? 5 : d >= -67 ? 4 : d >= -75 ? 3 : d >= -85 ? 2 : d > -95 ? 1 : 0;
+    meterSet(m, lit / 5, quality(dbm).tone);
 }
 function readout(k, v, u, meta, state, small) {
     var r = el('div', 'ro' + (small ? ' ro--sm' : ''));
@@ -725,7 +749,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '53bd7e2ef0';
+var CONSOLE_VERSION = '99dc07fa8b';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1489,7 +1513,7 @@ global.OS = {
     spark: spark, ribbon: ribbon,
     sourcesList: sourcesList, failoverControl: failoverControl,
     sv: sv, svtext: svtext, gem: gem, quality: quality, stateWord: stateWord,
-    scale: scale, scaleSet: scaleSet, rssiScale: rssiScale, rssiScaleSet: rssiScaleSet,
+    scale: scale, scaleSet: scaleSet, rssiScale: rssiScale, rssiScaleSet: rssiScaleSet, rssiBars: rssiBars, rssiBarsSet: rssiBarsSet,
     spectrum: spectrum, topology: topology,
     toast: toast, dialog: dialog, askConfirm: askConfirm, firewallAlert: firewallAlert,
     Transport: Transport, post: post, act: act,
