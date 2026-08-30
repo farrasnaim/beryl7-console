@@ -598,7 +598,7 @@ function adapt(D){
   /* Mark vestigial band-steering leftovers.
      Vanilla has no true MLD (mt76 ships no MLO code — see the runbook), so under
      band-steering a device should only ever hold ONE real link. A stale low-band
-     association lingers as a much older-generation link at ~0 TX: the iPhone Air
+     association lingers as a much older-generation link at ~0 TX: a Wi-Fi 7 phone
      shows "Wi-Fi 7 · EHT · 160MHz" alongside a junk "Wi-Fi 4 · HT · 20MHz".
      Idle time can't be the discriminator (a real link idles 6-25s when the device
      is just sitting there) — generation + band can. Flagged, not deleted, so the

@@ -25,8 +25,8 @@
 #
 # WHY IT HAS TO BE DYNAMIC
 # ------------------------
-# The delegated prefix is not stable — this line has already moved from
-# 2407:0:3002:d19a::/64 to 2407:0:3002:bb73::/64. Hardcoding it in uci would
+# The delegated prefix is not stable — on this line it rotated once within a
+# fortnight of the relay going live. Hardcoding it in uci would
 # work until the ISP rotated it and then fail exactly the way it failed before,
 # silently and only in the numbers. So the prefix is re-derived whenever the v6
 # uplink comes up or changes.
