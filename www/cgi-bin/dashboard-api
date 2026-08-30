@@ -302,7 +302,7 @@ if [ -f "$CLASSMAP" ]; then
         /^#/ || NF<3 { next }
         {
             mac=toupper($1); name=$2; cls=$3; ip=$4; zone=$5
-            gsub(/\\/,"\\\\",name); gsub(/"/,"\\\"",name)
+            gsub(/\\/,"\\\\&",name); gsub(/"/,"\\\\&",name)
             printf "%s\"%s\":{\"name\":\"%s\",\"class\":\"%s\",\"ip\":\"%s\",\"zone\":\"%s\"}", (c++?",":""), mac, name, cls, ip, zone
         }
         END { }' "$CLASSMAP")
@@ -316,7 +316,7 @@ fi
 # every DHCP hostname and lease expiry while still looking plausible.
 LJ=$(awk '{
         lexp=$1; mac=toupper($2); ip=$3; nm=$4
-        gsub(/\\/,"\\\\",nm); gsub(/"/,"\\\"",nm)
+        gsub(/\\/,"\\\\&",nm); gsub(/"/,"\\\\&",nm)
         printf "%s\"%s\":{\"ip\":\"%s\",\"name\":\"%s\",\"exp\":%s}", (c++?",":""), mac, ip, nm, (lexp~/^[0-9]+$/?lexp:0)
     }' /tmp/dhcp.leases 2>/dev/null)
 LJ="{$LJ}"
@@ -555,7 +555,7 @@ WIREDJ="[$WIREDJ]"
 # Deliberately empty by default — no OUI database ships on OpenWrt and guessing a
 # vendor from memory would put fabricated data on screen. Populate to enable.
 OUIJ=$(awk -F'|' '/^#/||NF<2{next}{
-        v=$2; gsub(/\\/,"\\\\",v); gsub(/"/,"\\\"",v)
+        v=$2; gsub(/\\/,"\\\\&",v); gsub(/"/,"\\\\&",v)
         printf "%s\"%s\":\"%s\"", (n++?",":""), toupper($1), v
       }' /etc/dashboard/oui 2>/dev/null)
 OUIJ="{$OUIJ}"
@@ -620,7 +620,7 @@ EVJ=$(tail -n 12 /tmp/.presence 2>/dev/null | awk -F'|' '
     {
         split($0,x," "); if (x[1]!~/^[0-9]+$/) next
         ev=(x[2]=="join")?"join":"leave"; mac=toupper(x[3]); nm=(mac in n)?n[mac]:""
-        gsub(/\\/,"\\\\",nm); gsub(/"/,"\\\"",nm)
+        gsub(/\\/,"\\\\&",nm); gsub(/"/,"\\\\&",nm)
         printf "%s{\"t\":%d,\"ev\":\"%s\",\"mac\":\"%s\",\"name\":\"%s\",\"band\":\"%s\"}", (c++?",":""), x[1], ev, mac, nm, x[4]
     }' "$CLASSMAP" -)
 EVJ="[$EVJ]"

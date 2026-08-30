@@ -112,7 +112,7 @@ known_remember() { # $1=ssid $2=enc $3=key
 }
 known_json() {     # ssids only — the keys never leave the router
     [ -s "$KNOWN" ] || { printf '[]'; return 0; }
-    awk -F'\t' '{ s=$1; gsub(/\\/,"\\\\",s); gsub(/"/,"\\\"",s)
+    awk -F'\t' '{ s=$1; gsub(/\\/,"\\\\&",s); gsub(/"/,"\\\\&",s)
                   printf "%s\"%s\"", (NR>1?",":""), s }
                 END{ }' "$KNOWN" 2>/dev/null | sed 's/^/[/; s/$/]/'
 }

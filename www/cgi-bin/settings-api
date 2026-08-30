@@ -373,7 +373,7 @@ if [ "$ACTION" = "updcheck" ]; then
     # indented rows between are the data. Guessing from a summary sentence is
     # how "1 modified default package" got read as something it was not.
     UJ=$(printf '%s\n' "$OUT" | awk -v ts="$(date +%s)" '
-        function jesc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+        function jesc(s) { gsub(/\\/, "\\\\&", s); gsub(/"/, "\\\\&", s); return s }
         /^Package version changes:/  { sec = "ver"; next }
         /^Default package analysis:/ { sec = "def"; next }
         /^There are currently package build failures/ { sec = ""; next }
