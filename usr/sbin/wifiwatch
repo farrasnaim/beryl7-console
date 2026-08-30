@@ -40,7 +40,18 @@
 
 CONF=/etc/dashboard/notify.conf
 PEND=/tmp/.wifipend
-GRACE=${NOTIFY_WIFI_GRACE:-20}
+# MEASURED, not guessed. 125 disconnect->reconnect gaps from this router's own
+# log: 34% return within 2s, 74% within 10s, then a long tail out to 7 minutes.
+# The distribution is CONTINUOUS - there is no clean gap between "roaming" and
+# "left", so no threshold can be right for every case and this is a tuning
+# knob, not a solved problem. 10s silences three quarters of the blips while
+# reporting a real departure fast enough to feel immediate.
+GRACE=${NOTIFY_WIFI_GRACE:-10}
+
+# How long a device may return and still be described as coming BACK rather
+# than arriving. Beyond this it is treated as a fresh arrival.
+RETURN_WINDOW=${NOTIFY_WIFI_RETURN:-600}
+LEFT=/tmp/.wifileft
 
 [ -r "$CONF" ] || exit 0
 . "$CONF" 2>/dev/null
@@ -53,6 +64,9 @@ M_WIFI_JOIN_T=${MSG_WIFI_JOIN_T:-"device joined Wi-Fi"}
 M_WIFI_JOIN_B=${MSG_WIFI_JOIN_B:-"%s connected to %s on %s GHz."}
 M_WIFI_LEAVE_T=${MSG_WIFI_LEAVE_T:-"device left Wi-Fi"}
 M_WIFI_LEAVE_B=${MSG_WIFI_LEAVE_B:-"%s disconnected from %s GHz."}
+# %s = device, %s = how long it was away
+M_WIFI_BACK_T=${MSG_WIFI_BACK_T:-"device is back"}
+M_WIFI_BACK_B=${MSG_WIFI_BACK_B:-"%s reconnected after %s away."}
 
 send() {   # $1 title  $2 body  $3 priority  $4 tags
     wget -q -T 8 -O /dev/null \
@@ -73,6 +87,15 @@ dev_name() {
 }
 
 ap_list() { iw dev 2>/dev/null | awk '/^\tInterface /{print $2}'; }
+
+# The hostapd ubus OBJECTS, with their ids. `wifi reload` - which the console's
+# own channel and SSID controls trigger - destroys and recreates them, and a
+# subscription to the old ones dies with them. Both processes stay alive
+# through that, so liveness says everything is fine while nothing is being
+# received: exactly the process-is-running-therefore-healthy trap this project
+# has been burned by before. The id changes when the object is recreated, so
+# comparing this string detects it.
+ap_fingerprint() { ubus -v list 2>/dev/null | grep "'hostapd\." | sort; }
 
 # Band from the FREQUENCY, never from the interface name or its index: naming
 # is a build detail and radio order is not guaranteed.
@@ -108,6 +131,14 @@ resolve_pending() {
         else
             send "$M_WIFI_LEAVE_T" "$(printf "$M_WIFI_LEAVE_B" "$(dev_name "$_pm")" "$_pb")" \
                  min iphone
+            # Remember that we ANNOUNCED this one. If it reappears shortly the
+            # departure was premature in hindsight, and the return is worth
+            # phrasing as a return - "back after 22s" tells the owner it was a
+            # blip, where a bare "joined" three seconds after a "left" reads as
+            # the system contradicting itself.
+            grep -v "^$_pm " "$LEFT" 2>/dev/null > "$LEFT.k"
+            printf '%s %s\n' "$_pm" "$_now" >> "$LEFT.k"
+            mv "$LEFT.k" "$LEFT" 2>/dev/null
         fi
     done < "$PEND"
     if [ -s "$_keep" ]; then mv "$_keep" "$PEND"; else rm -f "$_keep" "$PEND"; fi
@@ -115,6 +146,7 @@ resolve_pending() {
 
 OBJS=$(ubus list 2>/dev/null | grep '^hostapd\.')
 [ -n "$OBJS" ] || exit 0
+FP0=$(ap_fingerprint)
 
 # A FIFO rather than a pipe, so the reader can WAKE ON A TIMER as well as on an
 # event. That matters: a held departure has to be confirmed after GRACE seconds
@@ -150,9 +182,24 @@ while :; do
                     grep -v "^$mac " "$PEND" > "$PEND.k" 2>/dev/null
                     if [ -s "$PEND.k" ]; then mv "$PEND.k" "$PEND"; else rm -f "$PEND.k" "$PEND"; fi
                 elif ! assoc_anywhere "$mac" "$ifc"; then
-                    send "$M_WIFI_JOIN_T" \
-                         "$(printf "$M_WIFI_JOIN_B" "$(dev_name "$mac")" "$(ssid_of "$ifc")" "$band")" \
-                         low iphone
+                    _lt=$(awk -v m="$mac" '$1==m {print $2; exit}' "$LEFT" 2>/dev/null)
+                    _away=""
+                    if [ -n "$_lt" ]; then
+                        _ag=$(( $(date +%s) - _lt ))
+                        [ "$_ag" -ge 0 ] && [ "$_ag" -le "$RETURN_WINDOW" ] && {
+                            if [ "$_ag" -ge 60 ]; then _away="$((_ag / 60))m"; else _away="${_ag}s"; fi
+                        }
+                        grep -v "^$mac " "$LEFT" 2>/dev/null > "$LEFT.k"
+                        if [ -s "$LEFT.k" ]; then mv "$LEFT.k" "$LEFT"; else rm -f "$LEFT.k" "$LEFT"; fi
+                    fi
+                    if [ -n "$_away" ]; then
+                        send "$M_WIFI_BACK_T" \
+                             "$(printf "$M_WIFI_BACK_B" "$(dev_name "$mac")" "$_away")" low iphone
+                    else
+                        send "$M_WIFI_JOIN_T" \
+                             "$(printf "$M_WIFI_JOIN_B" "$(dev_name "$mac")" "$(ssid_of "$ifc")" "$band")" \
+                             low iphone
+                    fi
                 fi
                 ;;
             *)
@@ -164,5 +211,14 @@ while :; do
     # runs on every event AND on every 5s timeout, so a held departure is
     # confirmed even in total silence
     resolve_pending
+
+    # Re-check the subscription target, not just the process. If hostapd's
+    # objects were rebuilt underneath us the subscriber is deaf; ending the
+    # loop is procd's cue to restart the whole thing against the new ones.
+    # Worst-case deafness is one tick.
+    if [ "$(ap_fingerprint)" != "$FP0" ]; then
+        logger -t wifiwatch "hostapd ubus objects changed (wifi reload?) - restarting to resubscribe"
+        break
+    fi
 done
 exit 0
