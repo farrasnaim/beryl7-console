@@ -125,6 +125,7 @@ if [ "$ACTION" = "devdetail" ]; then
 
     # ---- talking to, right now ----
     PTRCACHE=/tmp/.ptrcache
+    ASNCACHE=/tmp/.asncache
     RJ=""
     if [ -r /proc/net/nf_conntrack ]; then
         RJ=$(IPLIST="$IPS" awk '
@@ -159,7 +160,42 @@ if [ "$ACTION" = "devdetail" ]; then
             printf '%s %s\n' "$d" "${nm:--}" >> "$PTRCACHE" 2>/dev/null
         fi
         [ "$nm" = "-" ] && nm=""
-        REMJ="$REMJ${REMJ:+,}[\"$(esc "$d")\",\"$(esc "$nm")\",$b,$c]"
+        # Who owns the address: Team Cymru's IP-to-ASN zone, answered over the
+        # router's own resolver chain (dnsmasq -> AdGuard -> DoH, so encrypted
+        # like everything else). Two TXT lookups per address, cached hard -
+        # ownership of an IP block changes on the timescale of company
+        # acquisitions, not page loads.
+        org=""
+        [ -f "$ASNCACHE" ] && org=$(awk -F'\t' -v ip="$d" '$1==ip {print $2; exit}' "$ASNCACHE" 2>/dev/null)
+        if [ -z "$org" ]; then
+            case "$d" in
+                *:*) _rq=$(printf '%s' "$d" | awk '{
+                        s=$0
+                        if (s ~ /::/) {
+                            split(s, hp, "::")
+                            nl = (hp[1]=="" ? 0 : split(hp[1], L, ":"))
+                            nr = (hp[2]=="" ? 0 : split(hp[2], R, ":"))
+                            s = ""
+                            for (i=1;i<=nl;i++) s = s (s==""?"":":") L[i]
+                            for (i=1;i<=8-nl-nr;i++) s = s (s==""?"":":") "0"
+                            for (i=1;i<=nr;i++) s = s (s==""?"":":") R[i]
+                        }
+                        n = split(s, g, ":"); hexs=""
+                        for (i=1;i<=n;i++) { x=g[i]; while (length(x)<4) x="0" x; hexs = hexs x }
+                        for (i=32;i>=1;i--) printf "%s.", substr(hexs, i, 1)
+                    }')origin6.asn.cymru.com ;;
+                *)   _rq=$(printf '%s' "$d" | awk -F. '{print $4"."$3"."$2"."$1}').origin.asn.cymru.com ;;
+            esac
+            _asn=$(nslookup -type=txt "$_rq" 127.0.0.1 2>/dev/null |
+                   sed -n 's/.*text = "\([0-9]*\).*/\1/p' | head -1)
+            if [ -n "$_asn" ]; then
+                org=$(nslookup -type=txt "AS$_asn.asn.cymru.com" 127.0.0.1 2>/dev/null |
+                      sed -n 's/.*| //p' | head -1 | tr -d '"' | sed 's/^AS[^ ]* - //')
+            fi
+            printf '%s\t%s\n' "$d" "${org:--}" >> "$ASNCACHE" 2>/dev/null
+        fi
+        [ "$org" = "-" ] && org=""
+        REMJ="$REMJ${REMJ:+,}[\"$(esc "$d")\",\"$(esc "$nm")\",$b,$c,\"$(esc "$org")\"]"
         IFS='
 '
     done
@@ -167,6 +203,8 @@ if [ "$ACTION" = "devdetail" ]; then
     # cache growth is bounded: keep the newest 400 mappings
     [ -f "$PTRCACHE" ] && [ "$(wc -l < "$PTRCACHE")" -gt 400 ] && \
         { tail -200 "$PTRCACHE" > "$PTRCACHE.n" && mv "$PTRCACHE.n" "$PTRCACHE"; }
+    [ -f "$ASNCACHE" ] && [ "$(wc -l < "$ASNCACHE")" -gt 400 ] && \
+        { tail -200 "$ASNCACHE" > "$ASNCACHE.n" && mv "$ASNCACHE.n" "$ASNCACHE"; }
 
     printf '{"ok":true,"mac":"%s","protos":[%s],"remotes":[%s]}' "$(esc "$DMAC")" "$PJ" "$REMJ"
     exit 0

@@ -1693,75 +1693,127 @@ function trafRow() {
     r._sh.style.cssText = 'font-size:11px;color:var(--ink-4);flex:none;font-variant-numeric:tabular-nums';
     b.appendChild(r._sh);
     r.appendChild(b);
-    /* Click for what the number is MADE OF. The drawer lives inside the row
-       node on purpose: rows are keyed and reordered with CSS order, so
-       anything outside the node would detach from its device on re-sort. */
+    /* Click for what the number is MADE OF - opens the device modal. */
     r.style.cursor = 'pointer';
-    r._det = el('div');
-    r._det.hidden = true;
-    r._det.style.cssText = 'margin:8px 0 4px;padding:10px 12px;border:1px solid var(--line-2);' +
-        'border-radius:var(--r);font-size:11px';
-    r.appendChild(r._det);
-    r.addEventListener('click', function (ev) {
-        if (r._det.contains(ev.target)) return;
-        if (!r._det.hidden) { r._det.hidden = true; return; }
-        r._det.hidden = false;
-        devDetail(r._det, r._mac);
+    r.addEventListener('click', function () {
+        if (r._mac) openDevModal(r._mac, r._nm.textContent || r._mac);
     });
     return r;
 }
 
-/* The drawer's two answers are different in KIND, and the labels say so. The
-   protocol split covers the accounting day, like the number it explains. The
-   remote list is only "right now": the per-device accountant drains every
-   conntrack counter each half-minute to compute its deltas, so a snapshot can
-   never hold more than ~30s of bytes — and nothing on this router records
-   destinations historically. Naming remotes as if they explained the day
-   would be a lie with a chart on it, so they are labelled as what they are. */
-function devDetail(det, mac) {
-    det.textContent = 'Reading…';
-    fetch(API + '?action=devdetail&mac=' + encodeURIComponent(mac), { cache: 'no-store' })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-            clear(det);
-            if (!j || !j.ok) { det.textContent = 'Could not read the breakdown.'; return; }
-            function cap(t) {
-                var c = el('div', null, t);
-                c.style.cssText = 'font-size:10px;font-weight:650;letter-spacing:.1em;' +
-                    'text-transform:uppercase;color:var(--ink-4);margin:2px 0 6px';
-                return c;
-            }
-            function line(l, rgt, dim) {
-                var w = el('div');
-                w.style.cssText = 'display:flex;justify-content:space-between;gap:10px;margin-bottom:3px';
-                var a = el('span', null, l);
-                a.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' +
-                    (dim ? ';color:var(--ink-3)' : '');
-                var z = el('span', 'n', rgt);
-                z.style.cssText = 'flex:none;font-variant-numeric:tabular-nums;color:var(--ink-2)';
-                w.appendChild(a); w.appendChild(z);
-                return w;
-            }
-            det.appendChild(cap('This accounting day · by protocol'));
-            if (!j.protos.length) det.appendChild(line('nothing recorded yet', '', true));
-            j.protos.forEach(function (p) {
-                det.appendChild(line(p[0], OS.bytes(p[1] + p[2]) +
-                    '  ·  ↓' + OS.bytes(p[1]) + ' ↑' + OS.bytes(p[2])));
-            });
-            det.appendChild(cap('Talking to right now'));
-            if (!j.remotes.length) det.appendChild(line('no active remote connections', '', true));
-            j.remotes.forEach(function (rr) {
-                var name = rr[1] || rr[0];
-                det.appendChild(line(name,
-                    rr[3] + (rr[3] === 1 ? ' conn' : ' conns') +
-                    (rr[2] > 0 ? '  ·  ' + OS.bytes(rr[2]) + ' /30s' : '')));
-            });
-            var h = el('div', null, 'Which sites made up the day is not something this router ' +
-                'records — the remote list is live connections only.');
-            h.style.cssText = 'margin-top:6px;font-size:10.5px;color:var(--ink-4)';
-            det.appendChild(h);
-        })
-        .catch(function () { det.textContent = 'Could not read the breakdown.'; });
+/* The device modal. Two answers, different in KIND, and the labels say so:
+   the protocol split covers the accounting day, like the number it explains;
+   the remote list is live and REFRESHES while the modal is open - but its byte
+   figures can never exceed ~30s, because the per-device accountant drains
+   every conntrack counter each half-minute for its deltas. Nothing on this
+   router records destinations historically, and the modal says that rather
+   than dressing the last half-minute up as the day.
+
+   Ownership comes from Team Cymru's IP-to-ASN DNS zone, resolved through the
+   router's own encrypted resolver chain and cached on the router - no packages,
+   no third-party HTTP API. */
+function openDevModal(mac, name) {
+    var veil = el('div', 'veil on');
+    /* the stock veil blurs at 2px; this one is a reading surface over a busy
+       page, so it earns more */
+    veil.style.backdropFilter = 'blur(8px)';
+    veil.style.webkitBackdropFilter = 'blur(8px)';
+    var dlg = el('div', 'dlg');
+    var hd = el('div', 'dlg__h');
+    hd.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:12px';
+    hd.appendChild(el('div', 'dlg__t', name));
+    var live = el('span', 'row__cap', 'live · every 4s');
+    hd.appendChild(live);
+    dlg.appendChild(hd);
+    var body = el('div', 'dlg__b');
+    body.textContent = 'Reading…';
+    dlg.appendChild(body);
+    var ft = el('div', 'dlg__f');
+    var cb = el('button', 'btn btn--sm', 'Close');
+    ft.appendChild(cb);
+    dlg.appendChild(ft);
+    veil.appendChild(dlg);
+    document.body.appendChild(veil);
+
+    var timer = null, closed = false;
+    function close() {
+        if (closed) return;
+        closed = true;
+        if (timer) clearInterval(timer);
+        document.removeEventListener('keydown', onkey);
+        if (veil.parentNode) veil.parentNode.removeChild(veil);
+    }
+    function onkey(e) { if (e.key === 'Escape') close(); }
+    cb.addEventListener('click', close);
+    veil.addEventListener('click', function (e) { if (e.target === veil) close(); });
+    document.addEventListener('keydown', onkey);
+
+    function cap(t) {
+        var c = el('div', null, t);
+        c.style.cssText = 'font-size:10px;font-weight:650;letter-spacing:.1em;' +
+            'text-transform:uppercase;color:var(--ink-4);margin:2px 0 8px';
+        return c;
+    }
+    function load() {
+        fetch(API + '?action=devdetail&mac=' + encodeURIComponent(mac), { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (closed) return;
+                if (!j || !j.ok) { body.textContent = 'Could not read the breakdown.'; return; }
+                clear(body);
+                body.appendChild(cap('This accounting day · by protocol'));
+                if (!j.protos.length) body.appendChild(el('div', 'hint', 'Nothing recorded yet.'));
+                j.protos.forEach(function (p) {
+                    var w = el('div');
+                    w.style.cssText = 'display:flex;justify-content:space-between;gap:12px;' +
+                        'align-items:baseline;margin-bottom:5px;font-size:12px';
+                    w.appendChild(el('span', null, p[0]));
+                    var z = el('span', 'n', OS.bytes(p[1] + p[2]) +
+                        '  ·  ↓' + OS.bytes(p[1]) + ' ↑' + OS.bytes(p[2]));
+                    z.style.cssText = 'flex:none;font-variant-numeric:tabular-nums;color:var(--ink-2);font-size:11.5px';
+                    w.appendChild(z);
+                    body.appendChild(w);
+                });
+                var c2 = cap('Talking to right now');
+                c2.style.marginTop = '16px';
+                body.appendChild(c2);
+                if (!j.remotes.length) body.appendChild(el('div', 'hint', 'No active remote connections.'));
+                j.remotes.forEach(function (rr) {
+                    var w = el('div');
+                    w.style.cssText = 'margin-bottom:8px';
+                    var top = el('div');
+                    top.style.cssText = 'display:flex;justify-content:space-between;gap:12px;' +
+                        'align-items:baseline;font-size:12px';
+                    /* full text, wrapping - a modal exists so nothing has to
+                       become an ellipsis */
+                    var nm = el('span', null, rr[1] || rr[0]);
+                    nm.style.cssText = 'word-break:break-all;min-width:0';
+                    top.appendChild(nm);
+                    var z = el('span', 'n', rr[3] + (rr[3] === 1 ? ' conn' : ' conns') +
+                        (rr[2] > 0 ? '  ·  ' + OS.bytes(rr[2]) : ''));
+                    z.style.cssText = 'flex:none;font-variant-numeric:tabular-nums;color:var(--ink-2);font-size:11px';
+                    top.appendChild(z);
+                    w.appendChild(top);
+                    var sub = [];
+                    if (rr[4]) sub.push(rr[4]);
+                    if (rr[1]) sub.push(rr[0]);
+                    if (sub.length) {
+                        var sb = el('div', null, sub.join('  ·  '));
+                        sb.style.cssText = 'font-size:10.5px;color:var(--ink-3);word-break:break-all';
+                        w.appendChild(sb);
+                    }
+                    body.appendChild(w);
+                });
+                var h = el('div', null, 'Which sites made up the day is not something this router ' +
+                    'records — the list above is live connections, refreshed while this stays open. ' +
+                    'Ownership names come from the public IP-to-AS registry.');
+                h.style.cssText = 'margin-top:12px;font-size:10.5px;color:var(--ink-4)';
+                body.appendChild(h);
+            })
+            .catch(function () { if (!closed) body.textContent = 'Could not read the breakdown.'; });
+    }
+    load();
+    timer = setInterval(load, 4000);
 }
 
 /* ----------------------------------------------------------------- boot -- */
