@@ -1722,7 +1722,7 @@ function openDevModal(mac, name) {
     var hd = el('div', 'dlg__h');
     hd.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:12px';
     hd.appendChild(el('div', 'dlg__t', name));
-    var live = el('span', 'row__cap', 'live · every 4s');
+    var live = el('span', 'row__cap', 'live · 1s');
     hd.appendChild(live);
     dlg.appendChild(hd);
     var body = el('div', 'dlg__b');
@@ -1754,16 +1754,61 @@ function openDevModal(mac, name) {
             'text-transform:uppercase;color:var(--ink-4);margin:2px 0 8px';
         return c;
     }
+    /* One-second cadence needs bookkeeping the 4s version did not:
+       - the cheap live call carries only connections; protocol rows and any
+         names it has not cached come from the full call every 5th tick
+       - remotes keep FIRST-SEEN order, so the list does not reshuffle under
+         the reader's eyes every second
+       - per-remote rate is the byte delta between consecutive polls. The
+         counters are drained twice a minute by the accountant; a drain shows
+         up as cur < prev, and the honest reading of that second is "at least
+         cur new bytes", which is what gets used. */
+    var st = { protos: null, rem: {}, order: [], tick: 0, prevT: 0, inflight: false };
     function load() {
-        fetch(API + '?action=devdetail&mac=' + encodeURIComponent(mac), { cache: 'no-store' })
+        if (st.inflight || closed) return;
+        st.inflight = true;
+        var full = (st.tick % 5 === 0); st.tick++;
+        fetch(API + '?action=devdetail&mac=' + encodeURIComponent(mac) + (full ? '' : '&live=1'),
+              { cache: 'no-store' })
             .then(function (r) { return r.json(); })
             .then(function (j) {
+                st.inflight = false;
                 if (closed) return;
-                if (!j || !j.ok) { body.textContent = 'Could not read the breakdown.'; return; }
+                if (!j || !j.ok) { if (full) body.textContent = 'Could not read the breakdown.'; return; }
+                var now = Date.now();
+                var dt = st.prevT ? (now - st.prevT) / 1000 : 0;
+                st.prevT = now;
+                if (j.protos) st.protos = j.protos;
+                var seen = {};
+                (j.remotes || []).forEach(function (rr) {
+                    var d = rr[0]; seen[d] = 1;
+                    var e = st.rem[d];
+                    if (!e) { e = st.rem[d] = { rate: 0, miss: 0 }; st.order.push(d); }
+                    if (rr[1]) e.name = rr[1];
+                    if (rr[4]) e.org = rr[4];
+                    if (dt > 0.3 && e.bytes != null) {
+                        var db = rr[2] >= e.bytes ? rr[2] - e.bytes : rr[2];
+                        e.rate = db / dt;
+                    }
+                    e.bytes = rr[2]; e.conns = rr[3]; e.miss = 0;
+                });
+                st.order.forEach(function (d) {
+                    if (!seen[d]) {
+                        st.rem[d].miss++;
+                        if (st.rem[d].miss > 3) { delete st.rem[d]; }
+                    }
+                });
+                st.order = st.order.filter(function (d) { return st.rem[d]; });
+                render(j);
+            })
+            .catch(function () { st.inflight = false; if (!closed && st.tick <= 1) body.textContent = 'Could not read the breakdown.'; });
+    }
+    function render(j) {
                 clear(body);
+                var protos = st.protos || [];
                 body.appendChild(cap('This accounting day · by protocol'));
-                if (!j.protos.length) body.appendChild(el('div', 'hint', 'Nothing recorded yet.'));
-                j.protos.forEach(function (p) {
+                if (!protos.length) body.appendChild(el('div', 'hint', 'Nothing recorded yet.'));
+                protos.forEach(function (p) {
                     var w = el('div');
                     w.style.cssText = 'display:flex;justify-content:space-between;gap:12px;' +
                         'align-items:baseline;margin-bottom:5px;font-size:12px';
@@ -1777,8 +1822,10 @@ function openDevModal(mac, name) {
                 var c2 = cap('Talking to right now');
                 c2.style.marginTop = '16px';
                 body.appendChild(c2);
-                if (!j.remotes.length) body.appendChild(el('div', 'hint', 'No active remote connections.'));
-                j.remotes.forEach(function (rr) {
+                if (!st.order.length) body.appendChild(el('div', 'hint', 'No active remote connections.'));
+                st.order.forEach(function (dkey) {
+                    var e = st.rem[dkey];
+                    var rr = [dkey, e.name || '', e.bytes || 0, e.conns || 0, e.org || '', e.rate || 0];
                     var w = el('div');
                     w.style.cssText = 'margin-bottom:8px';
                     var top = el('div');
@@ -1789,8 +1836,9 @@ function openDevModal(mac, name) {
                     var nm = el('span', null, rr[1] || rr[0]);
                     nm.style.cssText = 'word-break:break-all;min-width:0';
                     top.appendChild(nm);
-                    var z = el('span', 'n', rr[3] + (rr[3] === 1 ? ' conn' : ' conns') +
-                        (rr[2] > 0 ? '  ·  ' + OS.bytes(rr[2]) : ''));
+                    var z = el('span', 'n', (rr[5] >= 512 ? OS.bytes(rr[5]) + '/s  ·  ' : '') +
+                        rr[3] + (rr[3] === 1 ? ' conn' : ' conns'));
+                    if (rr[5] >= 512) z.style.color = 'var(--ink)';
                     z.style.cssText = 'flex:none;font-variant-numeric:tabular-nums;color:var(--ink-2);font-size:11px';
                     top.appendChild(z);
                     w.appendChild(top);
@@ -1805,15 +1853,13 @@ function openDevModal(mac, name) {
                     body.appendChild(w);
                 });
                 var h = el('div', null, 'Which sites made up the day is not something this router ' +
-                    'records — the list above is live connections, refreshed while this stays open. ' +
+                    'records — the list above is live connections, one second at a time. ' +
                     'Ownership names come from the public IP-to-AS registry.');
                 h.style.cssText = 'margin-top:12px;font-size:10.5px;color:var(--ink-4)';
                 body.appendChild(h);
-            })
-            .catch(function () { if (!closed) body.textContent = 'Could not read the breakdown.'; });
     }
     load();
-    timer = setInterval(load, 4000);
+    timer = setInterval(load, 1000);
 }
 
 /* ----------------------------------------------------------------- boot -- */
