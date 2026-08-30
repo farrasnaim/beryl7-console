@@ -32,6 +32,25 @@
 # learns its name (it is, on the public ntfy service) and keep it that way.
 
 CONF=/etc/dashboard/notify.conf
+
+# Link-quality thresholds. Overridable in notify.conf; the defaults are set
+# against this line's MEASURED idle behaviour (about 13-15 ms, jitter under
+# 1 ms, zero loss), not against a generic idea of "slow".
+#
+# 150 ms is roughly ten times the normal round trip - not "a bit worse", but
+# the range where calls break up and games become unplayable. 5% loss is where
+# TCP throughput visibly collapses.
+#
+# THREE CONSECUTIVE MINUTES, and a lower bar to clear than to trip. A single
+# bad minute is a torrent starting or a neighbour's microwave, and alerting on
+# it is how an owner learns to ignore the alerts. The gap between the trip and
+# clear levels stops a link hovering at the threshold from flapping the phone
+# all evening.
+RTT_BAD=${NOTIFY_RTT_MS:-150}
+RTT_OK=${NOTIFY_RTT_OK_MS:-80}
+LOSS_BAD=${NOTIFY_LOSS_PCT:-5}
+LOSS_OK=${NOTIFY_LOSS_OK_PCT:-2}
+NEED=${NOTIFY_DEGRADE_MINUTES:-3}
 STATE=/tmp/.notifystate
 QUEUE=/tmp/.notifyq
 QMAX=25
@@ -119,8 +138,33 @@ if [ -r /etc/dashboard/agh-auth ]; then
     [ "$_n" -ge 2 ] && now_dns=failing
 fi
 
+# Link quality, from the probe's own summary line - the same numbers the
+# Overview charts. Line 1 is "uptime window state"; line 3 is
+# "loss_percent avg_rtt jitter" over the last 60 probes, i.e. about a minute.
+#
+# Only judged while the probe says "ok". "down" is the WAN alert's business,
+# and "silent" means the chosen target never answered at all (a game server
+# that drops ICMP is a deliberate choice, not a fault).
+now_link=ok; q_rtt=0; q_loss=0
+if [ -r /tmp/.pingring ]; then
+    read -r _pu _pw _pstate < /tmp/.pingring 2>/dev/null
+    _l3=$(sed -n '3p' /tmp/.pingring 2>/dev/null)
+    q_loss=${_l3%% *}; _rest=${_l3#* }; q_rtt=${_rest%% *}
+    case "$q_loss" in ''|*[!0-9]*) q_loss=0 ;; esac
+    q_rtt=${q_rtt%%.*}
+    case "$q_rtt" in ''|-*|*[!0-9]*) q_rtt=0 ;; esac
+    if [ "$_pstate" = "ok" ] && [ "$q_rtt" -gt 0 ]; then
+        if [ "$q_rtt" -ge "$RTT_BAD" ] || [ "$q_loss" -ge "$LOSS_BAD" ]; then
+            now_link=bad
+        elif [ "$q_rtt" -gt "$RTT_OK" ] || [ "$q_loss" -gt "$LOSS_OK" ]; then
+            now_link=middling      # neither trips nor clears - hysteresis gap
+        fi
+    fi
+fi
+
 # ---- compare with last run --------------------------------------------------
 was_wan=""; was_wan6=""; was_fw=""; was_acct=""; was_dns=""
+was_link="ok"; bad_run=0; good_run=0
 [ -r "$STATE" ] && . "$STATE" 2>/dev/null
 
 if [ -z "$was_wan" ]; then
@@ -128,7 +172,7 @@ if [ -z "$was_wan" ]; then
     # Announcing every current state here would mean a burst of messages after
     # every reboot, which is exactly the noise this design avoids.
     notify "monitoring started" \
-        "Watching the internet link, IPv6, firewall, DNS upstreams and traffic accounting." \
+        "Watching the internet link, connection quality, IPv6, firewall, DNS upstreams and traffic accounting." \
         low white_check_mark
 else
     [ "$now_wan" != "$was_wan" ] && {
@@ -151,14 +195,32 @@ else
             && notify "traffic accounting stopped" "Per-device usage is no longer being counted." default warning \
             || notify "traffic accounting running" "Per-device usage is being counted again." low white_check_mark; }
 
+    # Counters rather than a straight comparison: this is the one signal where
+    # the interesting state is "has been true for a while", not "changed".
+    case "$now_link" in
+        bad)       bad_run=$((bad_run + 1)); good_run=0 ;;
+        ok)        good_run=$((good_run + 1)); bad_run=0 ;;
+        middling)  bad_run=0; good_run=0 ;;
+    esac
+    if [ "$was_link" = "ok" ] && [ "$bad_run" -ge "$NEED" ]; then
+        was_link=bad
+        notify "connection is struggling" \
+            "Latency ${q_rtt} ms and ${q_loss}% packet loss, held for ${NEED} minutes. Calls and games will feel it." \
+            high warning
+    elif [ "$was_link" = "bad" ] && [ "$good_run" -ge "$NEED" ]; then
+        was_link=ok
+        notify "connection is steady again" \
+            "Back to ${q_rtt} ms with ${q_loss}% loss." default white_check_mark
+    fi
+
     [ "$now_dns" != "$was_dns" ] && {
         [ "$now_dns" = failing ] \
             && notify "encrypted DNS is stalling" "Two or more upstream lookups timed out in the last half hour. Pages may load slowly; retries usually succeed." default warning \
             || notify "encrypted DNS recovered" "Upstream lookups are answering again." low white_check_mark; }
 fi
 
-printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\n' \
-    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" > "$STATE.tmp" 2>/dev/null &&
+printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\nwas_link=%s\nbad_run=%s\ngood_run=%s\n' \
+    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" "$was_link" "$bad_run" "$good_run" > "$STATE.tmp" 2>/dev/null &&
     mv "$STATE.tmp" "$STATE" 2>/dev/null
 
 flush_queue
