@@ -861,7 +861,12 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
   .row--entity>.re-sig{grid-area:c;display:flex !important;align-items:center;
       gap:10px;margin-left:39px}
   .row--entity>.re-sig:empty{display:none !important}
-  .re-sig .scale{flex:1;max-width:230px;width:auto !important}
+  /* 230px let the rule eat almost the whole line once the row reflowed and
+     the instrument got a line of its own: bar plus gap plus the dBm figure
+     came to 296px of a 375px screen, reading as a progress bar rather than a
+     small gauge. 140px keeps it clearly an instrument, in the same visual
+     proportion it has on desktop, and leaves the number room to breathe. */
+  .re-sig .scale{flex:1;max-width:140px;width:auto !important}
   .re-caret{display:none}
   .re-id .row__sub{white-space:normal}
   .re-id .row__nm{white-space:normal}
