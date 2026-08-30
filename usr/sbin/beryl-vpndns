@@ -116,7 +116,15 @@ while [ "$i" -lt 64 ]; do
                 # the whole ruleset, and every device's v6 protection, with it.
                 d=""
                 for _e in $(uci -q get network.$pif.dns 2>/dev/null | tr " ," "  "); do
-                    if valid_ip4 "$_e"; then d="$_e"; break; fi
+                    # Store the CANONICAL form, never the raw token: this is
+                    # the one consumer whose inputs may never have passed the
+                    # console (hand-edited config, values stored before the
+                    # boundary check existed), so a zero-padded octet here
+                    # would reach nft meaning a different host than intended.
+                    # IP4_CANON is set by every successful valid_ip4; the
+                    # missing-library fallback never succeeds, so it cannot
+                    # arrive here empty.
+                    if valid_ip4 "$_e"; then d="$IP4_CANON"; break; fi
                 done
                 if [ -n "$d" ]; then
                     body="$body	meta nfproto ipv4 ether saddr $sa udp dport 53 counter dnat ip to $d comment \"!vpn-dns $pn\"
