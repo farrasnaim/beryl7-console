@@ -310,7 +310,7 @@ if [ "$ACTION" = "setdev" ]; then
         if flock -n 9 2>/dev/null; then locked=1; break; fi
         tries=$((tries+1)); sleep 1
     done
-    [ "$locked" = 1 ] || { printf '{"ok":false,"error":"busy, try again"}'; exit 0; }
+    [ "$locked" = 1 ] || { printf '{"ok":false,"error":"another save is holding the class map right now — wait a second and try again"}'; exit 0; }
 
     TMPF="$CLASSMAP.$$"
     NM="$NEWNAME" OIP="$OLDIP" OZN="$OLDZONE" awk -F'|' -v m="$MAC" -v cl="$NEWCLASS" '
@@ -330,7 +330,7 @@ if [ "$ACTION" = "setdev" ]; then
     else
         rm -f "$TMPF"
         flock -u 9 2>/dev/null
-        printf '{"ok":false,"error":"write failed"}'; exit 0
+        printf '{"ok":false,"error":"could not write the class map — the rename did not happen. That is a filesystem refusal; check overlay space over SSH (df /overlay)"}'; exit 0
     fi
 
     printf '{"ok":true,"action":"setdev","mac":"%s","name":"%s","class":"%s"}' \

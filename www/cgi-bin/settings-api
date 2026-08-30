@@ -238,7 +238,7 @@ case "&$QUERY_STRING&" in
         else
             printf 'Content-Type: application/json\r\n'
             printf 'Cache-Control: no-store\r\n\r\n'
-            printf '{"ok":false,"error":"could not create the archive"}'
+            printf '{"ok":false,"error":"sysupgrade -b failed, so there is no archive to download. Run it over SSH to see its own error — usually the overlay is full."}'
         fi
         rm -f "$BK"
         exit 0
@@ -411,7 +411,7 @@ if [ "$ACTION" = "updcheck" ]; then
         }')
     case "$UJ" in
         '{'*) printf '%s' "$UJ" > "$UPDCACHE"; printf '{"ok":true,"update":%s}' "$UJ" ;;
-        *)    printf '{"ok":false,"error":"could not read owut output"}' ;;
+        *)    printf '{"ok":false,"error":"owut ran but printed nothing this page can parse — the check result is unknown, not \\"up to date\\". Run owut check over SSH to see the raw output."}' ;;
     esac
     exit 0
 fi
@@ -928,7 +928,7 @@ if [ "$ACTION" = "setnotify" ]; then
     fi
     mkdir -p /etc/dashboard
     printf 'NOTIFY_ENABLED=%s\nNOTIFY_URL=%s\n' "$NENABLED" "$NURL" > "$NOTIFYCONF.tmp" 2>/dev/null \
-        || fail "could not write the setting"
+        || fail "could not write /etc/dashboard/notify.conf — the setting is unchanged. That is a filesystem refusal; check overlay space over SSH"
     mv "$NOTIFYCONF.tmp" "$NOTIFYCONF"; chmod 600 "$NOTIFYCONF"
     # Re-baseline so switching on does not replay whatever happened while off.
     rm -f /tmp/.notifystate
@@ -938,9 +938,9 @@ if [ "$ACTION" = "setnotify" ]; then
 fi
 
 if [ "$ACTION" = "testnotify" ]; then
-    [ -r "$NOTIFYCONF" ] || fail "nothing configured yet"
+    [ -r "$NOTIFYCONF" ] || fail "notifications have never been set up — enter an address and enable them above, then test"
     . "$NOTIFYCONF" 2>/dev/null
-    [ "$NOTIFY_ENABLED" = "1" ] && [ -n "$NOTIFY_URL" ] || fail "notifications are switched off"
+    [ "$NOTIFY_ENABLED" = "1" ] && [ -n "$NOTIFY_URL" ] || fail "notifications are switched off — enable them above first, then test"
     _hn=$(uci -q get system.@system[0].hostname); _hn=${_hn:-router}
     if wget -q -T 8 -O /dev/null --header="Title: $_hn: test" --header="Tags: bell" \
         --post-data="If you are reading this on your phone, the alerts work." "$NOTIFY_URL" 2>/dev/null; then

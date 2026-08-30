@@ -105,20 +105,20 @@ add)
     IP=$IP4_CANON
     [ -n "$NAME" ] || NAME="$IP"
     _n=$(awk -F'|' '$1 != "" && $1 !~ /^#/ && $1 != ip' ip="$IP" "$TARGETS" 2>/dev/null | wc -l)
-    [ "$_n" -ge "$MAX_SAVED" ] && fail "that is as many as the list holds ($MAX_SAVED)"
+    [ "$_n" -ge "$MAX_SAVED" ] && fail "the list holds $MAX_SAVED addresses and is full — remove one first"
     # Re-adding an address that is already saved renames it rather than
     # duplicating it — a list with the same IP twice has no useful meaning.
     { [ -f "$TARGETS" ] && awk -F'|' -v ip="$IP" '$1 != ip' "$TARGETS" 2>/dev/null
       printf '%s|%s\n' "$IP" "$NAME"
-    } | save_list || fail "cannot save the list"
+    } | save_list || fail "could not write /etc/dashboard/ping-targets — the list is unchanged. That is a filesystem refusal; check overlay space over SSH (df /overlay)"
     printf '{"ok":true,"targets":%s}' "$(list_json)"
     ;;
 
 del)
     IP=$(qs_get ip)
-    [ -n "$IP" ] || fail "which address?"
-    [ -f "$TARGETS" ] || fail "nothing saved"
-    awk -F'|' -v ip="$IP" '$1 != ip' "$TARGETS" 2>/dev/null | save_list || fail "cannot save the list"
+    [ -n "$IP" ] || fail "no address given — nothing was removed"
+    [ -f "$TARGETS" ] || fail "the list is already empty — nothing to remove"
+    awk -F'|' -v ip="$IP" '$1 != ip' "$TARGETS" 2>/dev/null | save_list || fail "could not write /etc/dashboard/ping-targets — the list is unchanged. That is a filesystem refusal; check overlay space over SSH (df /overlay)"
     # The prober is deliberately NOT touched. Removing a shortcut should not
     # change what the router is currently measuring; the Overview shows the
     # live address whether or not it is still in the list.
@@ -137,8 +137,8 @@ set)
             ;;
         *) fail "unknown target" ;;
     esac
-    printf '%s\n' "$LINE" > "$SEL_FILE.tmp" 2>/dev/null || fail "cannot write the selection"
-    mv "$SEL_FILE.tmp" "$SEL_FILE" 2>/dev/null || fail "cannot write the selection"
+    printf '%s\n' "$LINE" > "$SEL_FILE.tmp" 2>/dev/null || fail "could not write the selection to /tmp — the probe target is unchanged. /tmp is RAM; if it is full, something is filling it — that needs SSH"
+    mv "$SEL_FILE.tmp" "$SEL_FILE" 2>/dev/null || fail "could not write the selection to /tmp — the probe target is unchanged. /tmp is RAM; if it is full, something is filling it — that needs SSH"
     printf '{"ok":true,"sel":"%s"}' "$(esc "$SEL")"
     ;;
 

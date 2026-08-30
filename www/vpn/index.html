@@ -77,7 +77,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=61677d5b"></script>
+<script src="/os.js?v=8af8c82c"></script>
 <script>
 (function () {
 'use strict';
@@ -1115,7 +1115,7 @@ function render(d) {
         var n3 = OS.note('IPv6 leak protection is NOT in force. ' + vd.routed +
             (vd.routed > 1 ? ' devices are' : ' device is') + ' routed through a tunnel, ' +
             'but the firewall is carrying no IPv6 rules for them — their IPv6 traffic is ' +
-            'going out through the home uplink in clear, with the tunnel still up. ' +
+            'going out through the normal uplink in clear, with the tunnel still up. ' +
             'The generated ruleset was refused; check the tunnel DNS values.', 'bad');
         n3.style.marginBottom = '12px';
         alerts.appendChild(n3);
@@ -1127,7 +1127,7 @@ function render(d) {
               'until that is fixed.'
             : 'The firewall refused the per-device DNS redirect, so it has been dropped. ' +
               'IPv6 is still blocked for routed devices, so the location leak is closed, ' +
-              'but their DNS is answered from the home uplink. Check the tunnel DNS values.',
+              'but their DNS is answered from the normal uplink. Check the tunnel DNS values.',
             'warn');
         n5.style.marginBottom = '12px';
         alerts.appendChild(n5);
@@ -1135,7 +1135,7 @@ function render(d) {
         var n4 = OS.note('No usable DNS server on ' +
             (vd.nodns.length > 1 ? vd.nodns.length + ' routed tunnels' : 'a routed tunnel') +
             '. IPv6 is still blocked for the affected devices, so the location leak is ' +
-            'closed, but their DNS is answered from the home uplink rather than inside the tunnel. ' +
+            'closed, but their DNS is answered from the normal uplink rather than inside the tunnel. ' +
             'Add a DNS line to the tunnel config to close it.', 'warn');
         n4.style.marginBottom = '12px';
         alerts.appendChild(n4);

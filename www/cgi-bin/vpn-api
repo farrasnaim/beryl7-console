@@ -146,7 +146,7 @@ agh_get() {  # $1 = path
         "http://$AGH_HOST:3010$1" 2>/dev/null
 }
 if [ "$ACTION" = "aghprot" ]; then
-    [ -r "$AGH_AUTH" ] || { printf '{"ok":false,"error":"AdGuard credentials file is missing on the router"}'; exit 0; }
+    [ -r "$AGH_AUTH" ] || { printf '{"ok":false,"error":"/etc/dashboard/agh-auth is missing, so the console cannot talk to AdGuard — DNS itself is unaffected. Recreate it over SSH with the Basic auth header (see the handoff)"}'; exit 0; }
     ST=$(qs_get state)
     case "$ST" in
         on)  _b='{"protection_enabled":true}' ;;
@@ -286,7 +286,7 @@ if [ "$ACTION" = "add" ]; then
     # lost and asks for confirmation before calling it.
     NAME=$(qs_get_dec name)
     CONF=$(qs_get_dec conf)
-    [ -n "$CONF" ] || { printf '{"ok":false,"error":"empty config"}'; exit 0; }
+    [ -n "$CONF" ] || { printf '{"ok":false,"error":"the pasted text is empty — paste the entire .conf, [Interface] and [Peer] sections included"}'; exit 0; }
 
     # --- parse the wg-quick .conf (section-aware) ---
     P=$(printf '%s\n' "$CONF" | awk '
@@ -514,7 +514,7 @@ if [ "$ACTION" = "del" ]; then
     NAME=$(qs_get name)
     case "$NAME" in ''|*[!a-zA-Z0-9_-]*) printf '{"ok":false,"error":"bad name"}'; exit 0 ;; esac
     IFACE="wg_$NAME"
-    [ -n "$(uci -q get network.$IFACE)" ] || { printf '{"ok":false,"error":"not found"}'; exit 0; }
+    [ -n "$(uci -q get network.$IFACE)" ] || { printf '{"ok":false,"error":"that tunnel no longer exists — the page may be stale; it refreshes itself within seconds, or reload"}'; exit 0; }
     ifdown "$IFACE" >/dev/null 2>&1
     uci -q delete network.$IFACE
     uci -q delete network.wgpeer_$NAME
@@ -547,7 +547,7 @@ if [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ]; then
     NAME=$(qs_get name)
     case "$NAME" in ''|*[!a-zA-Z0-9_-]*) printf '{"ok":false,"error":"bad name"}'; exit 0 ;; esac
     IFACE="wg_$NAME"
-    [ -n "$(uci -q get network.$IFACE)" ] || { printf '{"ok":false,"error":"not found"}'; exit 0; }
+    [ -n "$(uci -q get network.$IFACE)" ] || { printf '{"ok":false,"error":"that tunnel no longer exists — the page may be stale; it refreshes itself within seconds, or reload"}'; exit 0; }
     # pbr refuses to start if ANY enabled policy points at an interface it can't
     # see, and it aborts wholesale rather than skipping that one policy. So the
     # tunnel state and pbr must be resequenced together: bring the link up (or

@@ -89,7 +89,7 @@ case "$ACTION" in
         printf '{"ok":true}'; exit 0 ;;
     up)
         if [ "$(uci -q get network.tethering.disabled)" = "1" ]; then
-            printf '{"ok":false,"error":"the USB uplink is off"}'; exit 0
+            printf '{"ok":false,"error":"the USB uplink is switched off, so nothing here can act — switch it on at the top of this page first"}'; exit 0
         fi
         if [ -z "$(uci -q get network.tethering.device)" ]; then
             printf '{"ok":false,"error":"no USB network device detected"}'; exit 0

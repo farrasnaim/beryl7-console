@@ -421,7 +421,7 @@ if [ "$ACTION" = "add" ]; then
     BAND=$(qs_get band)
     [ -n "$SSID" ] || { printf '{"ok":false,"error":"ssid required"}'; exit 0; }
     case "$BAND" in 5) RADIO=$(radio_for_band 5g) ;; 6) RADIO=$(radio_for_band 6g) ;; *) RADIO=$(radio_for_band 2g) ;; esac
-    [ -n "$RADIO" ] || { printf '{"ok":false,"error":"no radio available"}'; exit 0; }
+    [ -n "$RADIO" ] || { printf '{"ok":false,"error":"no Wi-Fi radio is available to join with — every radio is disabled or absent. Enable one on the Settings page first"}'; exit 0; }
     # No password typed? If we have joined this network before, use what we
     # already know. This is the whole point of remembering: arriving back at a
     # place you have stayed should be one tap, not a passphrase typed on a
@@ -488,7 +488,7 @@ fi
 if [ "$ACTION" = "del" ]; then
     # Also unauthenticated: removing an uplink just falls back to the ethernet
     # WAN, and re-adding it is a two-click operation.
-    [ -n "$(uci -q get wireless.uplink)" ] || { printf '{"ok":false,"error":"no uplink configured"}'; exit 0; }
+    [ -n "$(uci -q get wireless.uplink)" ] || { printf '{"ok":false,"error":"no wireless uplink is configured yet, so there is nothing to act on — join a network first"}'; exit 0; }
     # Read the radio before deleting the section that names it.
     URADIO=$(uci -q get wireless.uplink.device)
     uci -q delete wireless.uplink
@@ -521,7 +521,7 @@ fi
 
 # ============================ ENABLE / DISABLE ============================
 if [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ]; then
-    [ -n "$(uci -q get wireless.uplink)" ] || { printf '{"ok":false,"error":"no uplink configured"}'; exit 0; }
+    [ -n "$(uci -q get wireless.uplink)" ] || { printf '{"ok":false,"error":"no wireless uplink is configured yet, so there is nothing to act on — join a network first"}'; exit 0; }
     [ "$ACTION" = "up" ] && uci set wireless.uplink.disabled='0' || uci set wireless.uplink.disabled='1'
     uci commit wireless
     if [ "$ACTION" = "down" ]; then
