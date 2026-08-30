@@ -1025,10 +1025,17 @@ printf '"lan":{"ipaddr":"%s","netmask":"%s","dhcp":{"start":%s,"limit":%s,"lease
     "$(esc "$(uci -q get dhcp.lan.leasetime)")"
 NOTIFY_ENABLED=0; NOTIFY_URL=""
 [ -r /etc/dashboard/notify.conf ] && . /etc/dashboard/notify.conf 2>/dev/null
+# The queue file exists only while a send is stranded, i.e. almost never.
+# TEST for it rather than redirecting from it: `wc -l < missing 2>/dev/null`
+# does NOT stay quiet, because the failing redirection is performed by the
+# SHELL and reported before wc ever runs - the 2>/dev/null lands on the wrong
+# process. Every poll of this page was writing an error to the system log.
+NOTIFY_QUEUED=0
+[ -f /tmp/.notifyq ] && NOTIFY_QUEUED=$(wc -l < /tmp/.notifyq)
 printf '"notify":{"enabled":%s,"url":"%s","queued":%s},' \
     "$([ "$NOTIFY_ENABLED" = 1 ] && echo true || echo false)" \
     "$(esc "$NOTIFY_URL")" \
-    "$(jnum "$(wc -l < /tmp/.notifyq 2>/dev/null || echo 0)")"
+    "$(jnum "$NOTIFY_QUEUED")"
 printf '"system":{"hostname":"%s","zonename":"%s","uptime":%s,"ntp":%s},' \
     "$(esc "$(uci -q get system.@system[0].hostname)")" \
     "$(esc "$(uci -q get system.@system[0].zonename)")" \
