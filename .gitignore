@@ -42,7 +42,15 @@ backups/
 # assumed: with the exceptions but no `!etc/**/`, `git add -A` over a tree holding
 # an SSH host key, a shadow file and a TLS key stages nothing whatsoever — not
 # the secrets, and not the console files it was supposed to keep.
-etc/**
+#
+# THE DENY IS UNANCHORED (`**/etc/`) ON PURPOSE. Root-anchored `etc/**` kept the
+# promise above only at the repo root: extract a backup bundle into a
+# subdirectory to inspect it — the very scenario this block names — and the
+# whole tree landed OUTSIDE the guard, admitted. An etc/ at any depth is now
+# private. The directory re-admit and the exceptions stay root-anchored,
+# deliberately: an extraction tree gets no exceptions, so git never even
+# descends into one.
+**/etc/**
 !etc/**/
 !etc/crontabs/root
 !etc/dashboard/classmap.example
