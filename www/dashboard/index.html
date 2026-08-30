@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=9bab825b"></script>
+<script src="/os.js?v=41510445"></script>
 <script>
 (function () {
 'use strict';
@@ -1171,7 +1171,7 @@ function rowFor(mac) {
        blocked rows hide the two children rather than the wrapper, so the row
        keeps its four grid columns either way. */
     var mid = el('div', 're-sig'); mid.style.cssText = 'display:flex;align-items:center;gap:10px';
-    r._sc = OS.rssiBars(-100, true);
+    r._sc = OS.rssiScale(-90, true);
     r._sc.style.width = '64px';
     mid.appendChild(r._sc);
     r._dbm = el('span', 'row__num');
@@ -1222,7 +1222,7 @@ function rowFor(mac) {
         r._sc.hidden = !wifi;
         r._dbm.hidden = !wifi;
         if (wifi) {
-            OS.rssiBarsSet(r._sc, v.signal);
+            OS.rssiScaleSet(r._sc, v.signal);
             r._sc.title = v.signal + ' dBm';
             setTxt(r._dbm, v.signal + ' dBm');
         }
@@ -1338,7 +1338,7 @@ function detailFor(box, v, d) {
         head.appendChild(OS.chip(OS.GEN[OS.genOf(st)], 'flat'));
         head.appendChild(OS.chip(((st.tx && st.tx.mhz) || 0) + ' MHz', 'flat'));
         var q2 = OS.quality(st.signal);
-        var sc2 = OS.rssiBars(st.signal, true); sc2.style.cssText = 'width:64px;margin-left:auto';
+        var sc2 = OS.rssiScale(st.signal, true); sc2.style.cssText = 'width:64px;margin-left:auto';
         head.appendChild(sc2);
         head.appendChild(OS.stateWord(q2.word, q2.tone === 'ok' ? 'ok' : q2.tone));
         sec.appendChild(head);
