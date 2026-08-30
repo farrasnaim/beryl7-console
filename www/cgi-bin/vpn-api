@@ -135,9 +135,15 @@ FAILMODE_FILE=/etc/dashboard/vpn-failmode
 # single place the credential lives outside AGH itself — change the AGH password
 # and this file together, or the panel goes DOWN while AGH keeps working.
 AGH_AUTH=/etc/dashboard/agh-auth
+# The admin UI binds the LAN address, not loopback or every interface - one
+# fewer face on the uplink side. Derived at request time, never hardcoded: the
+# LAN address is a setting on this router, and a literal here would break this
+# panel the day the LAN is renumbered (the AdGuard yaml needs the same edit
+# that day - that trap is recorded in the handoff).
+AGH_HOST=$(uci -q get network.lan.ipaddr); AGH_HOST=${AGH_HOST:-127.0.0.1}
 agh_get() {  # $1 = path
     wget -q -T 3 -O - --header="Authorization: $(cat "$AGH_AUTH")" \
-        "http://127.0.0.1:3010$1" 2>/dev/null
+        "http://$AGH_HOST:3010$1" 2>/dev/null
 }
 if [ "$ACTION" = "aghprot" ]; then
     [ -r "$AGH_AUTH" ] || { printf '{"ok":false,"error":"AdGuard credentials file is missing on the router"}'; exit 0; }
@@ -149,7 +155,7 @@ if [ "$ACTION" = "aghprot" ]; then
     esac
     wget -q -T 5 -O /dev/null --header="Authorization: $(cat "$AGH_AUTH")" \
         --header="Content-Type: application/json" --post-data="$_b" \
-        "http://127.0.0.1:3010/control/dns_config" 2>/dev/null
+        "http://$AGH_HOST:3010/control/dns_config" 2>/dev/null
     # Read the state back rather than trusting the write: the answer the panel
     # shows next is AGH's own, so a silently failed POST cannot show as success.
     _pe=$(agh_get /control/status | jsonfilter -e '@.protection_enabled' 2>/dev/null)
@@ -884,7 +890,7 @@ if [ -r "$AGH_AUTH" ]; then
         # the service is alive and the credential in /etc/dashboard/agh-auth
         # is what failed. Advising a restart for that (as this did) has the
         # owner bouncing a healthy service.
-        if wget -q -T 3 -O /dev/null "http://127.0.0.1:3010/" 2>/dev/null; then
+        if wget -q -T 3 -O /dev/null "http://$AGH_HOST:3010/" 2>/dev/null; then
             AGHJ='{"up":false,"reason":"auth"}'
         else
             AGHJ='{"up":false,"reason":"down"}'
