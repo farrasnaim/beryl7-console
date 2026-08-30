@@ -73,9 +73,104 @@ ACTION=$(qs_get action)
 # owner visited could silently rename their devices. The other three APIs
 # already carried this clause; dashboard-api was the one that did not.
 case "$ACTION" in
-    "") ;;
+    # devdetail reads accounting and connection state and changes nothing, so
+    # it stays a GET for the same reason `logs` does on the settings API.
+    ""|devdetail) ;;
     *) [ "$REQUEST_METHOD" = "POST" ] || { printf '{"ok":false,"error":"POST required"}'; exit 0; } ;;
 esac
+
+# ------------------------------------------------------------- devdetail --
+# What one device's number is MADE OF. Two answers, deliberately different in
+# kind, because the router only records one of them historically:
+#
+#   protos  — this accounting day, per protocol (nlbwmon groups by layer7).
+#             Same period as the Traffic panel's own engine.
+#   remotes — what the device is talking to RIGHT NOW. Grouped from conntrack
+#             by remote address, named by PTR. The byte figures here are the
+#             LAST ~30 SECONDS only: nlbwmon drains every flow's counters each
+#             refresh interval to compute its deltas, so a snapshot can never
+#             hold more than one interval of bytes. That is why this list is
+#             labelled "now" and the per-site share of the DAY is not offered —
+#             nothing on this router records destinations historically, and
+#             pretending the last half-minute is the day would be a lie with
+#             a chart on it.
+if [ "$ACTION" = "devdetail" ]; then
+    DMAC=$(qs_get_dec mac | tr 'a-f' 'A-F')
+    case "$DMAC" in
+        [0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]) ;;
+        *) printf '{"ok":false,"error":"bad mac"}'; exit 0 ;;
+    esac
+    LMAC=$(printf '%s' "$DMAC" | tr 'A-F' 'a-f')
+
+    # every address the device holds: the v4 lease plus its global/ULA v6
+    # neighbours (link-locals excluded — nothing routes through them).
+    IPS=$(awk -v m="$LMAC" '$2==m {print $3}' /tmp/dhcp.leases 2>/dev/null)
+    IPS="$IPS $(ip -6 neigh show 2>/dev/null | awk -v m="$LMAC" \
+        '$1 ~ /^fe80/ { next }
+        { for (i=1;i<NF;i++) if ($i=="lladdr" && tolower($(i+1))==m) print $1 }')"
+
+    # ---- today, by protocol ----
+    PJ=$(nlbw -c csv -g mac,layer7 2>/dev/null | awk -F'\t' -v m="\"$LMAC\"" '
+        NR==1 { next }
+        $3 != m { next }
+        {
+            gsub(/"/,"",$9); gsub(/"/,"",$1)
+            name = ($9 != "" ? $9 : ($1 == "IP" ? "other" : $1 "/" $2))
+            rx[name] += $5; tx[name] += $7
+        }
+        END { for (n in rx) printf "%015.0f\t%s\t%.0f\t%.0f\n", rx[n]+tx[n], n, rx[n], tx[n] }' |
+        sort -r | head -8 | awk -F'\t' '
+        { gsub(/\\/,"\\\\&",$2); gsub(/"/,"\\\\&",$2)
+          printf "%s[\"%s\",%.0f,%.0f]", (c++?",":""), $2, $3, $4 }')
+
+    # ---- talking to, right now ----
+    PTRCACHE=/tmp/.ptrcache
+    RJ=""
+    if [ -r /proc/net/nf_conntrack ]; then
+        RJ=$(IPLIST="$IPS" awk '
+            BEGIN { n = split(ENVIRON["IPLIST"], a, " "); for (i=1;i<=n;i++) if (a[i]!="") mine[a[i]]=1 }
+            {
+                src=""; dst=""; bytes=0
+                for (i=1;i<=NF;i++) {
+                    if ($i ~ /^src=/ && src=="") src=substr($i,5)
+                    else if ($i ~ /^dst=/ && dst=="") dst=substr($i,5)
+                    else if ($i ~ /^bytes=/) bytes += substr($i,7)
+                }
+                if (!(src in mine)) next
+                # remote only: LAN, multicast, broadcast and link-local are
+                # chatter, not sites
+                if (dst ~ /^192\.168\./ || dst ~ /^10\./ || dst ~ /^172\.(1[6-9]|2[0-9]|3[01])\./) next
+                if (dst ~ /^(224|239|255)\./ || dst ~ /^ff/ || dst ~ /^fe80/ || dst ~ /^fd/) next
+                agg[dst] += bytes; cnt[dst]++
+            }
+            END { for (d in agg) printf "%015.0f\t%s\t%d\n", agg[d], d, cnt[d] }' \
+            /proc/net/nf_conntrack 2>/dev/null | sort -r | head -10)
+    fi
+    REMJ=""
+    OIFS=$IFS; IFS='
+'
+    for line in $RJ; do
+        IFS=$OIFS
+        b=${line%%	*}; b=$(printf %s "$b" | sed "s/^0*//"); [ -n "$b" ] || b=0; rest=${line#*	}; d=${rest%%	*}; c=${rest#*	}
+        nm=""
+        [ -f "$PTRCACHE" ] && nm=$(awk -v ip="$d" '$1==ip {print $2; exit}' "$PTRCACHE" 2>/dev/null)
+        if [ -z "$nm" ]; then
+            nm=$(nslookup "$d" 127.0.0.1 2>/dev/null | sed -n 's/.*name = //p' | head -1 | sed 's/\.$//')
+            printf '%s %s\n' "$d" "${nm:--}" >> "$PTRCACHE" 2>/dev/null
+        fi
+        [ "$nm" = "-" ] && nm=""
+        REMJ="$REMJ${REMJ:+,}[\"$(esc "$d")\",\"$(esc "$nm")\",$b,$c]"
+        IFS='
+'
+    done
+    IFS=$OIFS
+    # cache growth is bounded: keep the newest 400 mappings
+    [ -f "$PTRCACHE" ] && [ "$(wc -l < "$PTRCACHE")" -gt 400 ] && \
+        { tail -200 "$PTRCACHE" > "$PTRCACHE.n" && mv "$PTRCACHE.n" "$PTRCACHE"; }
+
+    printf '{"ok":true,"mac":"%s","protos":[%s],"remotes":[%s]}' "$(esc "$DMAC")" "$PJ" "$REMJ"
+    exit 0
+fi
 
 # =========================== WRITE ACTIONS ===========================
 

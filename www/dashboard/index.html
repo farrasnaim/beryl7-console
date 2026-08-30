@@ -1634,6 +1634,7 @@ function renderTraffic(d, M) {
     var K = OS.keyed(box._grid, true);
     all.forEach(function (v, i) {
         var r = K.want(v.mac, trafRow).node;
+        r._mac = v.mac;
         r.style.order = i;
         var sum = v.traffic.dn + v.traffic.up;
         setTxt(r._nm, v.name);
@@ -1692,7 +1693,75 @@ function trafRow() {
     r._sh.style.cssText = 'font-size:11px;color:var(--ink-4);flex:none;font-variant-numeric:tabular-nums';
     b.appendChild(r._sh);
     r.appendChild(b);
+    /* Click for what the number is MADE OF. The drawer lives inside the row
+       node on purpose: rows are keyed and reordered with CSS order, so
+       anything outside the node would detach from its device on re-sort. */
+    r.style.cursor = 'pointer';
+    r._det = el('div');
+    r._det.hidden = true;
+    r._det.style.cssText = 'margin:8px 0 4px;padding:10px 12px;border:1px solid var(--line-2);' +
+        'border-radius:var(--r);font-size:11px';
+    r.appendChild(r._det);
+    r.addEventListener('click', function (ev) {
+        if (r._det.contains(ev.target)) return;
+        if (!r._det.hidden) { r._det.hidden = true; return; }
+        r._det.hidden = false;
+        devDetail(r._det, r._mac);
+    });
     return r;
+}
+
+/* The drawer's two answers are different in KIND, and the labels say so. The
+   protocol split covers the accounting day, like the number it explains. The
+   remote list is only "right now": the per-device accountant drains every
+   conntrack counter each half-minute to compute its deltas, so a snapshot can
+   never hold more than ~30s of bytes — and nothing on this router records
+   destinations historically. Naming remotes as if they explained the day
+   would be a lie with a chart on it, so they are labelled as what they are. */
+function devDetail(det, mac) {
+    det.textContent = 'Reading…';
+    fetch(API + '?action=devdetail&mac=' + encodeURIComponent(mac), { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            clear(det);
+            if (!j || !j.ok) { det.textContent = 'Could not read the breakdown.'; return; }
+            function cap(t) {
+                var c = el('div', null, t);
+                c.style.cssText = 'font-size:10px;font-weight:650;letter-spacing:.1em;' +
+                    'text-transform:uppercase;color:var(--ink-4);margin:2px 0 6px';
+                return c;
+            }
+            function line(l, rgt, dim) {
+                var w = el('div');
+                w.style.cssText = 'display:flex;justify-content:space-between;gap:10px;margin-bottom:3px';
+                var a = el('span', null, l);
+                a.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' +
+                    (dim ? ';color:var(--ink-3)' : '');
+                var z = el('span', 'n', rgt);
+                z.style.cssText = 'flex:none;font-variant-numeric:tabular-nums;color:var(--ink-2)';
+                w.appendChild(a); w.appendChild(z);
+                return w;
+            }
+            det.appendChild(cap('This accounting day · by protocol'));
+            if (!j.protos.length) det.appendChild(line('nothing recorded yet', '', true));
+            j.protos.forEach(function (p) {
+                det.appendChild(line(p[0], OS.bytes(p[1] + p[2]) +
+                    '  ·  ↓' + OS.bytes(p[1]) + ' ↑' + OS.bytes(p[2])));
+            });
+            det.appendChild(cap('Talking to right now'));
+            if (!j.remotes.length) det.appendChild(line('no active remote connections', '', true));
+            j.remotes.forEach(function (rr) {
+                var name = rr[1] || rr[0];
+                det.appendChild(line(name,
+                    rr[3] + (rr[3] === 1 ? ' conn' : ' conns') +
+                    (rr[2] > 0 ? '  ·  ' + OS.bytes(rr[2]) + ' /30s' : '')));
+            });
+            var h = el('div', null, 'Which sites made up the day is not something this router ' +
+                'records — the remote list is live connections only.');
+            h.style.cssText = 'margin-top:6px;font-size:10.5px;color:var(--ink-4)';
+            det.appendChild(h);
+        })
+        .catch(function () { det.textContent = 'Could not read the breakdown.'; });
 }
 
 /* ----------------------------------------------------------------- boot -- */
