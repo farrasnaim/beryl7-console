@@ -40,13 +40,25 @@
 
 CONF=/etc/dashboard/notify.conf
 PEND=/tmp/.wifipend
-# MEASURED, not guessed. 125 disconnect->reconnect gaps from this router's own
-# log: 34% return within 2s, 74% within 10s, then a long tail out to 7 minutes.
-# The distribution is CONTINUOUS - there is no clean gap between "roaming" and
-# "left", so no threshold can be right for every case and this is a tuning
-# knob, not a solved problem. 10s silences three quarters of the blips while
-# reporting a real departure fast enough to feel immediate.
-GRACE=${NOTIFY_WIFI_GRACE:-10}
+# MEASURED TWICE, and the second measurement corrected the first. Counting all
+# disconnect->reconnect gaps together said "74% within 10s" and produced a 10s
+# grace. But that mixed two populations. Split by whether the device came back
+# on a DIFFERENT radio (a roam) or the same one (a blip, a sleep, an off/on):
+#
+#   roam, n=38      53% return within ONE second, then a clean gap with ZERO
+#                   samples at 2-3s, a small 4-10s cluster, and a >10s tail
+#                   that is not roaming at all - those are real departures that
+#                   happened to come back on the other band.
+#   same radio, n=171   median ONE second: power-save wakeups and retries.
+#
+# So nearly all of the noise is over within a second, and the 10s grace was
+# paying nine seconds of delay for almost nothing. 3s sits inside the empty
+# 2-3s band: past the fast roams, well short of a human noticing.
+#
+# It stays a knob, because the tail overlaps: a handful of roams take 4-10s and
+# will produce a departure followed by a "back after Ns". That is the honest
+# trade for reporting a real disconnect in about three seconds.
+GRACE=${NOTIFY_WIFI_GRACE:-3}
 
 # How long a device may return and still be described as coming BACK rather
 # than arriving. Beyond this it is treated as a fresh arrival.
@@ -146,7 +158,7 @@ resolve_pending() {
 
 OBJS=$(ubus list 2>/dev/null | grep '^hostapd\.')
 [ -n "$OBJS" ] || exit 0
-FP0=$(ap_fingerprint)
+FP0=$(ap_fingerprint); FPTICK=0
 
 # A FIFO rather than a pipe, so the reader can WAKE ON A TIMER as well as on an
 # event. That matters: a held departure has to be confirmed after GRACE seconds
@@ -164,7 +176,7 @@ trap 'kill $UBPID 2>/dev/null; rm -f "$FIFO"' EXIT INT TERM
 
 while :; do
     kill -0 "$UBPID" 2>/dev/null || break
-    if IFS= read -r -t 5 line <&3; then
+    if IFS= read -r -t 1 line <&3; then
         case "$line" in
             *'"sta-authorized"'*|*'"disassoc"'*|*'"deauth"'*) ;;
             *) resolve_pending; continue ;;      # probe/auth/assoc noise
@@ -203,22 +215,34 @@ while :; do
                 fi
                 ;;
             *)
-                grep -q "^$mac " "$PEND" 2>/dev/null || \
-                    printf '%s %s %s\n' "$mac" "$(date +%s)" "$band" >> "$PEND"
+                # If the device is ALREADY on another radio at this instant,
+                # this is hostapd pruning the old association after a roam -
+                # decided, not pending. Costs nothing and removes the delay
+                # entirely for the commonest case.
+                if assoc_anywhere "$mac" "$ifc"; then
+                    :
+                else
+                    grep -q "^$mac " "$PEND" 2>/dev/null || \
+                        printf '%s %s %s\n' "$mac" "$(date +%s)" "$band" >> "$PEND"
+                fi
                 ;;
         esac
     fi
-    # runs on every event AND on every 5s timeout, so a held departure is
-    # confirmed even in total silence
+    # runs on every event AND on every 1s timeout, so a held departure is
+    # confirmed within a second of its grace expiring rather than up to five
+    # seconds later - the read timeout was the real floor on how fast a
+    # departure could be reported, not the grace itself
     resolve_pending
 
     # Re-check the subscription target, not just the process. If hostapd's
     # objects were rebuilt underneath us the subscriber is deaf; ending the
     # loop is procd's cue to restart the whole thing against the new ones.
     # Worst-case deafness is one tick.
-    if [ "$(ap_fingerprint)" != "$FP0" ]; then
+    FPTICK=$((FPTICK + 1))
+    if [ "$FPTICK" -ge 15 ] && [ "$(ap_fingerprint)" != "$FP0" ]; then
         logger -t wifiwatch "hostapd ubus objects changed (wifi reload?) - restarting to resubscribe"
         break
     fi
+    [ "$FPTICK" -ge 15 ] && FPTICK=0
 done
 exit 0
