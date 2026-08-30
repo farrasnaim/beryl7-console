@@ -83,19 +83,24 @@ wan_has_carrier() {
 # one are vanishingly rare. Anything with a control character is refused rather
 # than silently mangled.
 KNOWN=/etc/dashboard/repeater-known
+# SSIDs cross into awk via ENVIRON[], never -v: awk applies escape-sequence
+# processing to -v values, so an SSID containing the TEXT of an escape (a
+# backslash followed by t, n, ...) was silently transformed before comparison -
+# "forget this network" answered ok while the row, passphrase included, stayed.
+# ENVIRON passes bytes through untouched.
 KNOWN_MAX=16
 
 known_recall() {   # $1=ssid -> prints saved key, empty if unknown
     [ -s "$KNOWN" ] || return 0
-    awk -F'\t' -v s="$1" '$1==s {print $3; exit}' "$KNOWN" 2>/dev/null
+    S="$1" awk -F'\t' '$1==ENVIRON["S"] {print $3; exit}' "$KNOWN" 2>/dev/null
 }
 known_enc() {      # $1=ssid -> prints saved encryption
     [ -s "$KNOWN" ] || return 0
-    awk -F'\t' -v s="$1" '$1==s {print $2; exit}' "$KNOWN" 2>/dev/null
+    S="$1" awk -F'\t' '$1==ENVIRON["S"] {print $2; exit}' "$KNOWN" 2>/dev/null
 }
 known_forget() {   # $1=ssid
     [ -s "$KNOWN" ] || return 0
-    awk -F'\t' -v s="$1" '$1!=s' "$KNOWN" > "$KNOWN.n" 2>/dev/null && mv "$KNOWN.n" "$KNOWN"
+    S="$1" awk -F'\t' '$1!=ENVIRON["S"]' "$KNOWN" > "$KNOWN.n" 2>/dev/null && mv "$KNOWN.n" "$KNOWN"
     chmod 600 "$KNOWN" 2>/dev/null
 }
 known_remember() { # $1=ssid $2=enc $3=key
@@ -106,7 +111,7 @@ known_remember() { # $1=ssid $2=enc $3=key
     # Newest first, one entry per SSID, oldest beyond the cap dropped. Rewriting
     # rather than appending keeps a re-join from stacking duplicates.
     { printf '%s\t%s\t%s\n' "$1" "$2" "$3"
-      awk -F'\t' -v s="$1" '$1!=s' "$KNOWN" 2>/dev/null
+      S="$1" awk -F'\t' '$1!=ENVIRON["S"]' "$KNOWN" 2>/dev/null
     } | head -n "$KNOWN_MAX" > "$KNOWN.n" 2>/dev/null && mv "$KNOWN.n" "$KNOWN"
     chmod 600 "$KNOWN" 2>/dev/null
 }

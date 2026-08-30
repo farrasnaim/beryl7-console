@@ -96,8 +96,13 @@ if [ "$ACTION" = "setdev" ]; then
         *) printf '{"ok":false,"error":"bad class"}'; exit 0 ;;
     esac
     # The classmap is pipe-delimited and line-based, so a name may contain
-    # neither. Strip separators/control chars rather than rejecting, and cap the
-    # length so one entry can't bloat the file.
+    # neither LITERAL separator - tr strips those - and the length is capped so
+    # one entry can't bloat the file. That filter alone is NOT what keeps a line
+    # from gaining a field or a newline: the name used to travel into awk via
+    # -v, which re-creates separators from their text forms (the two characters
+    # backslash+n became a newline, forging a whole extra row with an arbitrary
+    # MAC). It now travels via ENVIRON[], which does no such processing, and
+    # the same goes for ip/zone, which are read back out of this very file.
     NEWNAME=$(printf '%s' "$NEWNAME" | tr -d '|\n\r\t' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | cut -c1-40)
     [ -n "$NEWNAME" ] || { printf '{"ok":false,"error":"name cannot be empty"}'; exit 0; }
 
@@ -128,8 +133,8 @@ if [ "$ACTION" = "setdev" ]; then
     [ "$locked" = 1 ] || { printf '{"ok":false,"error":"busy, try again"}'; exit 0; }
 
     TMPF="$CLASSMAP.$$"
-    awk -F'|' -v m="$MAC" -v nm="$NEWNAME" -v cl="$NEWCLASS" -v ip="$OLDIP" -v zn="$OLDZONE" '
-      BEGIN { done=0 }
+    NM="$NEWNAME" OIP="$OLDIP" OZN="$OLDZONE" awk -F'|' -v m="$MAC" -v cl="$NEWCLASS" '
+      BEGIN { done=0; nm=ENVIRON["NM"]; ip=ENVIRON["OIP"]; zn=ENVIRON["OZN"] }
       /^#/ { print; next }
       NF < 3 { print; next }
       {
