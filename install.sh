@@ -107,6 +107,7 @@ chmod 755 /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api 
           /www/cgi-bin/probe-api /www/cgi-bin/version-api \
           /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
           /usr/sbin/beryl-pbrtbl \
+          /etc/hotplug.d/iface/12-console-services \
           /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
           /etc/hotplug.d/iface/32-pbr-uplink \
           /etc/hotplug.d/iface/33-uplink-width \
@@ -157,9 +158,10 @@ echo "  . vpn rules regenerate at boot"
 
 # cpugovernor was copied and made executable but never enabled, so on a fresh
 # install it sat there doing nothing: the governor tuning is silent either way,
-# which is exactly why nobody noticed. It is only running on the router it was
-# developed on because an /etc/rc.d symlink was registered for backup by hand.
-# Enabling it here is what makes a clean install match that state.
+# which is exactly why nobody noticed. Enabling it here is what makes a clean
+# install work. Across a FIRMWARE UPGRADE none of these enables survive - the
+# keep list preserves init scripts, not rc.d links - and the boot-time guard
+# /etc/hotplug.d/iface/12-console-services re-registers whatever is missing.
 /etc/init.d/cpugovernor enable  >/dev/null 2>&1 || true
 /etc/init.d/cpugovernor restart >/dev/null 2>&1 || true
 echo "  . cpugovernor running"
@@ -173,6 +175,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
          /usr/sbin/beryl-pbrtbl /usr/share/beryl/cgi-lib.sh \
          /etc/dashboard /etc/crontabs/root \
+         /etc/hotplug.d/iface/12-console-services \
          /etc/hotplug.d/iface/15-travel-dns /etc/hotplug.d/iface/31-tethering-clash \
          /etc/hotplug.d/iface/32-pbr-uplink \
          /etc/hotplug.d/iface/33-uplink-width \

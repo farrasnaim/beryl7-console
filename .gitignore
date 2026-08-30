@@ -46,6 +46,7 @@ etc/**
 !etc/**/
 !etc/crontabs/root
 !etc/dashboard/classmap.example
+!etc/hotplug.d/iface/12-console-services
 !etc/hotplug.d/iface/15-travel-dns
 !etc/hotplug.d/iface/31-tethering-clash
 !etc/hotplug.d/iface/32-pbr-uplink

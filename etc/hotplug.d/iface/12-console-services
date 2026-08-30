@@ -1,0 +1,49 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/12-console-services
+#
+# Re-register the console services' boot links after a firmware upgrade.
+#
+# THE GAP THIS CLOSES: sysupgrade preserves the console's /etc/init.d scripts
+# (they are in /etc/sysupgrade.conf) but not their /etc/rc.d symlinks — the
+# keep list carries exactly one, S99cpugovernor, added by hand. After an
+# upgrade the scripts are back but nothing starts them: the 1-second probe
+# behind the Overview's ping/loss/jitter history never runs, and — worse —
+# beryl-vpndns never re-runs at boot, so the preserved nftables fragment comes
+# back FROZEN instead of recomputed. That frozen-ruleset failure is precisely
+# what the S18 boot link exists to prevent, and the remedy used to require
+# SSH, which is what the owner does not have while travelling.
+#
+# WHY THIS MECHANISM and not the obvious ones:
+#  * Preserving the symlinks themselves through the keep list would pin
+#    whatever START/STOP ordering existed at backup time; `enable` re-derives
+#    the links from the CURRENT script, so a later package that legitimately
+#    changes its ordering wins.
+#  * A uci-defaults script would sit in a directory that currently receives a
+#    file from an unidentified writer (recorded separately); this file's home
+#    is wholly owned by the console's installer.
+#  * restore.sh already heals this on the RESTORE path by calling `enable` —
+#    this is the same idiom, applied to the path that had no equivalent: the
+#    ordinary upgrade.
+#
+# lan ifup happens on every boot, so this runs at least once per boot. The
+# common case — links present — costs three globs and exits silently. Acting
+# only when a link is MISSING is what keeps this from restarting services on
+# every routine ifupdate.
+
+[ "$ACTION" = "ifup" ] || exit 0
+[ "$INTERFACE" = "lan" ] || exit 0
+
+for s in pingmon cpugovernor beryl-vpndns; do
+    [ -x "/etc/init.d/$s" ] || continue
+    # any S?? link for this service counts as registered
+    set -- /etc/rc.d/S[0-9][0-9]"$s"
+    [ -e "$1" ] && continue
+    /etc/init.d/"$s" enable >/dev/null 2>&1
+    # A link that was missing means this boot skipped the service. Start it
+    # now rather than waiting for the NEXT boot — for beryl-vpndns that start
+    # is the recomputation of the VPN nftables fragment from live policy,
+    # which is the entire point of the exercise.
+    /etc/init.d/"$s" start >/dev/null 2>&1
+    logger -t console-services "boot link for $s was missing (firmware upgrade?) - re-enabled and started"
+done
+exit 0

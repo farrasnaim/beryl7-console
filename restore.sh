@@ -106,10 +106,10 @@ ssh -n $SSHOPT "$TARGET" 'chmod 755 /www/cgi-bin/*-api 2>/dev/null
 ok "executable bits reapplied"
 
 # A restored /etc/init.d script is not a running service: what starts it at boot
-# is the /etc/rc.d symlink, and only cpugovernor's was ever registered for the
-# backup. Enabling here does not depend on the bundle carrying symlinks at all,
-# which is the more robust of the two answers — `enable` is idempotent, so it
-# costs nothing when they did come back.
+# is the /etc/rc.d symlink, which the bundle does not carry. Enabling here
+# re-derives the links from the scripts - idempotent, so it costs nothing when
+# they already exist. The ordinary UPGRADE path (no restore run) gets the same
+# healing from /etc/hotplug.d/iface/12-console-services at first boot.
 ssh -n $SSHOPT "$TARGET" 'for s in pingmon cpugovernor beryl-vpndns; do
         [ -x "/etc/init.d/$s" ] || continue
         /etc/init.d/$s enable >/dev/null 2>&1
