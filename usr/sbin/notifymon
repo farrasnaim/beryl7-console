@@ -46,11 +46,6 @@ CONF=/etc/dashboard/notify.conf
 # it is how an owner learns to ignore the alerts. The gap between the trip and
 # clear levels stops a link hovering at the threshold from flapping the phone
 # all evening.
-RTT_BAD=${NOTIFY_RTT_MS:-150}
-RTT_OK=${NOTIFY_RTT_OK_MS:-80}
-LOSS_BAD=${NOTIFY_LOSS_PCT:-5}
-LOSS_OK=${NOTIFY_LOSS_OK_PCT:-2}
-NEED=${NOTIFY_DEGRADE_MINUTES:-3}
 STATE=/tmp/.notifystate
 QUEUE=/tmp/.notifyq
 QMAX=25
@@ -59,6 +54,16 @@ QMAX=25
 . "$CONF" 2>/dev/null
 [ "$NOTIFY_ENABLED" = "1" ] || exit 0
 [ -n "$NOTIFY_URL" ] || exit 0
+
+# NOTE: every ${NOTIFY_*:-default} below MUST stay after the source above.
+# They were written before it and silently used their defaults forever - the
+# knobs were documented, advertised to the owner, and dead. A default that
+# happens to be sensible hides this completely.
+RTT_BAD=${NOTIFY_RTT_MS:-150}
+RTT_OK=${NOTIFY_RTT_OK_MS:-80}
+LOSS_BAD=${NOTIFY_LOSS_PCT:-5}
+LOSS_OK=${NOTIFY_LOSS_OK_PCT:-2}
+NEED=${NOTIFY_DEGRADE_MINUTES:-3}
 
 HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-router}
 
