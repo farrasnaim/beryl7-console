@@ -698,10 +698,31 @@ if [ "$ACTION" = "setlan" ]; then
             done
             uci commit uhttpd
         fi
+        # AdGuard's admin UI binds the LAN address the same literal way the
+        # console does (F-029) — but its config is YAML owned by AdGuard, not
+        # uci, so it gets an ANCHORED one-line substitution, never a blind
+        # s/old/new/ across the file (which could touch upstreams or rewrite
+        # rules). Only the http bind moves: DNS lives on loopback in the same
+        # file and is untouched by design. FAIL-SAFE by construction - every
+        # branch falls through, because a filtering UI must never be able to
+        # abort a LAN move; the failure line says where the UI was left.
+        if [ -f /etc/adguardhome/adguardhome.yaml ] &&
+           grep -q "^  address: $OLDIP:3010\$" /etc/adguardhome/adguardhome.yaml 2>/dev/null; then
+            if sed -i "s|^  address: $OLDIP:3010\$|  address: $IP:3010|" /etc/adguardhome/adguardhome.yaml 2>/dev/null; then
+                logger -t settings "AdGuard UI bind moved to $IP with the LAN"
+                AGH_MOVED=1
+            else
+                logger -t settings "AdGuard UI bind rewrite FAILED - UI stays on $OLDIP until fixed by hand"
+            fi
+        fi
         logger -t settings "LAN address change $OLDIP -> $IP via web UI"
         # Answer first, move the network afterwards — the response must escape
-        # on the old address before it stops existing.
-        ( sleep 2; /etc/init.d/network reload; sleep 2; /etc/init.d/uhttpd reload; /etc/init.d/dnsmasq restart ) >/dev/null 2>&1 &
+        # on the old address before it stops existing. AdGuard restarts last
+        # and only when its bind moved: the restart is what re-binds the UI,
+        # and the seconds it costs sit inside a window where dnsmasq is being
+        # restarted anyway.
+        ( sleep 2; /etc/init.d/network reload; sleep 2; /etc/init.d/uhttpd reload; /etc/init.d/dnsmasq restart
+          [ "$AGH_MOVED" = 1 ] && /etc/init.d/adguardhome restart ) >/dev/null 2>&1 &
         printf '{"ok":true,"moved":"%s"}' "$(esc "$IP")"
     else
         # The restart is NOT unconditional. dnsmasq derives its dhcp-range from
