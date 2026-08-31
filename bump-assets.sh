@@ -63,6 +63,7 @@ cd "$(dirname "$0")/www"
 
 hash_of() { md5sum "$1" | cut -c1-8; }
 changed=0
+rewritten=""
 
 # ---------------------------------------------------------------------------
 # ORDER MATTERS, AND IT IS THE VERSION FIRST.
@@ -113,6 +114,7 @@ for f in os.js cgi-bin/version-api; do
             s|^CONSOLE_VERSION='[^']*'|CONSOLE_VERSION='$VER'|" "$f"
     echo "  versioned $f"
     changed=$((changed + 1))
+    rewritten="$rewritten www/$f"
 done
 
 # ---- 2. now hash the assets, os.js having reached its final content ---------
@@ -134,7 +136,24 @@ for page in */index.html; do
     if [ "$before" != "$after" ]; then
         echo "  stamped  $page"
         changed=$((changed + 1))
+        rewritten="$rewritten www/$page"
     fi
 done
 
 echo "  os.css=$CSS  os.js=$JS  console version=$VER  ($changed file(s) rewritten)"
+
+# ---- 3. say out loud what must now ship together -----------------------------
+#
+# Exists because of 2026-08-30: a deploy shipped only the files whose TEXT had
+# been edited, not the files this script had just restamped. The router ended up
+# serving an os.js carrying one version and a version-api carrying another, and
+# every browser showed the "old copy" banner forever — a Reload that could never
+# succeed. The stamps are one unit: deploy a subset and the unit lies.
+if [ -n "$rewritten" ]; then
+    echo
+    echo "  DEPLOY TOGETHER — every file below plus www/cgi-bin/version-api."
+    echo "  Shipping a subset leaves the served os.js and version-api carrying"
+    echo "  different versions: the stale-page banner then shows on EVERY load"
+    echo "  and its Reload button cannot clear it."
+    for f in $rewritten; do echo "    $f"; done
+fi
