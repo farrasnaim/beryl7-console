@@ -99,9 +99,11 @@ ok "configuration and console files written"
 # tethering, and nothing anywhere saying why.
 ssh -n $SSHOPT "$TARGET" 'chmod 755 /www/cgi-bin/*-api 2>/dev/null
     chmod 755 /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch \
-              /usr/sbin/beryl-vpndns /usr/sbin/beryl-pbrtbl /usr/sbin/pingmon 2>/dev/null
+              /usr/sbin/beryl-vpndns /usr/sbin/beryl-pbrtbl /usr/sbin/pingmon \
+              /usr/sbin/notifymon /usr/sbin/wifiwatch 2>/dev/null
     chmod 755 /etc/hotplug.d/iface/* /etc/hotplug.d/net/* /etc/hotplug.d/usb/* 2>/dev/null
-    chmod 755 /etc/init.d/cpugovernor /etc/init.d/pingmon /etc/init.d/beryl-vpndns 2>/dev/null
+    chmod 755 /etc/init.d/cpugovernor /etc/init.d/pingmon /etc/init.d/beryl-vpndns \
+              /etc/init.d/wifiwatch 2>/dev/null
     true'
 ok "executable bits reapplied"
 
@@ -110,7 +112,7 @@ ok "executable bits reapplied"
 # re-derives the links from the scripts - idempotent, so it costs nothing when
 # they already exist. The ordinary UPGRADE path (no restore run) gets the same
 # healing from /etc/hotplug.d/iface/12-console-services at first boot.
-ssh -n $SSHOPT "$TARGET" 'for s in pingmon cpugovernor beryl-vpndns; do
+ssh -n $SSHOPT "$TARGET" 'for s in pingmon cpugovernor beryl-vpndns wifiwatch; do
         [ -x "/etc/init.d/$s" ] || continue
         /etc/init.d/$s enable >/dev/null 2>&1
     done

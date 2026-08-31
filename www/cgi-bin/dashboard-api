@@ -1036,7 +1036,14 @@ else
     # measured ~38ms, which is most of what this whole check costs.
     _fmj=""; [ -f /etc/dashboard/vpn-failmode ] && read -r _fmj < /etc/dashboard/vpn-failmode 2>/dev/null
     case "$_fmj" in open|closed) ;; *) _fmj=closed ;; esac
-    for _j in dashmon apwatch vpnwatch; do
+    # An EXPLICIT list, not one derived from the crontab. Deriving is tempting -
+    # it is exactly the drift that hid notifymon here for a day - but it turns
+    # "this program is in cron" into "this program promises a heartbeat", and
+    # those are different claims. Any cron entry that does not write one would be
+    # reported dead while running perfectly, which is a false positive on the
+    # panel the owner trusts most. The contract is opt-in and the cost of joining
+    # it is two lines; adding a console cron job means adding it here too.
+    for _j in dashmon apwatch vpnwatch notifymon; do
         # A dead vpnwatch under the CLOSED fail mode is latent, not present, harm:
         # it has nothing to release. Warning about it here would be warning about
         # something currently harmless, which is how an alarm earns a reflex to

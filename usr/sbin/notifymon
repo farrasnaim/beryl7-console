@@ -50,6 +50,18 @@ STATE=/tmp/.notifystate
 QUEUE=/tmp/.notifyq
 QMAX=25
 
+# ---- heartbeat -------------------------------------------------------------
+# The console's Jobs panel calls a cron program healthy when /tmp/.hb-<name> is
+# under 150s old. This program was in the crontab for a day writing NOTHING to
+# /tmp, so it was invisible there: it could have been dead the whole time and no
+# surface would have moved. Written on every path that completes normally -
+# including the idle ones, because "notifications are switched off" is notifymon
+# working correctly with nothing to do, not notifymon failing. The one path that
+# deliberately does NOT beat is a missing cgi-lib, where the program genuinely
+# cannot function and reporting it stale is the true answer.
+HB=/tmp/.hb-${0##*/}
+beat() { read -r _hb _ < /proc/uptime 2>/dev/null; printf '%s\n' "${_hb%.*}" > "$HB" 2>/dev/null; return 0; }
+
 # The config is PARSED, not sourced. It carries a value written by the web UI,
 # and `.` would run it as a shell script every minute as root. conf_load reads
 # it as data; see the note on that function. There is no fallback to `.` here
@@ -62,9 +74,9 @@ else
     exit 0
 fi
 
-conf_load "$CONF" || exit 0
-[ "$NOTIFY_ENABLED" = "1" ] || exit 0
-[ -n "$NOTIFY_URL" ] || exit 0
+conf_load "$CONF" || { beat; exit 0; }
+[ "$NOTIFY_ENABLED" = "1" ] || { beat; exit 0; }
+[ -n "$NOTIFY_URL" ] || { beat; exit 0; }
 
 # NOTE: every ${NOTIFY_*:-default} below MUST stay after the source above.
 # They were written before it and silently used their defaults forever - the
@@ -404,4 +416,5 @@ fi
     mv "$STATE.tmp" "$STATE" 2>/dev/null
 
 flush_queue
+beat
 exit 0

@@ -94,14 +94,16 @@ cp $S/usr/share/beryl/cgi-lib.sh /usr/share/beryl/
 
 # Helper daemons and the nftables generator.
 cp $S/usr/sbin/dashmon $S/usr/sbin/apwatch $S/usr/sbin/vpnwatch $S/usr/sbin/beryl-vpndns \
-   $S/usr/sbin/beryl-pbrtbl $S/usr/sbin/pingmon /usr/sbin/
+   $S/usr/sbin/beryl-pbrtbl $S/usr/sbin/pingmon \
+   $S/usr/sbin/notifymon $S/usr/sbin/wifiwatch /usr/sbin/
 
 # Hotplug automation and system tunables.
 mkdir -p /etc/hotplug.d/iface /etc/hotplug.d/net /etc/hotplug.d/usb /etc/sysctl.d
 cp $S/etc/hotplug.d/iface/* /etc/hotplug.d/iface/
 cp $S/etc/hotplug.d/net/* /etc/hotplug.d/net/
 cp $S/etc/hotplug.d/usb/40-usbmuxd /etc/hotplug.d/usb/
-cp $S/etc/init.d/cpugovernor $S/etc/init.d/pingmon $S/etc/init.d/beryl-vpndns /etc/init.d/
+cp $S/etc/init.d/cpugovernor $S/etc/init.d/pingmon $S/etc/init.d/beryl-vpndns \
+   $S/etc/init.d/wifiwatch /etc/init.d/
 cp $S/etc/sysctl.d/99-local.conf /etc/sysctl.d/
 
 # cp does not carry the exec bit reliably across filesystems; CGI that is not
@@ -138,7 +140,7 @@ fi
 # cron. dashmon feeds the Overview history panels; the two watchdogs are
 # optional but harmless. Added only if absent, so re-running does not duplicate.
 touch /etc/crontabs/root
-for job in /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch; do
+for job in /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/notifymon; do
     grep -qF "$job" /etc/crontabs/root || echo "* * * * * $job" >> /etc/crontabs/root
 done
 /etc/init.d/cron enable >/dev/null 2>&1 || true

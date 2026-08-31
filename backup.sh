@@ -10,10 +10,23 @@
 #     beryl7-<host>-<date>.info     model, version, and what was captured
 #
 # WHY sysupgrade -b RATHER THAN A HAND-PICKED FILE LIST: it already honours
-# /etc/sysupgrade.conf, and install.sh adds every console path to that file. So
-# one tarball holds both the router's configuration (all of /etc/config: your
-# networks, SSIDs, firewall, pbr policies, static leases) and the console
-# itself, and it stays correct as the console grows without editing this script.
+# /etc/sysupgrade.conf, and install.sh's preserve loop adds every console path to
+# that file. So one tarball holds both the router's configuration (all of
+# /etc/config: your networks, SSIDs, firewall, pbr policies, static leases) and
+# the console itself.
+#
+# READ THIS BEFORE TRUSTING THAT SENTENCE. "install.sh adds every console path"
+# is a claim about a list a human maintains, and on 2026-08-31 it was false:
+# notifymon had been in the preserve loop for a day but was absent from
+# /etc/sysupgrade.conf, because install.sh had ABORTED before reaching that loop
+# on every run since the program existed. The backup was silently missing a file
+# and said nothing - THE PRESERVE LIST IS THE BACKUP COVERAGE, so a gap there is
+# a gap here, and this script cannot detect one. If you add a console program,
+# add it to install.sh's preserve loop AND confirm it landed:
+#
+#     grep -qxF /usr/sbin/<prog> /etc/sysupgrade.conf && echo covered
+#
+# install.sh's Verifying section now performs that reconciliation itself.
 #
 # ############################################################################
 # # THE BUNDLE CONTAINS SECRETS: WireGuard private keys, Wi-Fi passphrases,   #
