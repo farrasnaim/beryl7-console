@@ -79,7 +79,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=62646815"></script>
+<script src="/os.js?v=ff416e4d"></script>
 <script>
 (function () {
 'use strict';
@@ -282,10 +282,44 @@ function renderAlerts(d) {
 }
 
 /* ----------------------------------------------------------------- scan -- */
+/* Every SSID this router broadcasts, so none of them can be tapped in the scan
+   list. This was built from d.iot_ssid alone — ONE name, and not even a chosen
+   one: the API returned whichever non-primary AP uci listed first. With five APs
+   that greyed out one and left four of the router's own networks looking like
+   any stranger's, joinable, which would join the router to itself. */
 function ownSsids(d) {
     var s = {};
-    if (d.iot_ssid && d.iot_ssid.name) s[d.iot_ssid.name] = 1;
+    (d.own_ssids || []).forEach(function (o) { if (o && o.name) s[o.name] = 1; });
+    /* Fallback for the old single-name field, which /legacy still reads. Only
+       consulted when own_ssids is absent entirely: a page left open across an
+       upgrade should grey out what it can rather than nothing. */
+    if (!d.own_ssids && d.iot_ssid && d.iot_ssid.name) s[d.iot_ssid.name] = 1;
     return s;
+}
+
+/* Which of your own networks joining an uplink actually switches off.
+   /etc/hotplug.d/iface/99-repeater-iot disables every AP that is not on the
+   primary network the moment the uplink comes up, and re-enables them when it
+   goes away — those SSIDs name a home network and there is no reason to
+   broadcast that in a hotel lobby. The join dialog used to say your own Wi-Fi
+   kept running "unchanged", which was written when there was one secondary SSID
+   and is now wrong for three of the five APs on this router.
+
+   By NAME, not by section, and deduplicated: one network broadcast on both
+   radios is two sections but one thing the owner recognises, and listing it
+   twice reads like a bug in the sentence that is trying to reassure them. */
+function travelOff(d) {
+    var seen = {}, names = [];
+    (d.own_ssids || []).forEach(function (o) {
+        if (!o || !o.travel_off || !o.name || seen[o.name]) return;
+        seen[o.name] = 1; names.push(o.name);
+    });
+    return names;
+}
+function quotedList(names) {
+    var q = names.map(function (s) { return '“' + s + '”'; });
+    if (q.length < 2) return q[0] || '';
+    return q.slice(0, -1).join(', ') + ' and ' + q[q.length - 1];
 }
 function renderScan(d) {
     var box = $('#scan'); clear(box);
@@ -390,8 +424,19 @@ function join(n, band) {
        friction at the exact moment it is hardest to answer — a phone keyboard,
        in a hotel, with no other way online. */
     var saved = !open && isKnown(n.ssid);
+    /* Say what actually happens, by name. Someone joining a hotel uplink is
+       about to lose whichever of their networks the hook takes down, and finding
+       that out afterwards — from a phone, in a lobby — is the worst place to
+       learn it. Named rather than counted, because "two other networks" does not
+       tell you whether the one your work laptop is on is one of them. */
+    var off = travelOff(last || {});
     var body = 'The router will join this network on ' + band + ' GHz and use it for internet access. ' +
-        'Your own Wi-Fi keeps running unchanged — devices stay connected to it.' +
+        (off.length
+            ? 'Your main Wi-Fi keeps running and devices stay connected to it. ' +
+              quotedList(off) + (off.length > 1
+                  ? ' switch off while the uplink is joined, and come back when you disconnect.'
+                  : ' switches off while the uplink is joined, and comes back when you disconnect.')
+            : 'Your own Wi-Fi keeps running unchanged — devices stay connected to it.') +
         (open ? ' This network is unencrypted; anyone nearby can see traffic that is not already secured.' : '') +
         (saved ? ' You have connected to this one before, so the saved password is used — no need to type it ' +
                  'again. If it has changed, forget the network first and rejoin.' : '');

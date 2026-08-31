@@ -91,11 +91,22 @@ uci commit wireless
 # inside the loop above would restart a shared radio once per SSID on it, and
 # the second reload would land while the first was still bringing interfaces
 # up - the mid-flight sampling that turned into the 2026-08-10 outage.
+# tell apwatch this AP gap is ours, not a fault (see cgi-lib wifi_reloading)
+#
+# Stamped once, ABOVE the branch, because both branches reload. It used to sit
+# inside the scoped branch only, so the fallback — the broadest reload in the
+# file — was the one running unannounced.
+printf '%s\n' "$(cut -d. -f1 /proc/uptime)" > /tmp/.wifi-reloading 2>/dev/null
 if [ -n "$(printf '%s' "$IOT_RADIOS" | tr -d ' ')" ]; then
-    # tell apwatch this AP gap is ours, not a fault (see cgi-lib wifi_reloading)
-    printf '%s\n' "$(cut -d. -f1 /proc/uptime)" > /tmp/.wifi-reloading 2>/dev/null
     ( sleep 1; for _r in $IOT_RADIOS; do [ -n "$_r" ] && wifi reload "$_r"; done ) >/dev/null 2>&1 &
 else
+    # Unscoped, and deliberately kept that way. Reaching here means not one
+    # changed section names a radio, which is a wireless config netifd could not
+    # have brought up in the first place — so there is no narrower target to
+    # aim at. Doing nothing instead is worse than the broad reload: the disabled
+    # flags are already committed, and skipping the reload would leave a home
+    # SSID broadcasting in a hotel lobby, which is the whole reason this hook
+    # exists. Same fallback rule as reload_uplink_radio and 33-uplink-width.
     ( sleep 1; wifi reload ) >/dev/null 2>&1 &
 fi
 

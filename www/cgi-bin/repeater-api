@@ -131,8 +131,18 @@ known_json() {     # ssids only — the keys never leave the router
 #
 # Falls back to reloading everything when the radio cannot be determined, which
 # is the old behaviour and still correct, just broader than necessary.
+#
+# The apwatch stand-down stamp is written HERE rather than at each call site,
+# and that placement is the point: this file had five reload sites and stamped
+# at none of them. Two of them (`del`, `down`) even `rm -f` the .repeater-trying
+# marker immediately before reloading, so the one guard apwatch had for this
+# path was being removed a line before the gap it existed to explain — apwatch
+# could sample the teardown, call the APs missing and stack a recovery on top.
+# One stamp inside the only function that reloads cannot drift from the call
+# sites the way five copies would.
 reload_uplink_radio() {
     _r="${1:-$(uci -q get wireless.uplink.device 2>/dev/null)}"
+    wifi_reloading
     if [ -n "$_r" ]; then wifi reload "$_r"; else wifi reload; fi
 }
 
@@ -638,9 +648,49 @@ LASTERR=""
 [ -f "$FAILMARK" ] && LASTERR=$(cat "$FAILMARK" 2>/dev/null)
 printf '"connecting":%s,"connect_timeout":%s,"last_error":"%s",' \
     "$CONNECTING" "$CONNECT_TIMEOUT" "$(esc "$LASTERR")"
-# The secondary SSID, if this router has one: the first AP that is not on the
-# primary network. Auto-managed with the uplink — see the hotplug script at
-# /etc/hotplug.d/iface/99-repeater-iot. Emits null where there is none.
+# EVERY AP this router broadcasts. The scan page greys its own networks out so
+# they cannot be tapped, and that list is only as complete as this one.
+#
+# This block used to emit `iot_ssid` alone: the FIRST wifi-iface not on the
+# primary network. That was written when there was exactly one, and it was never
+# generalised with the rest of the console. By 2026-08-31 it described one AP out
+# of five — the two primary-network SSIDs were not in it at all, and of the three
+# non-primary ones it returned whichever uci happened to list first. The page
+# built its whole exclusion set from that single name, so four of this router's
+# own networks were offered for joining like any stranger's.
+#
+# `travel_off` mirrors 99-repeater-iot's rule exactly: every AP on a network
+# other than the primary one goes down while an uplink is joined. The page needs
+# it to say WHICH networks travelling switches off instead of naming one. If
+# that rule ever changes it must change in both files, or the page starts
+# telling the owner something that is not true.
+PRIMARY_NET=lan
+printf '"own_ssids":['
+_own_n=0
+for _s in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+    _m=$(uci -q get wireless.$_s.mode 2>/dev/null)
+    [ -z "$_m" ] || [ "$_m" = "ap" ] || continue
+    _ss=$(uci -q get wireless.$_s.ssid 2>/dev/null)
+    # No name, nothing to match a scan result against — skip rather than emit an
+    # empty string, which would grey out every hidden network in the list.
+    [ -n "$_ss" ] || continue
+    _n=$(uci -q get wireless.$_s.network 2>/dev/null)
+    _d=$(uci -q get wireless.$_s.disabled 2>/dev/null); [ -n "$_d" ] || _d=0
+    printf '%s{"name":"%s","section":"%s","network":"%s","radio":"%s","enabled":%s,"travel_off":%s}' \
+        "$( [ "$_own_n" -gt 0 ] && printf ',' )" \
+        "$(esc "$_ss")" "$(esc "$_s")" "$(esc "$_n")" \
+        "$(esc "$(uci -q get wireless.$_s.device 2>/dev/null)")" \
+        "$( [ "$_d" = "1" ] && echo false || echo true )" \
+        "$( [ -n "$_n" ] && [ "$_n" != "$PRIMARY_NET" ] && echo true || echo false )"
+    _own_n=$((_own_n+1))
+done
+printf '],'
+
+# The first non-primary SSID, still emitted under its old name. Not redundant
+# with own_ssids above: /www/legacy/repeater/ reads exactly this shape and is
+# not being changed, so dropping the field would blank a row on that page.
+# Auto-managed with the uplink — see /etc/hotplug.d/iface/99-repeater-iot.
+# Emits null where there is none.
 IOTSEC=""
 for _s in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
     _m=$(uci -q get wireless.$_s.mode 2>/dev/null)

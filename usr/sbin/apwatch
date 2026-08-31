@@ -8,12 +8,30 @@
 # closes that hole by noticing and recovering on its own.
 #
 # ESCALATION, gentlest first, stopping as soon as the AP is back:
-#   strike 1  ->  `wifi up`        (re-apply wireless config)
-#   strike 2+ ->  `wifi reload`    (fuller restart of the wireless stack)
+#   strike 1  ->  nothing          (look again next tick before believing it)
+#   strike 2  ->  `wifi up`        (re-apply wireless config)
+#   strike 3+ ->  `wifi reload`    (fuller restart of the wireless stack)
 #
 # It stops there. It used to reboot on strike 3; that was removed 2026-08-11
 # after an audit found no case where it had ever been needed, while it remained
 # the most destructive automation on the box.
+#
+# STRIKE 1 DOES NOTHING ON PURPOSE, and that is a change from the original.
+# Every recovery here is a radio restart, which costs every client on that radio
+# about eight seconds — so the cost of acting on a false reading is far higher
+# than the cost of waiting one more minute for a real one. And false readings
+# are not hypothetical: this samples a live wireless stack that four other
+# programs can be reconfiguring, and a sample taken mid-flight looks exactly
+# like a fault. The healthy branch below clears the strike file, so a strike
+# count IS a run of consecutive bad samples; a lone bad one now costs nothing.
+#
+# RECOVERY IS SCOPED TO THE RADIO(S) THE MISSING SECTIONS LIVE ON, for the same
+# reason settings-api, dashboard-api, 99-repeater-iot and 33-uplink-width all
+# scope theirs. Unscoped, this was the last one left. Measured 2026-08-31: one
+# missing AP on radio0 at 13:16 ran a bare `wifi up`, which tore down BOTH
+# radio0 and radio1 ("Tearing down phy0" twice, one per radio) and produced 11
+# AP-STA-DISCONNECTED events across three APs — ten of them for stations that
+# had nothing wrong with them. Scoped, that is at most the radio in question.
 #
 # THIS IS NOT THE ONLY WRITER FOR WIRELESS, and assuming otherwise is unsafe.
 # As of 2026-08-11 five paths can reload the radios: this script (on a timer),
@@ -23,11 +41,16 @@
 # That matters because of how the 2026-08-10 outage escalated: an `ifup`
 # elsewhere reconfigured the wireless stack, this check sampled it mid-flight,
 # called the APs missing, and stacked a `wifi up` on top — tearing down phy0
-# and dropping every client. The `.repeater-trying` guard below covers only
-# the repeater-api path; the hotplug and tethering paths do not set it, so a
-# collision remains possible. Known and accepted, not solved — see F2 in the
-# 2026-08-11 sign-off. Do not "fix" it by adding another guard or lock without
-# a deliberate decision: that is how the last one got built.
+# and dropping every client. As of 2026-08-31 every one of those paths leaves
+# the `/tmp/.wifi-reloading` stamp read below before it reloads — repeater-api
+# was the last holdout and now stamps inside reload_uplink_radio, and the
+# hotplug handler stamps on both of its branches. So the collision F2 recorded
+# as "known and accepted" is now covered by the marker plus the confirming
+# second look above, rather than by luck.
+#
+# That is the whole defence and it is enough. Do not add another guard, lock,
+# debounce, watchdog, timer, reaper or marker file: that is how the last one
+# got built, and every one of them is a thing that can wedge.
 
 STATE=/tmp/.apwatch.strikes
 LOG="logger -t apwatch"
@@ -79,7 +102,13 @@ if [ -r /tmp/.wifi-reloading ]; then
 fi
 
 # Which AP sections are *supposed* to be running right now?
-want=0; have=0; missing=""
+#
+# `missing_radios` collects the radio each missing section is configured on, so
+# recovery can restart just those. Deduplicated, because three of the five APs
+# on this box share radio0 and reloading it once per section would restart it
+# while the previous restart was still bringing interfaces up — the mid-flight
+# state this script mistakes for a fault, caused by this script.
+want=0; have=0; missing=""; missing_radios=""
 for sec in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
     [ "$(uci -q get wireless.$sec.mode)" = "ap" ] || continue
     [ "$(uci -q get wireless.$sec.disabled)" = "1" ] && continue
@@ -99,6 +128,14 @@ for sec in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/
             have=$((have+1))
         else
             missing="$missing $sec"
+            # Read the radio from uci, not from ubus: the section is missing
+            # from the runtime precisely because it is not there, so the
+            # runtime is the one place that cannot say where it belongs.
+            rad=$(uci -q get wireless.$sec.device)
+            [ -n "$rad" ] && case " $missing_radios " in
+                *" $rad "*) ;;
+                *) missing_radios="$missing_radios $rad" ;;
+            esac
         fi
     fi
 done
@@ -117,9 +154,28 @@ strikes=$((strikes+1))
 echo "$strikes" > "$STATE"
 $LOG "AP(s) missing:$missing ($have/$want up) — strike $strikes"
 
+# Run one wireless command against each radio that is actually short an AP.
+#
+# Falls back to the unscoped form only when NO missing section named a radio —
+# a config broken in a way netifd could not have brought up anyway. That is the
+# same fallback repeater-api's reload_uplink_radio and 33-uplink-width use, and
+# it is the old behaviour: broader than necessary, never narrower than correct.
+scoped_wifi() {   # $1 = up | reload
+    if [ -n "$missing_radios" ]; then
+        for _r in $missing_radios; do
+            $LOG "recovery: wifi $1 $_r"
+            wifi "$1" "$_r" >/dev/null 2>&1
+        done
+    else
+        $LOG "recovery: wifi $1 (no radio resolved — all radios)"
+        wifi "$1" >/dev/null 2>&1
+    fi
+}
+
 case "$strikes" in
-    1) $LOG "recovery: wifi up";     wifi up     >/dev/null 2>&1 ;;
-    *) $LOG "recovery: wifi reload"; wifi reload >/dev/null 2>&1 ;;
+    1) $LOG "first missing sample — confirming next tick before acting" ;;
+    2) scoped_wifi up ;;
+    *) scoped_wifi reload ;;
 esac
 beat
 exit 0
