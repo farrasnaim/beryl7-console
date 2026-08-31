@@ -759,7 +759,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '35efa8f97f';
+var CONSOLE_VERSION = '8bfaa45eda';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1445,7 +1445,11 @@ function topology(m, compact) {
        shrunk in the middle with empty bands above and below it - the gap that
        showed up under the last lane. `auto` lets the height follow the aspect
        ratio instead, so the drawing always fills the space it is given. */
-    var W = 980, laneH = 40;
+    /* 34, not 40. The lane pitch set the whole drawing's height, and at four
+       lanes it was generous; at five it made the hero taller than the client
+       list it sits above. Boxes are 30 tall, so 34 keeps a 4px gutter between
+       them - tight, still legibly separate. */
+    var W = 980, laneH = 34;
     var laneN = (m.lanes || []).length;
     var half = laneN > 1 ? (laneN - 1) * (laneH / 2) + 21 : 45;
     var midY = Math.max(m.vpn ? 92 : 84, half);
@@ -1458,6 +1462,12 @@ function topology(m, compact) {
                         preserveAspectRatio: 'xMinYMid meet' });
     s.style.minWidth = '660px';
     s.style.height = 'auto';
+    /* NEVER LARGER THAN IT WAS DRAWN. The width is 100% of a container that is
+       wider than this on any desktop, and the height follows the aspect ratio -
+       so on a 1270px window the whole drawing was being magnified by a third,
+       and every pixel of that magnification pushed the client list down. Capped
+       at the viewBox's own width it renders at its design size and stops. */
+    s.style.maxWidth = W + 'px';
 
     function node(x, y, w, hh, cls) {
         s.appendChild(sv('rect', { 'class': 'nodebox ' + (cls || ''), x: x, y: y,
