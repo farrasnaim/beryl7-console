@@ -809,14 +809,43 @@ if [ "$ACTION" = "setlan" ]; then
         # independently of anything written here.
         ( sleep 2; /etc/init.d/network reload; sleep 2; /etc/init.d/uhttpd reload; /etc/init.d/dnsmasq restart
           if [ "$AGH_MOVED" = 1 ]; then
+              # THE PROBE MUST NOT NEED THE INTERNET.
+              #
+              # An answer on the port is still the test, not the process being
+              # alive: it stayed alive through all three failed starts, so a
+              # `pgrep` or a procd status would have called that healthy.
+              #
+              # But the probe used to be `openwrt.org`, which is a RECURSIVE
+              # lookup. With the uplink down — a travel router in a hotel whose
+              # WAN has not come up, exactly when someone is moving the LAN — a
+              # perfectly healthy AdGuard answers SERVFAIL, no `Name:` line
+              # appears, three 20s waits expire, and the ladder's last rung
+              # rebinds the admin UI to 127.0.0.1 and logs that all DNS is down.
+              # That turns "the internet is down" into "the panel now needs an
+              # SSH tunnel", which is the worst possible outcome to hand someone
+              # who is already offline.
+              #
+              # `localhost` is answered by AdGuard itself out of the system
+              # hosts file (hostsfile_enabled), never forwarded: its query log
+              # entry carries a DNSRewriteResult and NO Upstream field, where an
+              # external name records Upstream 127.0.0.1:5053. So it proves the
+              # listener parsed a query and built a response, with no uplink in
+              # the path. It cannot be a .invalid name instead — those are not
+              # AdGuard's to answer, and dnsmasq owns them per RFC 6761 anyway.
+              #
+              # The external name is kept as ONE last-chance probe after the
+              # loop, so an install that has the hosts file source switched off
+              # is still judged on a real answer rather than on our assumption.
+              # It runs once, not twenty times, so a wedged listener cannot
+              # multiply its timeout by the loop count.
+              agh_probe() { nslookup "$1" 127.0.0.1:5300 2>&1 | grep -qE '^Name:'; }
               agh_alive() {
                   _n=0
                   while [ "$_n" -lt 20 ]; do
-                      # An answer on the port is the test, not the process being
-                      # alive: it stayed alive through all three failed starts.
-                      nslookup openwrt.org 127.0.0.1:5300 2>&1 | grep -qE '^Name:' && return 0
+                      agh_probe localhost && return 0
                       _n=$((_n + 1)); sleep 1
                   done
+                  agh_probe openwrt.org && return 0
                   return 1
               }
               /etc/init.d/adguardhome restart
@@ -1077,6 +1106,93 @@ if [ "$ACTION" = "setnotify" ]; then
         # parse in conf_load is what makes accepting & safe, not this list.
         _urlbad=$(printf '%s' "$NURL" | tr -d 'A-Za-z0-9:/?#[]@!&*+,;=._~%-')
         [ -n "$_urlbad" ] && fail "that address contains characters a URL cannot hold"
+
+        # THE ADDRESS IS A BEARER SECRET, SO IT HAS TO BE UNGUESSABLE.
+        #
+        # On a public push service the topic IS the authentication: whoever
+        # knows it reads this router's alerts. The join notifier now sends
+        # network names and the names or MAC addresses of the devices joining
+        # them, so a guessable topic is a live feed of who is in the house. A
+        # topic built out of strings anyone can read in the public repo — the
+        # product name, the owner's handle — is guessable in a handful of
+        # attempts, and the service will not rate-limit a subscriber.
+        #
+        # THE BAR. The URL is split into components after the scheme and host
+        # (the host is public by definition and can never be the secret), and
+        # at least ONE component must look like something that was generated
+        # rather than typed:
+        #
+        #   - 12 characters or more. Twelve random base62 characters is ~71
+        #     bits; nothing shorter is worth calling a secret.
+        #   - contains BOTH an upper and a lower case letter. This is the rule
+        #     that does the real work. Every service that mints these tokens —
+        #     and the push service's own "generate" button — emits base62 or
+        #     base64url, where a 12-character token misses one of the two cases
+        #     about 0.7% of the time. A slug a person typed is almost always
+        #     all lower case. Digits are deliberately NOT required: the miss
+        #     rate for those is ~12% at this length, and human slugs contain
+        #     digits anyway, so the signal is weak and the false refusals real.
+        #   - at least 8 DISTINCT characters, so length cannot be reached by
+        #     repeating a short pattern. Twelve random characters give about
+        #     eleven distinct ones; this only bites padding.
+        #   - does not contain this router's own name. Derived at run time from
+        #     the hostname, never hardcoded: the exact failure this is here to
+        #     stop was a topic prefixed with a name that is written down in
+        #     public. Only applied when the hostname is 4+ characters, so a
+        #     short one cannot collide with a real token by accident.
+        #   - is not just words wearing a capital letter. Split again on the
+        #     separators people put in slugs (- _ .), a component every one of
+        #     whose chunks is a word — one leading letter, lower case after it,
+        #     digits only at the end — is refused. That is what stops the
+        #     obvious second attempt after the case rule bites: capitalising
+        #     the same guessable words. A generated token never has this shape,
+        #     because its capitals land in the middle.
+        #
+        # What this still cannot see is a run-together CamelCase phrase with no
+        # separator: it has interior capitals and reads as random to every test
+        # above. Refusing that needs a dictionary, which is not on this router.
+        #
+        # Checking COMPONENTS, not the whole string, is what keeps structured
+        # webhooks working: the secret sits in the last path segment for
+        # Discord and Slack, in a query VALUE for Gotify, and in the middle of
+        # the path for Telegram, whose last segment is the literal method name.
+        # Requiring one strong component accepts all four and still refuses a
+        # URL whose every part is a word.
+        #
+        # Fed on stdin, two lines, because `awk -v` processes backslash escapes
+        # in the value on busybox and this value is attacker-shaped. If the
+        # hostname line ever arrived malformed the URL would not be on line 2
+        # and nothing is printed, which fails closed.
+        _nhn=$(uci -q get system.@system[0].hostname 2>/dev/null | tr -d '\n\r')
+        _nstrong=$(printf '%s\n%s\n' "$_nhn" "$NURL" | awk '
+            NR == 1 { hn = tolower($0); next }
+            NR == 2 {
+                u = $0
+                sub("^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*", "", u)
+                n = split(u, seg, "[/?&=#:]")
+                for (i = 1; i <= n; i++) {
+                    s = seg[i]
+                    if (length(s) < 12) continue
+                    if (s !~ /[a-z]/ || s !~ /[A-Z]/) continue
+                    d = 0; delete seen
+                    for (j = 1; j <= length(s); j++) {
+                        c = substr(s, j, 1)
+                        if (!(c in seen)) { seen[c] = 1; d++ }
+                    }
+                    if (d < 8) continue
+                    if (length(hn) >= 4 && index(tolower(s), hn) > 0) continue
+                    wordy = 1
+                    m = split(s, ch, "[-_.]")
+                    for (k = 1; k <= m; k++) {
+                        if (ch[k] == "") continue
+                        if (ch[k] !~ /^[A-Za-z][a-z]*[0-9]*$/) { wordy = 0; break }
+                    }
+                    if (wordy) continue
+                    print "1"; exit
+                }
+                print "0"
+            }')
+        [ "$_nstrong" = "1" ] || fail "that address has no unguessable part in it. Alerts name your networks and the devices joining them, and on a public push service the address is the only thing keeping strangers out — so it needs a token of 12 or more characters mixing upper and lower case, not a word. Use the service's own generate button. To switch notifications off, clear this field instead."
     fi
     mkdir -p /etc/dashboard
     # SAVE OWNS TWO KEYS AND MUST LEAVE THE REST ALONE.
@@ -1093,7 +1209,35 @@ if [ "$ACTION" = "setnotify" ]; then
     # rather than carried forward. That is deliberate: it means saving from this
     # page also cleans out any junk line an older, unvalidated write may have
     # left behind, and the file converges on something conf_load can read whole.
-    {
+    # THE FILE IS BUILT IN MEMORY FIRST, AND THE WRITE IS CHECKED BY COUNTING
+    # BYTES — not by the exit status of the redirection.
+    #
+    # This used to be one `{ ...; if ...; fi; } > tmp || fail`. A group command
+    # exits with the status of its LAST command, and the last thing in that
+    # group was a shell test, not a write. Replayed on this router against
+    # /dev/full: with the config's final line being a preserved key the group
+    # did return 1, but with a trailing comment, a trailing blank line, a
+    # trailing NOTIFY_URL= line, a trailing junk line, or no config file at all
+    # it returned 0. The live file ends in NOTIFY_URL=, so the check could not
+    # fire here at all — and the `mv` under it was unchecked as well, so a
+    # truncated temp file was installed over a good config and the endpoint
+    # still answered {"ok":true}. That loses the URL and all 51 overrides.
+    #
+    # Exit status alone cannot be trusted even when the last command IS a write:
+    # stdout to a file is block-buffered, so a printf can return 0 with the data
+    # still in the buffer and the ENOSPC surfacing only at the flush, after the
+    # status has been taken. Measured on a 64k tmpfs deliberately filled: a
+    # 15889-byte payload landed as 4096 bytes.
+    #
+    # So: capture, write once, then verify the file on disk is exactly as long
+    # as what we meant to write. That is deterministic whatever the buffering
+    # does. `${#var}` in ash counts BYTES, not characters (checked: a 5-char
+    # UTF-8 string measures 6), so this stays correct for non-ASCII captions.
+    #
+    # The trailing X is there because command substitution strips every trailing
+    # newline; without it a config that ends in blank lines would silently lose
+    # them and the byte count would disagree with the file for no real reason.
+    _newconf=$( {
         printf 'NOTIFY_ENABLED=%s\nNOTIFY_URL=%s\n' "$NENABLED" "$NURL"
         if [ -r "$NOTIFYCONF" ]; then
             while IFS= read -r _ln || [ -n "$_ln" ]; do
@@ -1107,9 +1251,21 @@ if [ "$ACTION" = "setnotify" ]; then
                 printf '%s\n' "$_ln"
             done < "$NOTIFYCONF"
         fi
-    } > "$NOTIFYCONF.tmp" 2>/dev/null \
-        || fail "could not write /etc/dashboard/notify.conf — the setting is unchanged. That is a filesystem refusal; check overlay space over SSH"
-    mv "$NOTIFYCONF.tmp" "$NOTIFYCONF"; chmod 600 "$NOTIFYCONF"
+        printf 'X'
+    } )
+    _newconf=${_newconf%X}
+    _wfail="could not write /etc/dashboard/notify.conf — the setting is unchanged. That is a filesystem refusal; check overlay space over SSH"
+    # 0600 before the rename, not after: the temp file is created under the
+    # CGI's umask, and chmod-after leaves a window where the URL is world
+    # readable under its final name.
+    rm -f "$NOTIFYCONF.tmp"
+    printf '%s' "$_newconf" > "$NOTIFYCONF.tmp" 2>/dev/null || { rm -f "$NOTIFYCONF.tmp"; fail "$_wfail"; }
+    chmod 600 "$NOTIFYCONF.tmp" 2>/dev/null
+    _wrote=$(wc -c < "$NOTIFYCONF.tmp" 2>/dev/null); _wrote=${_wrote##* }
+    [ "$_wrote" = "${#_newconf}" ] || { rm -f "$NOTIFYCONF.tmp"; fail "$_wfail"; }
+    # The rename is the only step that can destroy the old file, so it is the
+    # one step that must not be assumed to have worked either.
+    mv "$NOTIFYCONF.tmp" "$NOTIFYCONF" 2>/dev/null || { rm -f "$NOTIFYCONF.tmp"; fail "$_wfail"; }
     # Re-baseline so switching on does not replay whatever happened while off.
     rm -f /tmp/.notifystate
     logger -t settings "push notifications set to $NENABLED via web UI"
