@@ -102,12 +102,50 @@ M_WIFI_LEAVE_B=${MSG_WIFI_LEAVE_B:-"%s disconnected from %s GHz."}
 M_WIFI_BACK_T=${MSG_WIFI_BACK_T:-"device is back"}
 M_WIFI_BACK_B=${MSG_WIFI_BACK_B:-"%s reconnected after %s away."}
 
+# THE QUEUE IS NOTIFYMON'S, DELIBERATELY. A second retry mechanism here would
+# be a second thing to get wrong, and the two would race for the same topic.
+# notifymon drains this file every minute from cron, oldest first, stopping at
+# the first failure so ordering survives - so appending to it is the whole of
+# what this needs to do.
+#
+# It matters most on exactly the paths this router exists for: a captive portal,
+# a dead uplink, a DNS outage. wget failed on every one of those and the alert
+# was discarded with nothing recording that it had ever existed, which is the
+# worst possible behaviour for a device whose job is telling you what happened
+# while you were not looking.
+QUEUE=/tmp/.notifyq
+QMAX=25
+QDROP=/tmp/.notifyqdrop
+
 send() {   # $1 title  $2 body  $3 priority  $4 tags
     wget -q -T 8 -O /dev/null \
         --header="Title: $HOSTN: $1" \
         --header="Priority: ${3:-default}" \
         --header="Tags: ${4:-iphone}" \
         --post-data="$2" "$NOTIFY_URL" 2>/dev/null
+}
+
+# Send, and keep it if the send fails. The body carries the time the event
+# actually happened, because a Wi-Fi join delivered an hour late is misleading
+# without it - the same reason notifymon stamps its own queued messages.
+notify() {  # $1 title  $2 body  $3 priority  $4 tags
+    send "$1" "$2" "$3" "$4" && return 0
+    if [ -f "$QUEUE" ] && [ "$(wc -l < "$QUEUE" 2>/dev/null)" -ge "$QMAX" ]; then
+        _d=0; [ -r "$QDROP" ] && read -r _d < "$QDROP" 2>/dev/null
+        case "$_d" in ''|*[!0-9]*) _d=0 ;; esac
+        printf '%s\n' "$((_d + 1))" > "$QDROP" 2>/dev/null
+        logger -t wifiwatch "alert queue full ($QMAX) - dropped: $1"
+        return 0
+    fi
+    # A literal | would split into the wrong fields when notifymon reads this
+    # back. Names come from the class map, which is itself |-separated and so
+    # cannot contain one, but the guard costs nothing and does not depend on
+    # that staying true.
+    printf '%s|%s|%s|%s\n' \
+        "$(printf '%s' "$1" | tr -d '|')" \
+        "$(date '+%H:%M') — $(printf '%s' "$2" | tr -d '|')" \
+        "$3" "$4" >> "$QUEUE" 2>/dev/null
+    logger -t wifiwatch "notification send failed - queued for notifymon to retry"
 }
 
 # Names come from the class map, so the phone and the console agree on what a
@@ -176,7 +214,7 @@ resolve_pending() {
         elif assoc_anywhere "$_pm"; then
             :   # came back inside the window - a roam, and not news
         else
-            send "$M_WIFI_LEAVE_T" "$(printf "$M_WIFI_LEAVE_B" "$(dev_name "$_pm")" "$_pb")" \
+            notify "$M_WIFI_LEAVE_T" "$(printf "$M_WIFI_LEAVE_B" "$(dev_name "$_pm")" "$_pb")" \
                  min iphone
             # Remember that we ANNOUNCED this one. If it reappears shortly the
             # departure was premature in hindsight, and the return is worth
@@ -245,10 +283,10 @@ while :; do
                         if [ -s "$LEFT.k" ]; then mv "$LEFT.k" "$LEFT"; else rm -f "$LEFT.k" "$LEFT"; fi
                     fi
                     if [ -n "$_away" ]; then
-                        send "$M_WIFI_BACK_T" \
+                        notify "$M_WIFI_BACK_T" \
                              "$(printf "$M_WIFI_BACK_B" "$(dev_name "$mac")" "$_away")" low iphone
                     else
-                        send "$M_WIFI_JOIN_T" \
+                        notify "$M_WIFI_JOIN_T" \
                              "$(printf "$M_WIFI_JOIN_B" "$(dev_name "$mac")" "$(ssid_of "$ifc")" "$band")" \
                              low iphone
                     fi

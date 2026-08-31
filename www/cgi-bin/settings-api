@@ -1020,7 +1020,35 @@ if [ "$ACTION" = "setnotify" ]; then
         [ -n "$_urlbad" ] && fail "that address contains characters a URL cannot hold"
     fi
     mkdir -p /etc/dashboard
-    printf 'NOTIFY_ENABLED=%s\nNOTIFY_URL=%s\n' "$NENABLED" "$NURL" > "$NOTIFYCONF.tmp" 2>/dev/null \
+    # SAVE OWNS TWO KEYS AND MUST LEAVE THE REST ALONE.
+    #
+    # This used to write exactly two lines over the file, which erased every
+    # other key in it - and there are 51 documented ones: the message captions
+    # and the alert thresholds that notifymon and wifiwatch read. notifymon's
+    # own header tells the owner those survive "because a console reinstall
+    # replaces this script and never touches that config", which is true of a
+    # reinstall and was false of this button. Someone who had reworded their
+    # alerts in Indonesian lost the lot by toggling notifications off and on.
+    #
+    # Anything that is not a valid assignment and not a comment is DROPPED
+    # rather than carried forward. That is deliberate: it means saving from this
+    # page also cleans out any junk line an older, unvalidated write may have
+    # left behind, and the file converges on something conf_load can read whole.
+    {
+        printf 'NOTIFY_ENABLED=%s\nNOTIFY_URL=%s\n' "$NENABLED" "$NURL"
+        if [ -r "$NOTIFYCONF" ]; then
+            while IFS= read -r _ln || [ -n "$_ln" ]; do
+                case "$_ln" in
+                    ''|'#'*)                       printf '%s\n' "$_ln"; continue ;;
+                    NOTIFY_ENABLED=*|NOTIFY_URL=*) continue ;;
+                esac
+                _lk=${_ln%%=*}
+                [ "$_lk" = "$_ln" ] && continue
+                case "$_lk" in ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;; esac
+                printf '%s\n' "$_ln"
+            done < "$NOTIFYCONF"
+        fi
+    } > "$NOTIFYCONF.tmp" 2>/dev/null \
         || fail "could not write /etc/dashboard/notify.conf — the setting is unchanged. That is a filesystem refusal; check overlay space over SSH"
     mv "$NOTIFYCONF.tmp" "$NOTIFYCONF"; chmod 600 "$NOTIFYCONF"
     # Re-baseline so switching on does not replay whatever happened while off.

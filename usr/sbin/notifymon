@@ -49,6 +49,7 @@ CONF=/etc/dashboard/notify.conf
 STATE=/tmp/.notifystate
 QUEUE=/tmp/.notifyq
 QMAX=25
+QDROP=/tmp/.notifyqdrop
 
 # ---- heartbeat -------------------------------------------------------------
 # The console's Jobs panel calls a cron program healthy when /tmp/.hb-<name> is
@@ -93,7 +94,11 @@ HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-route
 # ---- wording ---------------------------------------------------------------
 # Every line below can be overridden in notify.conf without touching this file,
 # which matters because a console reinstall replaces this script and never
-# touches that config. Set any of these there to reword a message:
+# touches that config. Nor does the Settings page: its notification Save owns
+# NOTIFY_ENABLED and NOTIFY_URL and copies every other key through untouched.
+# It did not always - until 2026-08-31 it wrote two lines over the whole file
+# and silently erased every override in it, while this comment promised the
+# opposite. Set any of these there to reword a message:
 #
 #     MSG_WAN_DOWN_T="internet mati"
 #     MSG_WAN_DOWN_B="Koneksi WAN terputus."
@@ -119,6 +124,13 @@ M_ACCT_DOWN_T=${MSG_ACCT_DOWN_T:-"traffic accounting stopped"}
 M_ACCT_DOWN_B=${MSG_ACCT_DOWN_B:-"Per-device usage is no longer being counted."}
 M_ACCT_UP_T=${MSG_ACCT_UP_T:-"traffic accounting running"}
 M_ACCT_UP_B=${MSG_ACCT_UP_B:-"Per-device usage is being counted again."}
+M_PROBE_DOWN_T=${MSG_PROBE_DOWN_T:-"connection probe stopped"}
+M_PROBE_DOWN_B=${MSG_PROBE_DOWN_B:-"Latency and loss are no longer being measured, so the connection-quality alert cannot fire."}
+M_PROBE_UP_T=${MSG_PROBE_UP_T:-"connection probe running"}
+M_PROBE_UP_B=${MSG_PROBE_UP_B:-"Latency and loss are being measured again."}
+# %s = how many alerts were dropped while the queue was full
+M_QDROP_T=${MSG_QDROP_T:-"some alerts were lost"}
+M_QDROP_B=${MSG_QDROP_B:-"%s alert(s) were dropped while this router could not reach the notification service. Everything since has been delivered."}
 M_DNS_BAD_T=${MSG_DNS_BAD_T:-"encrypted DNS is stalling"}
 M_DNS_BAD_B=${MSG_DNS_BAD_B:-"Two or more upstream lookups timed out in the last half hour. Pages may load slowly; retries usually succeed."}
 M_DNS_OK_T=${MSG_DNS_OK_T:-"encrypted DNS recovered"}
@@ -152,7 +164,18 @@ send() {   # $1 title  $2 body  $3 priority  $4 tags
 }
 
 queue() { # same args; called when send failed
-    [ -f "$QUEUE" ] && [ "$(wc -l < "$QUEUE" 2>/dev/null)" -ge "$QMAX" ] && return 0
+    # A FULL QUEUE USED TO DROP IN SILENCE. The message was gone, nothing
+    # recorded that it had existed, and the owner's only clue was an alert that
+    # never arrived - indistinguishable from nothing having happened. Count the
+    # drops instead; flush_queue reports the total once delivery works again,
+    # which is the moment the owner can actually be told.
+    if [ -f "$QUEUE" ] && [ "$(wc -l < "$QUEUE" 2>/dev/null)" -ge "$QMAX" ]; then
+        _d=0; [ -r "$QDROP" ] && read -r _d < "$QDROP" 2>/dev/null
+        case "$_d" in ''|*[!0-9]*) _d=0 ;; esac
+        printf '%s\n' "$((_d + 1))" > "$QDROP" 2>/dev/null
+        logger -t notifymon "alert queue full ($QMAX) - dropped: $1"
+        return 0
+    fi
     printf '%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" >> "$QUEUE" 2>/dev/null
 }
 
@@ -165,7 +188,15 @@ notify() { # $1 title $2 body $3 priority $4 tags
 # Drain anything stranded by an outage. Stop at the first failure so ordering
 # survives and the retry is not a send storm against a link that is still down.
 flush_queue() {
-    [ -s "$QUEUE" ] || return 0
+    # The drain is CONDITIONAL, the drop report is not. An early `return` here
+    # when the queue is empty would put the report below out of reach in exactly
+    # the case it exists for - drops recorded, queue since emptied - and the
+    # count would sit in /tmp forever with nobody told.
+    [ -s "$QUEUE" ] && drain_queue
+    report_drops
+}
+
+drain_queue() {
     _tmp="$QUEUE.w"; : > "$_tmp"
     _stuck=0
     while IFS='|' read -r _t _b _p _g; do
@@ -178,6 +209,20 @@ flush_queue() {
         fi
     done < "$QUEUE"
     if [ -s "$_tmp" ]; then mv "$_tmp" "$QUEUE"; else rm -f "$_tmp" "$QUEUE"; fi
+}
+
+# Something was lost while the link was down: say so, once, at the first moment
+# saying so can work. Only when nothing is still queued - sending the count over
+# a link that is still failing would just queue the count, or lose it too. The
+# file is cleared only on a CONFIRMED send, so a failure here retries next
+# minute rather than swallowing the number.
+report_drops() {
+    [ -s "$QUEUE" ] && return 0
+    [ -s "$QDROP" ] || return 0
+    _dn=0; read -r _dn < "$QDROP" 2>/dev/null
+    case "$_dn" in ''|*[!0-9]*) _dn=0 ;; esac
+    [ "$_dn" -gt 0 ] || { rm -f "$QDROP"; return 0; }
+    send "$M_QDROP_T" "$(printf "$M_QDROP_B" "$_dn")" low warning && rm -f "$QDROP"
 }
 
 # ---- read the facts, the same ones the console reads -----------------------
@@ -224,14 +269,39 @@ fi
 # Only judged while the probe says "ok". "down" is the WAN alert's business,
 # and "silent" means the chosen target never answered at all (a game server
 # that drops ICMP is a deliberate choice, not a fault).
-now_link=ok; q_rtt=0; q_loss=0
+#
+# THE RING'S AGE IS PART OF THE READING, NOT DECORATION. The first field of line
+# one is the uptime the ring was last written at, and both display endpoints
+# check it - rate-api at 10s, dashboard-api at 90s. This did not: it read the
+# field into a variable and threw it away. So if pingmon stopped, the file stayed
+# on disk holding its last good numbers, this scored them as healthy forever, and
+# the ONE alert whose whole job is "your connection is struggling" could never
+# fire again. A detector that reports health from a file nobody is writing is the
+# exact shape this project keeps having to remove.
+#
+# Stale is UNKNOWN, never ok. Unknown advances neither counter below, so an
+# outstanding bad run cannot be cleared by silence and a new one cannot be
+# started by it either.
+now_link=unknown; now_probe=stopped; q_rtt=0; q_loss=0
 if [ -r /tmp/.pingring ]; then
     read -r _pu _pw _pstate < /tmp/.pingring 2>/dev/null
+    _upnow=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+    _page=-1
+    case "$_pu$_upnow" in ''|*[!0-9]*) ;; *) _page=$((_upnow - _pu)) ;; esac
+    # 90s matches the Overview's window: cron gives this a minute of jitter, so a
+    # tighter bound would call a healthy ring stale on an unlucky tick.
+    if [ "$_page" -ge 0 ] && [ "$_page" -le 90 ]; then now_probe=ok; fi
+fi
+if [ "$now_probe" = ok ]; then
+    now_link=ok
     _l3=$(sed -n '3p' /tmp/.pingring 2>/dev/null)
     q_loss=${_l3%% *}; _rest=${_l3#* }; q_rtt=${_rest%% *}
     case "$q_loss" in ''|*[!0-9]*) q_loss=0 ;; esac
     q_rtt=${q_rtt%%.*}
     case "$q_rtt" in ''|-*|*[!0-9]*) q_rtt=0 ;; esac
+    # pingmon is alive but reports the target unreachable or silent: that is
+    # the WAN alert's business, so quality stays unjudged rather than "ok".
+    [ "$_pstate" = "ok" ] || now_link=unknown
     if [ "$_pstate" = "ok" ] && [ "$q_rtt" -gt 0 ]; then
         if [ "$q_rtt" -ge "$RTT_BAD" ] || [ "$q_loss" -ge "$LOSS_BAD" ]; then
             now_link=bad
@@ -350,12 +420,21 @@ else
             && notify "$M_ACCT_DOWN_T" "$M_ACCT_DOWN_B" default warning \
             || notify "$M_ACCT_UP_T" "$M_ACCT_UP_B" low white_check_mark; }
 
+    # The probe's own death, reported the way accounting's already is. Judged
+    # from the FRESHNESS OF ITS OUTPUT rather than from pgrep: a process can be
+    # alive and writing nothing, which is precisely how this went unnoticed.
+    [ "$now_probe" != "$was_probe" ] && {
+        [ "$now_probe" = stopped ] \
+            && notify "$M_PROBE_DOWN_T" "$M_PROBE_DOWN_B" default warning \
+            || notify "$M_PROBE_UP_T" "$M_PROBE_UP_B" low white_check_mark; }
+
     # Counters rather than a straight comparison: this is the one signal where
     # the interesting state is "has been true for a while", not "changed".
     case "$now_link" in
         bad)       bad_run=$((bad_run + 1)); good_run=0 ;;
         ok)        good_run=$((good_run + 1)); bad_run=0 ;;
         middling)  bad_run=0; good_run=0 ;;
+        unknown)   bad_run=0; good_run=0 ;;   # no measurement is not evidence
     esac
     if [ "$was_link" = "ok" ] && [ "$bad_run" -ge "$NEED" ]; then
         was_link=bad
@@ -410,8 +489,8 @@ else
             || notify "$M_DNS_OK_T" "$M_DNS_OK_B" low white_check_mark; }
 fi
 
-{ printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\nwas_link=%s\nbad_run=%s\ngood_run=%s\nwas_vpause=%s\n' \
-    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" "$was_link" "$bad_run" "$good_run" "$now_vpause"
+{ printf 'was_wan=%s\nwas_wan6=%s\nwas_fw=%s\nwas_acct=%s\nwas_dns=%s\nwas_link=%s\nbad_run=%s\ngood_run=%s\nwas_vpause=%s\nwas_probe=%s\n' \
+    "$now_wan" "$now_wan6" "$now_fw" "$now_acct" "$now_dns" "$was_link" "$bad_run" "$good_run" "$now_vpause" "$now_probe"
   printf 'was_vpn="%s"\nwas_vdev="%s"\n' "$now_vpn" "$now_vdev"; } > "$STATE.tmp" 2>/dev/null &&
     mv "$STATE.tmp" "$STATE" 2>/dev/null
 
