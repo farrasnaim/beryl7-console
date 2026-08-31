@@ -9,10 +9,20 @@
 # Hooked on the netdev appearing rather than at boot, because the list is runtime
 # state and a cold boot is when it is actually empty.
 #
-# Measured, against the obvious assumption: a plain `wifi reload` does NOT clear
-# it. The interfaces are not recreated - their ifindexes are unchanged across a
-# reload - so the BSS is never torn down and the runtime list survives. Only a
-# reboot loses it, which is exactly what this hook covers.
+# WHICH RELOADS CLEAR THE LIST. A plain `wifi reload` does NOT: the interfaces
+# are not recreated, their ifindexes are unchanged, the BSS is never torn down
+# and the runtime list survives. A reload that changes SECURITY settings is a
+# different animal - netifd unregisters and recreates the BSSs, the kernel logs
+# `(unregistering)`, and the list goes with them. That is why this hook must
+# work on a reload and not only on a cold boot.
+#
+# AND WHY IT VERIFIES. rrm_nr_set returns success for a call hostapd accepted
+# and then discarded because the BSS was still coming up. The first version of
+# this script trusted that return value and, worse, logged unconditionally - so
+# on 2026-09-01 the 2.4 GHz list sat empty for eleven minutes while the log said
+# the reports had been set. A client on 2.4 GHz was told nothing about the 5 GHz
+# AP, which is the exact failure this script exists to prevent, reported as a
+# success. Every set is now read back, and the log says which direction landed.
 
 [ "$ACTION" = add ] || exit 0
 case "$INTERFACE" in
@@ -27,8 +37,9 @@ registered() {
 	ubus -S list 2>/dev/null | grep -qx "hostapd.$1"
 }
 
-# Describe $2 to $1. Reads the three fields in one call: asking three times
-# invites the two APs disagreeing mid-read if hostapd is still settling.
+# Describe $2 to $1, and CONFIRM IT IS THERE AFTERWARDS. Reads the three fields
+# in one call: asking three times invites the two APs disagreeing mid-read if
+# hostapd is still settling.
 set_pair() {
 	local target="$1" src="$2" nr bssid ssid elem
 	nr=$(ubus call "hostapd.$src" rrm_nr_get_own 2>/dev/null) || return 1
@@ -37,7 +48,8 @@ set_pair() {
 	elem=$(printf '%s' "$nr" | jsonfilter -e '@.value[2]')
 	[ -n "$bssid" ] && [ -n "$elem" ] || return 1
 	ubus call "hostapd.$target" rrm_nr_set \
-		"{\"list\":[[\"$bssid\",\"$ssid\",\"$elem\"]]}" >/dev/null 2>&1
+		"{\"list\":[[\"$bssid\",\"$ssid\",\"$elem\"]]}" >/dev/null 2>&1 || return 1
+	ubus call "hostapd.$target" rrm_nr_list 2>/dev/null | grep -q "$bssid"
 }
 
 # Both sides must be on ubus before either can be described. Bounded so a band
@@ -50,7 +62,24 @@ while [ $i -lt 15 ]; do
 done
 registered "$AP24" && registered "$AP5" || exit 0
 
-set_pair "$AP24" "$AP5"
-set_pair "$AP5" "$AP24"
+# Being on ubus is not the same as being ready to keep what it is given, so each
+# direction is retried on its own until the read-back confirms it. A direction
+# that has already landed is not set again.
+ok24=0
+ok5=0
+j=0
+while [ $j -lt 10 ]; do
+	[ "$ok24" = 1 ] || { set_pair "$AP24" "$AP5" && ok24=1; }
+	[ "$ok5" = 1 ] || { set_pair "$AP5" "$AP24" && ok5=1; }
+	[ "$ok24" = 1 ] && [ "$ok5" = 1 ] && break
+	sleep 1
+	j=$((j + 1))
+done
 
-logger -t rrm-neighbors "cross-band neighbour reports set (trigger: $INTERFACE)"
+if [ "$ok24" = 1 ] && [ "$ok5" = 1 ]; then
+	logger -t rrm-neighbors \
+		"neighbour reports verified both ways after ${j}s (trigger: $INTERFACE)"
+else
+	logger -t rrm-neighbors \
+		"NEIGHBOUR REPORTS INCOMPLETE after ${j}s (trigger: $INTERFACE): 2.4->5=$ok24 5->2.4=$ok5"
+fi
