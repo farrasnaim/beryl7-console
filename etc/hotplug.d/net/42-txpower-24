@@ -18,13 +18,18 @@
 # when 5 GHz is the better band. Lowering 2.4 narrows that gap:
 #
 #     26 dBm  ->  2.4 GHz louder by 9.6 dB   (regulatory default)
-#     20 dBm  ->  2.4 GHz louder by 3.6 dB   (this setting)
-#     17 dBm  ->  5 GHz louder by 0.6 dB     (where the balance actually flips)
+#     20 dBm  ->  2.4 GHz louder by 3.6 dB   (tried first; changed nothing)
+#     17 dBm  ->  5 GHz louder by 0.6 dB     (this setting - the balance flips here)
 #
 # Every dB also comes off the clients that have no 5 GHz to move to. The weakest
-# station on this radio measured -63 dBm on 2026-09-01, so 20 dBm is the largest
-# cut that leaves it comfortable. Go lower only while watching that client.
-TXPOWER_DBM=20
+# station on this radio measured -63 dBm on 2026-09-01, so at 17 dBm it sits
+# around -72 dBm effective, against an -85 dBm noise floor - still ~13 dB of SNR
+# for a link running at 6 Mbit/s, but the margin is real and worth watching.
+#
+# 20 dBm was tried first on 2026-09-01 and moved nothing: 2.4 GHz was still the
+# louder band by 3.6 dB, so clients kept landing there. Half a cut bought the
+# coverage loss without the behaviour change.
+TXPOWER_DBM=17
 
 [ "$ACTION" = add ] || exit 0
 
