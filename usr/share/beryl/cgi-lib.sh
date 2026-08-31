@@ -125,7 +125,17 @@ fw_table_state() {
 # multicast or broadcast, which mean nothing as a round-trip target or a
 # resolver. A LAN address IS allowed: both callers have legitimate uses for one.
 # On success, IP4_CANON holds the canonical dotted quad and is what callers
-# must STORE - never the raw input. Decision, made deliberately: a leading-zero
+# must STORE - never the raw input. On EVERY failure it is the empty string,
+# which it was not: the canonical form used to be appended to IP4_CANON octet by
+# octet as the loop ran, so an out-of-range reject left the octets it had already
+# accepted standing ("1.2.3.256" left "1.2.3"), and a charset reject returned
+# before the variable was touched at all, leaving the PREVIOUS call's value - or
+# a previous reject's fragment - in place. Every caller gates on the return code,
+# so nothing was reading it; that is luck, not a contract, and the next caller to
+# read IP4_CANON after a check it forgot to test would get a valid-looking
+# address that was never valid. The value is now built in _canon and copied out
+# only on the success path, so no failure route can leave a fragment behind.
+# Decision, made deliberately: a leading-zero
 # octet is read as DECIMAL padding ("192.168.008.001" means .8.1), because the
 # alternative - the kernel and inet_aton reading it as OCTAL - is exactly the
 # surprise this exists to remove. Canonicalising rather than rejecting keeps a
@@ -138,10 +148,13 @@ fw_table_state() {
 # visibly existed. Every octet comparison below is arithmetic on the
 # canonicalised value.
 valid_ip4() {
+    # Cleared FIRST, before any route out of this function exists, so the two
+    # early rejects below cannot return with a stale value still in it.
+    IP4_CANON=""
     case "$1" in
         ''|*[!0-9.]*|*..*|.*|*.) return 1 ;;
     esac
-    _c=0; _first=""; IP4_CANON=""
+    _c=0; _first=""; _canon=""
     _oldifs=$IFS; IFS=.
     for _o in $1; do
         case "$_o" in ''|*[!0-9]*) IFS=$_oldifs; return 1 ;; esac
@@ -153,12 +166,14 @@ valid_ip4() {
         [ "$_o" -gt 255 ] && { IFS=$_oldifs; return 1; }
         _c=$((_c + 1))
         [ "$_c" -eq 1 ] && _first=$_o
-        IP4_CANON="$IP4_CANON${IP4_CANON:+.}$_o"
+        _canon="$_canon${_canon:+.}$_o"
     done
     IFS=$_oldifs
-    [ "$_c" -eq 4 ] || { IP4_CANON=""; return 1; }
-    [ "$_first" -eq 0 ] && { IP4_CANON=""; return 1; }    # "this network"
-    [ "$_first" -ge 224 ] && { IP4_CANON=""; return 1; }  # multicast, 255.x broadcast
+    [ "$_c" -eq 4 ] || return 1
+    [ "$_first" -eq 0 ] && return 1      # "this network"
+    [ "$_first" -ge 224 ] && return 1    # multicast, 255.x broadcast
+    # The ONLY assignment to IP4_CANON that is not the empty string.
+    IP4_CANON=$_canon
     return 0
 }
 
@@ -246,8 +261,36 @@ wifi_reloading() { printf '%s\n' "$(cut -d. -f1 /proc/uptime)" > /tmp/.wifi-relo
 # assignment, which the shell does not re-parse, does not word-split and does
 # not glob. A value of `x$(cmd)` therefore ASSIGNS those eight characters
 # instead of running anything, and the same is true of a backtick, a semicolon,
-# a pipe or an embedded newline. An already-poisoned file is defused on its
-# first read after this lands; it is not cleaned up, but it cannot execute.
+# a pipe or an embedded newline.
+#
+# THAT IS ONLY HALF OF IT, and the half this comment used to claim - "it cannot
+# execute" - was true of conf_load and false of the program that called it. The
+# charset check answers "is this a shell name", not "is this a name the shell
+# already has a meaning for", and PATH, IFS, LD_PRELOAD, LD_LIBRARY_PATH and ENV
+# are all perfectly good shell names. `eval "$_ck=\$_cv"` assigned them, and
+# notifymon and wifiwatch then run wget, logger, uci and iw UNQUALIFIED as root:
+# a line reading `PATH=/tmp/somewhere` was measured selecting an attacker's
+# `logger` out of /tmp on the very next command. Nothing executed inside
+# conf_load; the caller executed it, one line later, which is the same outcome.
+#
+# So the key is now checked against an ALLOWLIST as well as a charset. A
+# denylist was the other option and was rejected: it has to enumerate every name
+# the shell, the C library and the dynamic loader will ever give meaning to, and
+# it is wrong the first time one of them adds another. The allowlist is by
+# PREFIX rather than by exact name on purpose - notifymon's header invites the
+# owner to add MSG_* rewordings by hand and there are 51 documented keys across
+# two separately-versioned daemons, so an exact list here would drift and would
+# silently drop an override the owner had set. Every key those daemons and
+# settings-api actually read begins NOTIFY_ or MSG_ (checked against all three),
+# and no name the shell or the loader cares about begins with either.
+#
+# The cost is that conf_load is NOT a general KEY=value reader any more: it
+# reads this project's notify.conf schema. A future caller with a different
+# schema must widen the case below deliberately, and will notice immediately
+# because its keys arrive unset. That is the intended failure direction.
+#
+# An already-poisoned file is defused on its first read after this lands - the
+# dangerous line is dropped, not assigned - and it is still not cleaned up.
 #
 # One layer of matching quotes is stripped, because `.` used to consume them
 # and the documented override examples in notifymon are written with them.
@@ -264,6 +307,13 @@ conf_load() {
         [ "$_ck" = "$_cl" ] && continue                 # no '=' on the line
         case "$_ck" in
             ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;;      # not a shell name
+        esac
+        # ...and being a shell name is not enough. Written as a literal pattern
+        # union rather than a loop over a variable, because splitting a list
+        # here would depend on IFS - and IFS is one of the names being kept out.
+        case "$_ck" in
+            NOTIFY_*|MSG_*) ;;
+            *) continue ;;                              # not a key we own
         esac
         _cv=${_cl#*=}
         case "$_cv" in

@@ -83,7 +83,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=62646815"></script>
+<script src="/os.js?v=ff416e4d"></script>
 <script>
 (function () {
 'use strict';
@@ -1028,6 +1028,22 @@ function renderAdguard(d) {
                     'was written and has not picked it up. Encrypted DNS is intact, so this is not ' +
                     'a leak \u2014 but a captive portal still has no plaintext DNS to hijack, so ' +
                     'sign-in will keep failing. Reload it over SSH: /etc/init.d/dnsmasq reload', 'bad'));
+            } else if (t.state === 'indeterminate') {
+                /* Deliberately NOT folded into the hide-condition above.
+                   `unknown` means there is no conf-dir at all and nothing to
+                   report; this means a fallback IS installed and the console
+                   could not read one of the two numbers it compares to decide
+                   whether dnsmasq loaded it. Hiding the panel here would go
+                   quiet at the exact moment a plaintext resolver may be on
+                   the path, which is the silence this panel exists to end. */
+                tst.appendChild(OS.stateWord('CANNOT TELL', 'warn'));
+                tbox.appendChild(OS.note('The travel fallback (' + srv + ') is written to ' +
+                    'dnsmasq\u2019s runtime config, but this console could not read one of ' +
+                    'the numbers it compares \u2014 dnsmasq\u2019s start time, or the ' +
+                    'file\u2019s timestamp \u2014 so it cannot say whether the running ' +
+                    'resolver has picked it up. Assume plaintext DNS MAY be on the path. ' +
+                    'Check over SSH with logread -e dnsmasq, and reload it if in doubt: ' +
+                    '/etc/init.d/dnsmasq reload', 'warn'));
             }
         }
     }

@@ -914,7 +914,8 @@ printf '"adguard":%s,' "$AGHJ"
 # cost this project real time more than once. The authority is the file dnsmasq
 # actually loads, in its runtime conf-dir.
 #
-# Four states, because "no fallback" and "cannot tell" are different answers:
+# Six states, because "no fallback" and the two different kinds of "cannot tell"
+# are different answers:
 #   off      the conf-dir exists and holds no fallback - strict DoH, today's state
 #   active   the fallback is installed AND dnsmasq started after it was written,
 #            so the running resolver has it
@@ -927,7 +928,33 @@ printf '"adguard":%s,' "$AGHJ"
 #            finished, and dnsmasq still predates the file: the restart did not
 #            happen, and the portal still has no plaintext DNS to hijack
 #   unknown  no dnsmasq conf-dir found at all - this router is not arranged the
-#            way the hook assumes, so no claim either way
+#            way the hook assumes, so nothing to report either way
+#   indeterminate
+#            the fallback IS installed, and one of the four numbers the
+#            comparison needs did not resolve, so which of active/settling/
+#            pending is true cannot be established. DIFFERENT from unknown: with
+#            unknown there is nothing there, here there is something there and
+#            plaintext DNS may or may not be on the path. The panel must SAY so
+#            rather than hide, which is what unknown does.
+#
+# Why "indeterminate" exists at all. The four numbers used to be checked by
+# concatenating them into one string and testing that for non-digits - and a
+# missing number contributes NOTHING to a concatenation, so as long as any other
+# operand was a digit the string still looked clean and the arithmetic ran on the
+# hole. Measured, all four forced empty one at a time on this router:
+#     dnsmasq start empty -> `[ 96400 -le "" ]` is "out of range", rc=2, NOT
+#                            false, so the `if` fell through to the `elif` and
+#                            the answer became whatever the file's age said
+#     conf mtime empty    -> $(( - (now - up) )) is a large negative, which is
+#                            -le anything, so it asserted "active"
+#     uptime empty        -> mtime - now is negative, so it asserted "active"
+#     all four empty      -> the concatenation is finally empty and the guard
+#                            fired, and the guard's own branch ALSO said "active"
+# Four of the five shapes produced a confident wrong answer and none of them
+# produced a hint that anything had gone wrong. "active" is the worst possible
+# default here: it is the state that tells the owner their DNS is in cleartext,
+# so guessing it wrongly trains them to ignore it. Each operand is validated
+# SEPARATELY below, and a hole yields a state that claims nothing.
 TDCONF=""; TDSTATE=unknown; TDSRV=""
 for _d in /tmp/dnsmasq.*.d; do [ -d "$_d" ] && TDCONF="$_d/travel-dns.conf" && break; done
 if [ -n "$TDCONF" ]; then
@@ -939,13 +966,23 @@ if [ -n "$TDCONF" ]; then
         _dmst=$(sed 's/.*) //' "/proc/$_dmp/stat" 2>/dev/null | awk '{print int($20/100)}')
         _fmt=$(date -r "$TDCONF" +%s 2>/dev/null)
         _nowe=$(date +%s); _upe=$(cut -d. -f1 /proc/uptime 2>/dev/null)
-        case "$_dmst$_fmt$_upe" in ''|*[!0-9]*) TDSTATE=active ;; *)
+        # One at a time, never concatenated: an empty operand is invisible in a
+        # concatenation with any non-empty digit neighbour. _dmst goes missing
+        # on a pgrep miss and _fmt on a file that vanished between the -s test
+        # above and the stat here; those two are reachable, _nowe and _upe are
+        # checked for the same money.
+        _tdbad=""
+        for _tdo in "$_dmst" "$_fmt" "$_nowe" "$_upe"; do
+            case "$_tdo" in ''|*[!0-9]*) _tdbad=1 ;; esac
+        done
+        if [ -n "$_tdbad" ]; then TDSTATE=indeterminate
+        else
             # both expressed as seconds-since-boot so they are comparable
             _fmup=$((_fmt - (_nowe - _upe)))
             if [ "$_fmup" -le "$_dmst" ]; then TDSTATE=active
             elif [ $((_nowe - _fmt)) -lt 90 ]; then TDSTATE=settling
-            else TDSTATE=pending; fi ;;
-        esac
+            else TDSTATE=pending; fi
+        fi
         [ -n "$TDSRV" ] || TDSTATE=off
     else
         TDSTATE=off
