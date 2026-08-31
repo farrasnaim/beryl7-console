@@ -106,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=ff416e4d"></script>
+<script src="/os.js?v=ff4b3b8c"></script>
 <script>
 (function () {
 'use strict';
@@ -1113,7 +1113,23 @@ function renderNotify(d) {
     var n = d.notify; if (!n) return;
     var box = $('#b-notify'); clear(box);
     var st = $('#st-notify'); if (st) clear(st);
-    if (st) st.appendChild(n.enabled ? OS.stateWord('ON', 'ok') : OS.stateWord('OFF', null));
+    if (st) st.appendChild(n.weak ? OS.stateWord('WEAK ADDRESS', 'warn')
+                                  : n.enabled ? OS.stateWord('ON', 'ok')
+                                              : OS.stateWord('OFF', null));
+
+    /* The router refuses to SAVE an address this guessable, but the one already
+       stored predates that rule, and enforcement the owner cannot see is
+       enforcement he cannot act on. Said before the form rather than after Apply
+       is refused, because the requirement is about the address he already has,
+       not about the edit he is making. */
+    if (n.weak) {
+        box.appendChild(OS.note('The address in use is guessable. It is short of a random ' +
+            'token, or it reads as words, and on a public push service the address is the only ' +
+            'thing keeping strangers out — while these alerts name your networks and the ' +
+            'devices joining them. You can still switch notifications off with it in place, but ' +
+            'it cannot be switched back on until it is replaced: use the service’s generate ' +
+            'button and paste the new address below.', 'warn'));
+    }
 
     var form = el('div');
     var chk = checkRow('Send me a message when something changes', n.enabled);
@@ -1155,7 +1171,16 @@ function renderNotify(d) {
     ar.reset.addEventListener('click', function () { markDirty('notify', false); renderNotify(d); });
     ar.apply.addEventListener('click', function () {
         OS.act(ar.apply, API, {
-            action: 'setnotify', enabled: chk.input.checked ? '1' : '0', url: u.value.trim()
+            /* An address the owner has not touched is not resubmitted. The
+               field is prefilled from the router, so sending it back made every
+               change to this panel - including switching notifications OFF - a
+               re-save of the stored address, which the strength bar then
+               refused. Nothing else on this page can be changed without also
+               replacing the address, which is not a requirement anyone
+               intended. */
+            action: 'setnotify', enabled: chk.input.checked ? '1' : '0',
+            keepurl: (u.value.trim() === (n.url || '')) ? '1' : '0',
+            url: u.value.trim()
         }, { ok: 'Saved.', delay: 800, failPrefix: 'Not saved' }).then(function (j) {
             if (j && j.ok) markDirty('notify', false);
         });

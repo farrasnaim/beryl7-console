@@ -1058,15 +1058,80 @@ fi
 # /etc/dashboard (0600) and never in the repo, and the only things ever sent
 # are interface and service STATES - no addresses, keys, device names or
 # traffic contents.
+# ---- is this address unguessable enough to be a shared secret? ----------
+#
+# A FUNCTION rather than an inline check, because two callers need the same
+# answer and they must not be able to disagree: the write path refuses a weak
+# address, and the read path has to TELL the console the stored one is weak.
+# Enforcement that only exists at write time is enforcement the owner cannot
+# see, and the alerts now carry network names and the names of devices joining
+# them - so a weak topic he knows about and a weak topic the console hides are
+# very different situations.
+#
+# It prints a verdict and never the value. Nothing here may log, echo or emit
+# the address: proving a secret is weak by showing it is not a trade worth
+# making.
+#
+url_strong() {   # $1 = url -> prints 1 if it carries an unguessable part
+    _ushn=$(uci -q get system.@system[0].hostname 2>/dev/null | tr "A-Z" "a-z")
+    printf '%s\n%s\n' "$_ushn" "$1" | awk '
+        NR == 1 { hn = tolower($0); next }
+        NR == 2 {
+            u = $0
+            sub("^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*", "", u)
+            n = split(u, seg, "[/?&=#:]")
+            for (i = 1; i <= n; i++) {
+                s = seg[i]
+                if (length(s) < 12) continue
+                if (s !~ /[a-z]/ || s !~ /[A-Z]/) continue
+                d = 0; delete seen
+                for (j = 1; j <= length(s); j++) {
+                    c = substr(s, j, 1)
+                    if (!(c in seen)) { seen[c] = 1; d++ }
+                }
+                if (d < 8) continue
+                if (length(hn) >= 4 && index(tolower(s), hn) > 0) continue
+                wordy = 1
+                m = split(s, ch, "[-_.]")
+                for (k = 1; k <= m; k++) {
+                    if (ch[k] == "") continue
+                    if (ch[k] !~ /^[A-Za-z][a-z]*[0-9]*$/) { wordy = 0; break }
+                }
+                if (wordy) continue
+                print "1"; exit
+            }
+            print "0"
+        }'
+}
+
 NOTIFYCONF=/etc/dashboard/notify.conf
 if [ "$ACTION" = "setnotify" ]; then
     NENABLED=$(qs_get enabled)
+    # KEEP means "I am not changing the address", which is a different request
+    # from "here is an address". The page sends it whenever the field still holds
+    # what the router already has, so switching notifications off does not
+    # resubmit the stored value and get refused by a bar it was never being asked
+    # to clear. It is not a grandfather clause: an address that fails the bar can
+    # be kept and switched OFF, never switched back ON, and never re-saved as a
+    # new value.
+    NKEEP=$(qs_get_dec keepurl | tr -d '\n\r')
     # CR and LF are stripped before anything else looks at the value, the same
     # way ssid and key are handled above. This file is line-structured: a
     # newline inside a value does not corrupt a string, it forges a whole extra
     # LINE, and every defence that reasons about "the value" would be reasoning
     # about only the first one.
     NURL=$(qs_get_dec url | tr -d '\n\r')
+    if [ "$NKEEP" = "1" ]; then
+        conf_load "$NOTIFYCONF" >/dev/null 2>&1
+        NURL=$NOTIFY_URL
+        [ -n "$NURL" ] || fail "there is no address stored to keep — enter one"
+        # Arming a weak address is still refused; only keeping it while switching
+        # off is allowed. Checked here rather than below because the shared
+        # validation is skipped for a value the owner is not introducing.
+        if [ "$NENABLED" = "1" ] && [ "$(url_strong "$NURL")" != "1" ]; then
+            fail "the stored address is too easy to guess to switch back on. Alerts name your networks and the devices joining them, so this needs a new address from the service's generate button — replace it in the field above."
+        fi
+    fi
     case "$NENABLED" in 0|1) ;; *) fail "enabled must be 0 or 1" ;; esac
 
     # VALIDATED ON EVERY PATH, not only when the toggle is on. These checks used
@@ -1078,7 +1143,9 @@ if [ "$ACTION" = "setnotify" ]; then
     # An empty address is allowed ONLY with the toggle off, which is how the
     # feature is cleared; with it on, an empty address would arm a monitor that
     # can never deliver.
-    if [ -z "$NURL" ]; then
+    if [ "$NKEEP" = "1" ]; then
+        :   # validated above against the stored value; nothing new to check
+    elif [ -z "$NURL" ]; then
         [ "$NENABLED" = "1" ] && fail "enter the address to send to before switching notifications on"
     else
         case "$NURL" in
@@ -1164,35 +1231,7 @@ if [ "$ACTION" = "setnotify" ]; then
         # hostname line ever arrived malformed the URL would not be on line 2
         # and nothing is printed, which fails closed.
         _nhn=$(uci -q get system.@system[0].hostname 2>/dev/null | tr -d '\n\r')
-        _nstrong=$(printf '%s\n%s\n' "$_nhn" "$NURL" | awk '
-            NR == 1 { hn = tolower($0); next }
-            NR == 2 {
-                u = $0
-                sub("^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*", "", u)
-                n = split(u, seg, "[/?&=#:]")
-                for (i = 1; i <= n; i++) {
-                    s = seg[i]
-                    if (length(s) < 12) continue
-                    if (s !~ /[a-z]/ || s !~ /[A-Z]/) continue
-                    d = 0; delete seen
-                    for (j = 1; j <= length(s); j++) {
-                        c = substr(s, j, 1)
-                        if (!(c in seen)) { seen[c] = 1; d++ }
-                    }
-                    if (d < 8) continue
-                    if (length(hn) >= 4 && index(tolower(s), hn) > 0) continue
-                    wordy = 1
-                    m = split(s, ch, "[-_.]")
-                    for (k = 1; k <= m; k++) {
-                        if (ch[k] == "") continue
-                        if (ch[k] !~ /^[A-Za-z][a-z]*[0-9]*$/) { wordy = 0; break }
-                    }
-                    if (wordy) continue
-                    print "1"; exit
-                }
-                print "0"
-            }')
-        [ "$_nstrong" = "1" ] || fail "that address has no unguessable part in it. Alerts name your networks and the devices joining them, and on a public push service the address is the only thing keeping strangers out — so it needs a token of 12 or more characters mixing upper and lower case, not a word. Use the service's own generate button. To switch notifications off, clear this field instead."
+        [ "$(url_strong "$NURL")" = "1" ] || fail "that address has no unguessable part in it. Alerts name your networks and the devices joining them, and on a public push service the address is the only thing keeping strangers out — so it needs a token of 12 or more characters mixing upper and lower case, not a word. Use the service's own generate button. To switch notifications off, clear this field instead."
     fi
     mkdir -p /etc/dashboard
     # SAVE OWNS TWO KEYS AND MUST LEAVE THE REST ALONE.
@@ -1398,10 +1437,16 @@ conf_load /etc/dashboard/notify.conf >/dev/null 2>&1
 # process. Every poll of this page was writing an error to the system log.
 NOTIFY_QUEUED=0
 [ -f /tmp/.notifyq ] && NOTIFY_QUEUED=$(wc -l < /tmp/.notifyq)
-printf '"notify":{"enabled":%s,"url":"%s","queued":%s},' \
+# `weak` is a VERDICT about the stored address and never says anything about
+# its contents. Enforcement used to exist only on the way in, which meant the one
+# state worth warning about - an address already stored that would be refused
+# today - was the one state the console could not show. The alerts carry network
+# names and the names of devices joining them, so this is not cosmetic.
+printf '"notify":{"enabled":%s,"url":"%s","queued":%s,"weak":%s},' \
     "$([ "$NOTIFY_ENABLED" = 1 ] && echo true || echo false)" \
     "$(esc "$NOTIFY_URL")" \
-    "$(jnum "$NOTIFY_QUEUED")"
+    "$(jnum "$NOTIFY_QUEUED")" \
+    "$( [ -n "$NOTIFY_URL" ] && [ "$(url_strong "$NOTIFY_URL")" != "1" ] && echo true || echo false )"
 printf '"system":{"hostname":"%s","zonename":"%s","uptime":%s,"ntp":%s},' \
     "$(esc "$(uci -q get system.@system[0].hostname)")" \
     "$(esc "$(uci -q get system.@system[0].zonename)")" \
