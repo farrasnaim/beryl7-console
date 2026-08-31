@@ -118,20 +118,62 @@ WATCH_ALL=${NOTIFY_WIFI_ALL_APS:-0}
 SKIP_NETS=${NOTIFY_WIFI_SKIP:-iot}
 
 HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-router}
-# %s = device, %s = network, %s = band
+
+# ---- wording ---------------------------------------------------------------
+# Every caption below can be overridden in notify.conf without touching this
+# file, which matters because a console reinstall replaces this script and never
+# touches that config:
+#
+#     MSG_WIFI_JOIN_B="%s masuk ke %s di %s GHz."
+#
+# HOW MANY %s A BODY TAKES IS PART OF ITS CONTRACT, and getting it wrong is not
+# a harmless mistake here. busybox printf REPEATS its whole format string when
+# it is handed more arguments than the format has conversions, rather than
+# ignoring the extras. Measured on this router, a two-slot format given three
+# arguments:
+#
+#     $ printf '%s disconnected from %s GHz.' dev net 5
+#     dev disconnected from net GHz.5 disconnected from  GHz.
+#
+# The sentence arrives twice, the second copy garbled. Too FEW arguments is the
+# quiet direction: the surplus conversions render as empty strings, leaving gaps
+# and stray punctuation.
+#
+# So the per-caption comments below state the slot count, and they are the
+# contract. Only MSG_WIFI_LEAVE_B tolerates a wrong count, and only because its
+# arity CHANGED - see its own note. Every other caption here, and every caption
+# in notifymon, is fed a fixed number of arguments and assumes the shipped
+# count.
+#
+# Never put a | in a caption: it separates fields in the retry queue.
+
+# 3 slots: %s = device, %s = network, %s = band
 M_WIFI_JOIN_T=${MSG_WIFI_JOIN_T:-"device joined Wi-Fi"}
 M_WIFI_JOIN_B=${MSG_WIFI_JOIN_B:-"%s connected to %s on %s GHz."}
-# %s = device, %s = network, %s = band.
+# 3 slots: %s = device, %s = network, %s = band.
 #
 # THE NETWORK IS NEW HERE, and it is the whole point: a departure used to carry
 # the band and nothing else, so leaving the guest network and leaving the main
 # one produced byte-identical messages. Joins have always named the network, so
 # the pair read as if the router only half knew what it was talking about.
 #
-# An override written for the OLD two-slot body keeps working - see where this
-# is filled in. That is not politeness: busybox printf REPEATS the format when
-# it is handed more arguments than conversions, so passing three to a two-slot
-# override would print the whole sentence twice rather than ignore the extra.
+# THIS CAPTION WENT FROM TWO SLOTS TO THREE ON 2026-08-31, so unlike every other
+# caption in this file it cannot assume the shipped count: an override written
+# for the old form is still out there. THE SLOT COUNT IS COUNTED BEFORE FILLING
+# (the `case` at the departure branch) and exactly that many arguments are
+# passed. Without that count, busybox printf's repeat-on-surplus behaviour would
+# print the whole sentence twice - see the block above the join caption for the
+# measured output.
+#
+# What each shape produces, measured through that `case`:
+#
+#     3 slots (shipped)  device disconnected from network on 5 GHz.
+#     2 slots (old form) device disconnected from 5 GHz.        network dropped
+#     0 slots            used verbatim
+#     4 slots            takes the 3-slot branch; the fourth conversion renders
+#                        EMPTY, so a trailing "after ." is what you get. Not
+#                        corrupt, but not what was written - four is not a
+#                        supported arity and nothing will tell you so.
 M_WIFI_LEAVE_T=${MSG_WIFI_LEAVE_T:-"device left Wi-Fi"}
 M_WIFI_LEAVE_B=${MSG_WIFI_LEAVE_B:-"%s disconnected from %s on %s GHz."}
 # %s = device, %s = how long it was away

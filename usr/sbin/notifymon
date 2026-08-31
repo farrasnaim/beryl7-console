@@ -122,6 +122,21 @@ HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-route
 # %s in a body is filled with live values where the comment says so; a message
 # with no %s is used verbatim. Never put a | in one - it separates fields in
 # the retry queue.
+#
+# THE SLOT COUNT IS PART OF THE CONTRACT. Every caption here is fed a FIXED
+# number of arguments and assumes the shipped count - none of them counts the
+# slots in an override first. That is safe as long as an arity never changes,
+# and it has not for these, but it makes a wrong count in notify.conf worse than
+# a typo. busybox printf REPEATS its whole format when handed more arguments
+# than conversions rather than ignoring the extras. Measured on this router:
+#
+#     $ printf '%s disconnected from %s GHz.' dev net 5
+#     dev disconnected from net GHz.5 disconnected from  GHz.
+#
+# Too few arguments is quieter and just as wrong: the surplus conversions render
+# as empty strings. Match the slot count in the comment above each caption.
+# (wifiwatch's MSG_WIFI_LEAVE_B is the one exception in either file, and only
+# because its arity changed - it counts the slots before filling.)
 M_HELLO_T=${MSG_HELLO_T:-"monitoring started"}
 M_HELLO_B=${MSG_HELLO_B:-"Watching the internet link, connection quality, VPN tunnels, Wi-Fi devices, IPv6, firewall, DNS upstreams and traffic accounting."}
 M_WAN_DOWN_T=${MSG_WAN_DOWN_T:-"internet is down"}
