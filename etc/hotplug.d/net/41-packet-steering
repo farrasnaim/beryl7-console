@@ -1,0 +1,35 @@
+#!/bin/sh
+# Re-apply RPS/XPS packet steering to Wi-Fi netdevs after they are recreated.
+#
+# /etc/init.d/packet_steering only runs on a network or firewall reload, or on
+# an `interface.*` ubus event. A `wifi reload` that changes security settings
+# destroys and recreates every BSS netdev, and none of those three things fire -
+# so the new netdevs come back with rps_cpus=0 and the steering that uci still
+# says is enabled quietly stops applying to them.
+#
+# Measured on 2026-09-01: after the day's reloads, four of the five AP netdevs
+# had rps_cpus=0, including phy0.1-ap0 which carries all of this router's real
+# Wi-Fi traffic. Only phy0.0-ap1 - the one netdev that happened to predate the
+# last run - still had its mask. `/etc/init.d/packet_steering reload` restored
+# all five immediately, which is the whole of the repair.
+#
+# This fires once per netdev, so a full reload runs it about five times. That is
+# left alone deliberately: the script is idempotent and costs a few sysfs writes,
+# and a debounce marker would be more moving parts than the thing it saves.
+
+[ "$ACTION" = add ] || exit 0
+
+case "$INTERFACE" in
+	phy*) ;;
+	*) exit 0 ;;
+esac
+
+# Do nothing when the feature is switched off, rather than starting a service
+# the owner has disabled. Tested with `case` and not `[ -gt ]` because busybox
+# returns rc=2 "out of range" for an empty string there, not false.
+PS=$(uci -q get network.@globals[0].packet_steering)
+case "$PS" in
+	''|0) exit 0 ;;
+esac
+
+/etc/init.d/packet_steering reload >/dev/null 2>&1
