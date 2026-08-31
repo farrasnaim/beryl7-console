@@ -278,12 +278,44 @@ notify_flag_on() {   # $1 = raw value; unset or empty means on
 # the three-slot branch and renders its fourth conversion empty: wrong, but
 # quietly wrong rather than doubled, and four is not a supported arity.
 cap_fmt() {   # $1 = format, $2..$4 = values
+    # ONE PASS OVER THE FORMAT, because the three things that matter about a
+    # percent cannot be decided independently:
+    #
+    #   %s   a conversion. Count it.
+    #   %%   an escaped percent the author wrote deliberately. Leave it, and do
+    #        NOT count the `s` in `%%s` as a conversion - printf does not.
+    #   %x   anything else is a literal percent the author meant. printf would
+    #        read it as a conversion, eat an argument, corrupt the sentence and
+    #        write `invalid number` to the log on EVERY alert. Escape it.
+    #
+    # A first attempt did this with sed and got all three wrong in different
+    # ways: `s/%\([^s%]\)/%%\1/g` turns `%%` into `%%%` because the second `%`
+    # of the pair matches as a stray, a no-slot caption then printed its own
+    # escapes, and `%%s` was counted as a conversion and doubled the sentence.
+    # Walking the string is the only way to get `%%` treated as one token.
+    #
+    # awk emits the conversion count as a single leading digit and the repaired
+    # format after it, so the split below is pure shell rather than more forks.
     _cf=$1; shift
-    case "$_cf" in
-        *%s*%s*%s*) printf "$_cf" "${1:-}" "${2:-}" "${3:-}" ;;
-        *%s*%s*)    printf "$_cf" "${1:-}" "${2:-}" ;;
-        *%s*)       printf "$_cf" "${1:-}" ;;
-        *)          printf '%s' "$_cf" ;;
+    _cfn=$(printf '%s' "$_cf" | awk '{
+        n = 0; out = ""
+        for (i = 1; i <= length($0); i++) {
+            c = substr($0, i, 1)
+            if (c != "%") { out = out c; continue }
+            d = substr($0, i + 1, 1)
+            if (d == "%")      { out = out "%%"; i++ }
+            else if (d == "s") { out = out "%s"; n++; i++ }
+            else               { out = out "%%" }
+        }
+        if (n > 3) n = 3
+        printf "%d%s", n, out
+    }')
+    _cfmt=${_cfn#?}
+    case "$_cfn" in
+        0*) printf "$_cfmt" ;;
+        1*) printf "$_cfmt" "${1:-}" ;;
+        2*) printf "$_cfmt" "${1:-}" "${2:-}" ;;
+        *)  printf "$_cfmt" "${1:-}" "${2:-}" "${3:-}" ;;
     esac
 }
 
