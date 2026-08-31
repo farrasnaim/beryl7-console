@@ -1384,11 +1384,16 @@ printf '"wireless":{"radios":[%s],' "$RJ"
 # all on a router that has none. Each entry carries its own section name because
 # that is what the write action needs back.
 #
-# `legacy` is reported rather than inferred in the page, and it is the whole
-# point of the guest SSID: an AP that advertises only WPA-PSK with no PMF is one
-# a pre-2012 supplicant can actually associate with, where the main SSID's
-# sae-mixed + ieee80211w + ieee80211r advertises five AKM suites and four RSN
-# capability bits those clients were never written to parse.
+# `legacy` is reported rather than inferred in the page. It says one thing: this
+# AP advertises WPA-PSK alone with no PMF, which is what a pre-2012 supplicant
+# can actually associate with - such a client refuses a whole RSN element it
+# cannot parse rather than skipping the AKM suites it does not know.
+#
+# It was the reason the guest SSID exists. It is no longer what SEPARATES guest
+# from main: on 2026-09-01 the main APs were brought down to `psk2+ccmp` with
+# ieee80211w=0 and 802.11r removed, so `wpa_key_mgmt=WPA-PSK` is now what every
+# BSS on this router advertises. The flag still reports each network truthfully,
+# which is all it ever claimed to do - it just no longer distinguishes them.
 _SECJ=""
 for _net in $(secondary_networks); do
     _secs=$(sections_of_net "$_net")
