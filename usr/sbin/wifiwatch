@@ -24,11 +24,14 @@
 # this by only sampling once a minute, which is exactly the latency being
 # removed here, so the debounce has to be rebuilt properly:
 #
-#   JOIN  is announced only if the device is not already associated on ANOTHER
-#         AP at that moment. A band hop therefore announces nothing.
+#   JOIN  is announced only if the device is not already on another AP OF THE
+#         SAME NETWORK at that moment. A band hop therefore announces nothing.
 #   LEAVE cannot be judged instantly - "gone" and "moving" look identical for a
-#         second or two - so it is held for GRACE seconds and then confirmed
-#         against every AP. Anything that came back is silently dropped.
+#         second or two - so it is held for GRACE seconds and then confirmed.
+#         Anything that came back to the same network is silently dropped.
+#   MOVE  is the third case, and it was missing. "Same network" above used to
+#         read "anywhere", which swallowed a crossing between two watched
+#         networks from both ends at once - see assoc_net.
 #
 # So joins are instant and leaves take GRACE. That asymmetry is physics, not a
 # shortcut: no amount of engineering can tell a departure from a roam at the
@@ -37,6 +40,17 @@
 # WHAT IT IS ALLOWED TO DO. It sends messages. It never restarts a service,
 # never writes uci, never touches the radios - the same invariant pingmon
 # carries. The worst failure it can produce is a wrong message.
+
+# EVERYTHING THIS WRITES IS PRIVATE, and procd starts a service with a 022
+# umask, so every one of these files landed world-readable: the alert queue
+# (which carries device names and, since the guest network existed, guest
+# SSIDs), the pending-departure and recently-left files (MACs), and the event
+# FIFO - which is not just readable but WRITABLE, i.e. an injection point for
+# fake association events. There are no non-root accounts on this router today,
+# which is exactly why none of it was visible; the next person to add one
+# inherits a readable list of who is in the house. Set before the first file is
+# created rather than chmod'ing afterwards, so there is no window at all.
+umask 077
 
 CONF=/etc/dashboard/notify.conf
 PEND=/tmp/.wifipend
@@ -104,13 +118,33 @@ WATCH_ALL=${NOTIFY_WIFI_ALL_APS:-0}
 SKIP_NETS=${NOTIFY_WIFI_SKIP:-iot}
 
 HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-router}
+# %s = device, %s = network, %s = band
 M_WIFI_JOIN_T=${MSG_WIFI_JOIN_T:-"device joined Wi-Fi"}
 M_WIFI_JOIN_B=${MSG_WIFI_JOIN_B:-"%s connected to %s on %s GHz."}
+# %s = device, %s = network, %s = band.
+#
+# THE NETWORK IS NEW HERE, and it is the whole point: a departure used to carry
+# the band and nothing else, so leaving the guest network and leaving the main
+# one produced byte-identical messages. Joins have always named the network, so
+# the pair read as if the router only half knew what it was talking about.
+#
+# An override written for the OLD two-slot body keeps working - see where this
+# is filled in. That is not politeness: busybox printf REPEATS the format when
+# it is handed more arguments than conversions, so passing three to a two-slot
+# override would print the whole sentence twice rather than ignore the extra.
 M_WIFI_LEAVE_T=${MSG_WIFI_LEAVE_T:-"device left Wi-Fi"}
-M_WIFI_LEAVE_B=${MSG_WIFI_LEAVE_B:-"%s disconnected from %s GHz."}
+M_WIFI_LEAVE_B=${MSG_WIFI_LEAVE_B:-"%s disconnected from %s on %s GHz."}
 # %s = device, %s = how long it was away
 M_WIFI_BACK_T=${MSG_WIFI_BACK_T:-"device is back"}
 M_WIFI_BACK_B=${MSG_WIFI_BACK_B:-"%s reconnected after %s away."}
+# %s = device, %s = network left, %s = network joined.
+#
+# A device crossing between two watched networks is neither an arrival nor a
+# departure and reads wrong as either: "left" is untrue because it is still on
+# the router, and "joined" hides that it used to be somewhere with different
+# rules. Naming both ends is the only phrasing that is actually the news.
+M_WIFI_MOVE_T=${MSG_WIFI_MOVE_T:-"device changed network"}
+M_WIFI_MOVE_B=${MSG_WIFI_MOVE_B:-"%s moved from %s to %s."}
 
 # THE QUEUE IS NOTIFYMON'S, DELIBERATELY. A second retry mechanism here would
 # be a second thing to get wrong, and the two would race for the same topic.
@@ -127,6 +161,71 @@ QUEUE=/tmp/.notifyq
 QMAX=25
 QDROP=/tmp/.notifyqdrop
 
+# THE QUEUE IS SHARED, AND SHARING IT WAS NOT FREE. notifymon drains it by
+# reading it and writing the remainder back over the top; an append landing
+# between that read and that write was overwritten, and overwritten in SILENCE -
+# the drop counter is only touched when the queue is FULL, so a lost alert
+# incremented nothing and left no trace anywhere. Measured, not theorised: one
+# line appended a second into a three-second drain vanished and no counter
+# appeared.
+#
+# LOCKING, rather than the alternatives. Counting the loss is a receipt for a
+# lost message, not a fix. Making the drain non-destructive cannot help on its
+# own while an appender may be mid-write. And a second delivery path here is the
+# very thing the note above rejects - the queue being notifymon's is the point.
+#
+# flock is a kernel lock held on an open fd, so a process that dies holding it
+# releases it: there is no stale-lock case to reason about and nothing to clean
+# up after a reboot. The redirection is scoped to a brace group rather than a
+# bare `exec`, because a failed `exec` redirection can take a non-interactive
+# shell down with it. If flock is missing entirely the block still runs and the
+# behaviour degrades to exactly what exists today - never to a dropped alert.
+QLOCK=/tmp/.notifyq.lock
+
+# A umask only applies to files this process CREATES. Anything left in /tmp by a
+# build that ran before it - the queue, the drop counter, and this program's own
+# pending and recently-left lists, which are nothing but MACs - keeps 0644 until
+# a reboot clears /tmp. One chmod at start-up, once per service start.
+chmod 0600 "$QUEUE" "$QDROP" "$PEND" "$LEFT" 2>/dev/null
+
+# ---- heartbeat -------------------------------------------------------------
+# WHAT A HEARTBEAT MEANS FOR A DAEMON, which is not what it means for a cron
+# job. dashmon, apwatch, vpnwatch and notifymon each stamp when a RUN completes.
+# This has no runs: it blocks on a read and may legitimately have nothing to say
+# for days, so "completed normally" is not an event that ever happens here.
+#
+# The observable is therefore THE LOOP TURNING. The read already has a one
+# second timeout - it has to, so a held departure can be confirmed when the
+# airwaves go silent - which means an idle, healthy wifiwatch still comes round
+# about once a second. A stopped loop is the failure worth surfacing, and it is
+# very nearly the only one: a deaf subscriber, a wedged read, a process killed
+# without procd noticing. Everything else this program does is downstream of it.
+#
+# Written at most every HB_EVERY seconds rather than on every pass: a stamp a
+# second is 86400 pointless writes a day and the console's staleness bar is
+# 150s, so five missed beats still fit inside it.
+#
+# NO EARLY EXIT BEATS - the opposite of notifymon's rule, and deliberate. For a
+# cron job an early exit IS a completed run, so it stamps. For a service procd
+# respawns every ten seconds, an early exit means the program is not running at
+# all, and a stamp there would assert liveness for something that just died.
+# Notifications being switched off is the one legitimate reason to be absent,
+# and the CONSOLE is what knows that: dashboard-api reads the same three keys
+# this gates on and does not expect a stamp when they say no. Liveness is
+# claimed here; permission to be absent is granted there.
+HB=/tmp/.hb-${0##*/}
+HB_EVERY=30
+HB_LAST=0
+beat() {
+    read -r _hb _ < /proc/uptime 2>/dev/null
+    _hb=${_hb%.*}
+    case "$_hb" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$((_hb - HB_LAST))" -lt "$HB_EVERY" ] && return 0
+    HB_LAST=$_hb
+    printf '%s\n' "$_hb" > "$HB" 2>/dev/null
+    return 0
+}
+
 send() {   # $1 title  $2 body  $3 priority  $4 tags
     wget -q -T 8 -O /dev/null \
         --header="Title: $HOSTN: $1" \
@@ -139,23 +238,33 @@ send() {   # $1 title  $2 body  $3 priority  $4 tags
 # actually happened, because a Wi-Fi join delivered an hour late is misleading
 # without it - the same reason notifymon stamps its own queued messages.
 notify() {  # $1 title  $2 body  $3 priority  $4 tags
+    # A send can stall for the full wget timeout, and a run of them is the only
+    # thing that keeps this function away from the loop for long. Stamp before
+    # blocking, so a dead uplink is never mistaken for a dead wifiwatch.
+    beat
     send "$1" "$2" "$3" "$4" && return 0
-    if [ -f "$QUEUE" ] && [ "$(wc -l < "$QUEUE" 2>/dev/null)" -ge "$QMAX" ]; then
-        _d=0; [ -r "$QDROP" ] && read -r _d < "$QDROP" 2>/dev/null
-        case "$_d" in ''|*[!0-9]*) _d=0 ;; esac
-        printf '%s\n' "$((_d + 1))" > "$QDROP" 2>/dev/null
-        logger -t wifiwatch "alert queue full ($QMAX) - dropped: $1"
-        return 0
-    fi
     # A literal | would split into the wrong fields when notifymon reads this
     # back. Names come from the class map, which is itself |-separated and so
     # cannot contain one, but the guard costs nothing and does not depend on
-    # that staying true.
-    printf '%s|%s|%s|%s\n' \
-        "$(printf '%s' "$1" | tr -d '|')" \
-        "$(date '+%H:%M') — $(printf '%s' "$2" | tr -d '|')" \
-        "$3" "$4" >> "$QUEUE" 2>/dev/null
-    logger -t wifiwatch "notification send failed - queued for notifymon to retry"
+    # that staying true. Composed BEFORE the lock is taken: these are forks, and
+    # nothing held under a lock should be waiting on one.
+    _qt=$(printf '%s' "$1" | tr -d '|')
+    _qb="$(date '+%H:%M') — $(printf '%s' "$2" | tr -d '|')"
+    # No `return` inside the block: the lock is released by the brace group's
+    # redirection closing, and jumping out of it is the one way to make that
+    # harder to reason about than it needs to be.
+    {
+        flock -x 9 2>/dev/null
+        if [ -f "$QUEUE" ] && [ "$(wc -l < "$QUEUE" 2>/dev/null)" -ge "$QMAX" ]; then
+            _d=0; [ -r "$QDROP" ] && read -r _d < "$QDROP" 2>/dev/null
+            case "$_d" in ''|*[!0-9]*) _d=0 ;; esac
+            printf '%s\n' "$((_d + 1))" > "$QDROP" 2>/dev/null
+            logger -t wifiwatch "alert queue full ($QMAX) - dropped: $1"
+        else
+            printf '%s|%s|%s|%s\n' "$_qt" "$_qb" "$3" "$4" >> "$QUEUE" 2>/dev/null
+            logger -t wifiwatch "notification send failed - queued for notifymon to retry"
+        fi
+    } 9>>"$QLOCK" 2>/dev/null
 }
 
 # Names come from the class map, so the phone and the console agree on what a
@@ -194,10 +303,14 @@ net_of_ap() {   # $1 = interface -> prints the network name, or fails
     return 1
 }
 
-watched_ap() {   # $1 = interface
+# The skip rule, applied to a network NAME. Split out from the interface-shaped
+# test because assoc_net below has already paid for the bridge lookup by the
+# time it needs to ask, and resolving the same interface twice on an event path
+# is the kind of cost that turns "instant" into "nearly instant".
+watched_net() {   # $1 = network name
     [ "$WATCH_ALL" = "1" ] && return 0
-    _wn=$(net_of_ap "$1") || return 1
-    case " $SKIP_NETS " in *" $_wn "*) return 1 ;; esac
+    [ -n "$1" ] || return 1
+    case " $SKIP_NETS " in *" $1 "*) return 1 ;; esac
     return 0
 }
 
@@ -222,28 +335,101 @@ ssid_of() {   # $1 = interface
     iwinfo "$1" info 2>/dev/null | sed -n 's/.*ESSID: "\(.*\)"/\1/p' | head -1
 }
 
-# Is this MAC associated anywhere right now, optionally ignoring one AP?
-assoc_anywhere() {   # $1 = mac (lower)  $2 = interface to skip (optional)
+# The human label for a network. The SSID is what the owner's phone shows and
+# what a join message already says, so using it on both sides of the pair is
+# what makes them symmetric; the uci name is the fallback when the radio cannot
+# be asked, and it is still better than nothing at all.
+net_label() {   # $1 = interface  $2 = network name
+    _nl=$(ssid_of "$1")
+    [ -n "$_nl" ] || _nl=$2
+    [ -n "$_nl" ] || _nl="Wi-Fi"
+    printf '%s' "$_nl"
+}
+
+# Which WATCHED network is this MAC on right now, ignoring one AP?
+#
+# THIS USED TO ANSWER A DIFFERENT QUESTION - "is it associated ANYWHERE" - and
+# both callers read a yes as "still here, say nothing". That made a crossing
+# between two watched networks invisible from BOTH ends at once: the join saw it
+# still on the old network and stayed quiet, the departure saw it already on the
+# new one and stayed quiet, so moving between the main and guest networks - the
+# exact event the guest network exists to report - produced no message at all.
+# Reproduced in both event orders before it was changed.
+#
+# The same yes also came back from APs on the SKIP LIST. Joining the main
+# network while something held the same MAC on the IoT network was silenced by
+# an AP the owner had explicitly asked not to be told about, which is a strictly
+# larger bug than the crossing and was hiding underneath it.
+#
+# So the answer is now a NETWORK, from watched APs only, and the callers compare
+# it with the network in front of them. Same network -> a band hop, still
+# silent, which is the noise the original guard exists to kill and the one
+# behaviour that must not regress. Different network -> a crossing, and news.
+#
+# Prints "<network> <label>", label last because an SSID may contain spaces. The
+# network is "-" when the bridge lookup fails or NOTIFY_WIFI_ALL_APS is on; rc 0
+# still means associated, and callers treat "-" as "cannot tell, assume same" -
+# conservative, and identical to today rather than a new source of messages.
+assoc_net() {   # $1 = mac (lower)  $2 = interface to skip (optional)
     for _i in $(ap_list); do
         [ "$_i" = "$2" ] && continue
-        iw dev "$_i" station dump 2>/dev/null | grep -qi "^Station $1" && return 0
+        # The cheap test first. The bridge and uci lookups are the expensive
+        # half and are paid only for the AP that actually holds this station,
+        # which is normally exactly one of them.
+        iw dev "$_i" station dump 2>/dev/null | grep -qi "^Station $1" || continue
+        _an=$(net_of_ap "$_i" 2>/dev/null)
+        watched_net "$_an" || continue
+        printf '%s %s' "${_an:--}" "$(net_label "$_i" "$_an")"
+        return 0
     done
     return 1
 }
 
 # Departures that have outlived the grace period and are still gone.
+#
+# A pending record is "mac epoch band network label", label last because an SSID
+# may contain spaces. The last two fields are what F-069 was missing: without
+# the network a departure from the guest side and a departure from the main side
+# were byte-identical messages.
 resolve_pending() {
     [ -s "$PEND" ] || return 0
     _now=$(date +%s); _keep="$PEND.k"; : > "$_keep"
-    while read -r _pm _pt _pb; do
+    while read -r _pm _pt _pb _pn _pl; do
         [ -n "$_pm" ] || continue
         if [ $((_now - _pt)) -lt "$GRACE" ]; then
-            printf '%s %s %s\n' "$_pm" "$_pt" "$_pb" >> "$_keep"
-        elif assoc_anywhere "$_pm"; then
-            :   # came back inside the window - a roam, and not news
+            printf '%s %s %s %s %s\n' "$_pm" "$_pt" "$_pb" "${_pn:--}" "${_pl:-Wi-Fi}" >> "$_keep"
+            continue
+        fi
+        # A record written by an older build has no network fields at all, and
+        # would otherwise compare unequal to everything and report a crossing
+        # that did not happen. One restart's worth of them, but a wrong message
+        # is the worst thing this program can produce.
+        [ -n "$_pl" ] || _pl="Wi-Fi"
+        _here=0; _cn=-; _cl=
+        if _c=$(assoc_net "$_pm"); then _here=1; _cn=${_c%% *}; _cl=${_c#* }; fi
+        if [ "$_here" = 1 ] && [ -n "$_pn" ] && [ "$_pn" != "-" ] && \
+           [ "$_cn" != "-" ] && [ "$_cn" != "$_pn" ]; then
+            # Gone from the network it left, but present on a different watched
+            # one. The join should already have announced this crossing; getting
+            # here means that event never arrived - a dropped notification, or an
+            # association that predates this process. A late crossing beats the
+            # silence, which is what this whole path was producing before.
+            notify "$M_WIFI_MOVE_T" \
+                 "$(printf "$M_WIFI_MOVE_B" "$(dev_name "$_pm")" "$_pl" "$_cl")" low iphone
+        elif [ "$_here" = 1 ]; then
+            :   # back on the same network inside the window - a roam, not news
         else
-            notify "$M_WIFI_LEAVE_T" "$(printf "$M_WIFI_LEAVE_B" "$(dev_name "$_pm")" "$_pb")" \
-                 min iphone
+            # An override written for the OLD two-slot body still has to work,
+            # and busybox printf repeats its format rather than ignoring extra
+            # arguments, so the sentence would be printed twice if this just fed
+            # it three. Count the slots and pass exactly that many.
+            _dn=$(dev_name "$_pm")
+            case "$M_WIFI_LEAVE_B" in
+                *%s*%s*%s*) _db=$(printf "$M_WIFI_LEAVE_B" "$_dn" "$_pl" "$_pb") ;;
+                *%s*%s*)    _db=$(printf "$M_WIFI_LEAVE_B" "$_dn" "$_pb") ;;
+                *)          _db=$M_WIFI_LEAVE_B ;;
+            esac
+            notify "$M_WIFI_LEAVE_T" "$_db" min iphone
             # Remember that we ANNOUNCED this one. If it reappears shortly the
             # departure was premature in hindsight, and the return is worth
             # phrasing as a return - "back after 22s" tells the owner it was a
@@ -275,6 +461,12 @@ UBPID=$!
 exec 3<> "$FIFO"
 trap 'kill $UBPID 2>/dev/null; rm -f "$FIFO"' EXIT INT TERM
 
+# Stamp before the first pass rather than 30s into it: the service is up and
+# subscribed at this point, and a console that showed it stale for the first
+# half minute after every boot would be crying wolf on the most frequent
+# condition a travel router has.
+beat
+
 while :; do
     kill -0 "$UBPID" 2>/dev/null || break
     if IFS= read -r -t 1 line <&3; then
@@ -285,21 +477,53 @@ while :; do
         mac=$(printf '%s' "$line" | sed -n 's/.*"address":"\([0-9a-fA-F:]*\)".*/\1/p' | tr 'A-F' 'a-f')
         ifc=$(printf '%s' "$line" | sed -n 's/.*"ifname":"\([^"]*\)".*/\1/p')
         [ -n "$mac" ] && [ -n "$ifc" ] || { resolve_pending; continue; }
-        # Not an AP we report on (the IoT SSID by default): drop the event
-        # before it can create a pending departure, or a device that only ever
-        # lives there would sit in the queue and be announced when its grace
-        # expired.
-        watched_ap "$ifc" || { resolve_pending; continue; }
+        # Resolved once and carried, rather than asked for again inside the
+        # skip test: the network is now needed by every branch below, not just
+        # by the filter.
+        net=$(net_of_ap "$ifc" 2>/dev/null)
+        # Not a network we report on (IoT by default): drop the event before it
+        # can create a pending departure, or a device that only ever lives there
+        # would sit in the queue and be announced when its grace expired.
+        watched_net "$net" || { resolve_pending; continue; }
         band=$(band_of "$ifc")
+        label=$(net_label "$ifc" "$net")
 
         case "$line" in
             *'"sta-authorized"'*)
                 # A pending departure for this MAC means it was moving, not
-                # leaving: cancel it and say nothing.
+                # leaving. WHICH KIND of move decides whether it is news, and
+                # that is what the network on the pending record is for: back
+                # onto the same network is the band hop this debounce exists to
+                # swallow; onto a different one is the crossing that used to be
+                # silenced from both ends at once.
                 if [ -s "$PEND" ] && grep -q "^$mac " "$PEND" 2>/dev/null; then
+                    _pnet=; _plab=
+                    while read -r _qm _qt _qb _qn _ql; do
+                        [ "$_qm" = "$mac" ] || continue
+                        _pnet=$_qn; _plab=$_ql; break
+                    done < "$PEND"
                     grep -v "^$mac " "$PEND" > "$PEND.k" 2>/dev/null
                     if [ -s "$PEND.k" ]; then mv "$PEND.k" "$PEND"; else rm -f "$PEND.k" "$PEND"; fi
-                elif ! assoc_anywhere "$mac" "$ifc"; then
+                    # $net is empty only under NOTIFY_WIFI_ALL_APS with an
+                    # unbridged AP, and "moved to nowhere" is not a sentence.
+                    if [ -n "$net" ] && [ -n "$_pnet" ] && [ "$_pnet" != "-" ] && \
+                       [ "$_pnet" != "$net" ]; then
+                        notify "$M_WIFI_MOVE_T" \
+                             "$(printf "$M_WIFI_MOVE_B" "$(dev_name "$mac")" \
+                                "${_plab:-Wi-Fi}" "$label")" low iphone
+                    fi
+                elif _o=$(assoc_net "$mac" "$ifc"); then
+                    # Already on another watched AP with no departure pending.
+                    # Same network -> a band hop, and silent. Different network
+                    # -> the crossing, announced HERE, because the matching
+                    # departure will (correctly) stay quiet when it arrives.
+                    _onet=${_o%% *}; _olab=${_o#* }
+                    if [ -n "$net" ] && [ "$_onet" != "-" ] && [ "$_onet" != "$net" ]; then
+                        notify "$M_WIFI_MOVE_T" \
+                             "$(printf "$M_WIFI_MOVE_B" "$(dev_name "$mac")" "$_olab" "$label")" \
+                             low iphone
+                    fi
+                else
                     _lt=$(awk -v m="$mac" '$1==m {print $2; exit}' "$LEFT" 2>/dev/null)
                     _away=""
                     if [ -n "$_lt" ]; then
@@ -314,22 +538,30 @@ while :; do
                         notify "$M_WIFI_BACK_T" \
                              "$(printf "$M_WIFI_BACK_B" "$(dev_name "$mac")" "$_away")" low iphone
                     else
+                        # the label, not a second ssid_of: same string when the
+                        # radio answers, and the network name rather than an
+                        # empty gap in the sentence when it does not
                         notify "$M_WIFI_JOIN_T" \
-                             "$(printf "$M_WIFI_JOIN_B" "$(dev_name "$mac")" "$(ssid_of "$ifc")" "$band")" \
+                             "$(printf "$M_WIFI_JOIN_B" "$(dev_name "$mac")" "$label" "$band")" \
                              low iphone
                     fi
                 fi
                 ;;
             *)
-                # If the device is ALREADY on another radio at this instant,
-                # this is hostapd pruning the old association after a roam -
-                # decided, not pending. Costs nothing and removes the delay
-                # entirely for the commonest case.
-                if assoc_anywhere "$mac" "$ifc"; then
+                # Still on another WATCHED AP at this instant? Then this is
+                # either hostapd pruning the old association after a band hop or
+                # the tail of a crossing whose join has already been announced
+                # above. Either way it is decided, not pending, and silent.
+                #
+                # Watched only, deliberately: an AP on the skip list answering
+                # "yes" here is how a real departure from the main network used
+                # to be swallowed by the IoT radio.
+                if assoc_net "$mac" "$ifc" >/dev/null; then
                     :
                 else
                     grep -q "^$mac " "$PEND" 2>/dev/null || \
-                        printf '%s %s %s\n' "$mac" "$(date +%s)" "$band" >> "$PEND"
+                        printf '%s %s %s %s %s\n' "$mac" "$(date +%s)" "$band" \
+                            "${net:--}" "$label" >> "$PEND"
                 fi
                 ;;
         esac
@@ -339,6 +571,11 @@ while :; do
     # seconds later - the read timeout was the real floor on how fast a
     # departure could be reported, not the grace itself
     resolve_pending
+
+    # The loop turned, which is the whole of what this program promises to be
+    # doing when nothing is happening. Rate-limited inside beat, so this is a
+    # /proc read and an arithmetic test on all but one pass in thirty.
+    beat
 
     # Re-check the subscription target, not just the process. If hostapd's
     # objects were rebuilt underneath us the subscriber is deaf; ending the

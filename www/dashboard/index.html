@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=62646815"></script>
+<script src="/os.js?v=ff416e4d"></script>
 <script>
 (function () {
 'use strict';
@@ -1957,8 +1957,14 @@ function renderJobs(d) {
     clear(box);
     var j = d.jobs;
     if (!j || j.state !== 'stale' || !(j.stale || []).length) return;
+    /* Every program the panel can name, in the words the owner would use for
+       what it DOES. The fallback below renders a bare program name, which is
+       the one thing this panel is written to avoid: two of these were reaching
+       the reader as `notifymon` and `wifiwatch` in a paragraph otherwise free
+       of jargon. */
     var names = { dashmon: 'history and reachability', apwatch: 'the Wi-Fi watchdog',
-                  vpnwatch: 'automatic VPN release' };
+                  vpnwatch: 'automatic VPN release', notifymon: 'push notifications',
+                  wifiwatch: 'real-time Wi-Fi alerts' };
     var which = j.stale.map(function (n) { return names[n] || n; }).join(', ');
     var n = OS.note(j.cron === false
         ? 'The scheduler is not running, so nothing that recovers this router on its own ' +
@@ -1966,7 +1972,14 @@ function renderJobs(d) {
           'stops answering. Restart it over SSH with:  /etc/init.d/cron restart'
         : 'A background job has stopped completing: ' + which + '. The scheduler itself is ' +
           'still running, so this is that job failing rather than the whole schedule. ' +
-          'Its log lines are under Settings, in the system log.',
+          'Its log lines are under Settings, in the system log.' +
+          /* The panel now covers a procd SERVICE as well as the cron jobs, and
+             the two have different remedies. Naming the one that applies beats
+             a general instruction the reader has to translate. */
+          (j.stale.indexOf('wifiwatch') >= 0
+             ? '  Real-time Wi-Fi alerts are a service rather than a scheduled job: ' +
+               'restart it over SSH with  /etc/init.d/wifiwatch restart'
+             : ''),
         'warn');
     n.style.marginBottom = '14px';
     box.appendChild(n);

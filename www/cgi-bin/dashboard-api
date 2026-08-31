@@ -1030,6 +1030,36 @@ printf '"ovl_total":%s,"ovl_used":%s,"wan_uptime":%s,"firewall":"%s"},' \
 # The cron daemon is only asked about when a stamp is already stale — 40ms, and
 # the healthy path should not pay it. It separates two diagnoses with different
 # remedies: cron itself down, versus one job failing while the others run.
+
+# Is wifiwatch SUPPOSED to be running? It exits on purpose when notifications
+# are switched off, and procd then respawns it every ten seconds forever, so it
+# stamps nothing at all - configured absence, which must not read as failure.
+# The three keys tested here are exactly the three wifiwatch itself gates on; if
+# they drift apart the console starts either crying wolf or covering for a dead
+# service, so they are named together in both files.
+#
+# Parsed, never sourced, for the reason written all over this project: the file
+# carries values the web UI wrote, and `.` would run them as root. conf_load
+# would do this properly but would also import every NOTIFY_* and MSG_* key into
+# this endpoint's namespace, and this endpoint has a lot of names. Only three
+# keys matter and only their yes/no matters, so the quoted forms conf_load
+# accepts are matched literally instead. Last line wins, as conf_load does.
+notify_wifi_expected() {
+    _nwe=0; _nwu=0; _nww=1
+    [ -r /etc/dashboard/notify.conf ] || return 1
+    while IFS= read -r _nwl || [ -n "$_nwl" ]; do
+        case "$_nwl" in
+            NOTIFY_ENABLED=1|NOTIFY_ENABLED=\"1\"|NOTIFY_ENABLED=\'1\') _nwe=1 ;;
+            NOTIFY_ENABLED=*) _nwe=0 ;;
+            NOTIFY_WIFI=0|NOTIFY_WIFI=\"0\"|NOTIFY_WIFI=\'0\') _nww=0 ;;
+            NOTIFY_WIFI=*) _nww=1 ;;
+            NOTIFY_URL=|NOTIFY_URL=\"\"|NOTIFY_URL=\'\') _nwu=0 ;;
+            NOTIFY_URL=*) _nwu=1 ;;
+        esac
+    done < /etc/dashboard/notify.conf
+    [ "$_nwe" = 1 ] && [ "$_nwu" = 1 ] && [ "$_nww" = 1 ]
+}
+
 JOBS_STATE=ok; JOBS_STALE=""; JOBS_CRON=true
 if [ "$_upnow" -lt 180 ]; then
     JOBS_STATE=grace
@@ -1045,7 +1075,26 @@ else
     # reported dead while running perfectly, which is a false positive on the
     # panel the owner trusts most. The contract is opt-in and the cost of joining
     # it is two lines; adding a console cron job means adding it here too.
-    for _j in dashmon apwatch vpnwatch notifymon; do
+    #
+    # wifiwatch IS ON THIS LIST THOUGH IT IS NOT A CRON JOB, and that is the
+    # right home for it rather than a panel of its own. The contract above is
+    # about the OBSERVABLE - a stamp, and freshness of that stamp - not about
+    # what started the program; a procd service that stops stamping has stopped
+    # doing its job exactly as a cron job that stops stamping has. The owner's
+    # question is one question, "has something that watches this router stopped",
+    # and splitting it across two panels would be splitting it on an
+    # implementation detail they have no reason to know about. What genuinely
+    # differs is the remedy - `/etc/init.d/wifiwatch restart`, not a cron
+    # restart - and that lives in the panel's wording, not in its structure.
+    #
+    # Until it stamped anything, a dead wifiwatch took every Wi-Fi alert with it
+    # while this said "ok": it is the sole event source for arrivals, departures
+    # and network crossings, and nothing else on the console noticed it at all.
+    #
+    # Its heartbeat is written every 30s from the event loop rather than at the
+    # end of a run, so the same 150s bar allows five missed beats. See the note
+    # in wifiwatch on why a daemon's heartbeat means the loop turning.
+    for _j in dashmon apwatch vpnwatch notifymon wifiwatch; do
         # A dead vpnwatch under the CLOSED fail mode is latent, not present, harm:
         # it has nothing to release. Warning about it here would be warning about
         # something currently harmless, which is how an alarm earns a reflex to
@@ -1056,6 +1105,10 @@ else
         case "$_hbv" in ''|*[!0-9]*) _hbv=-1 ;; esac
         _hbage=$((_upnow - _hbv))
         if [ "$_hbv" -lt 0 ] || [ "$_hbage" -lt 0 ] || [ "$_hbage" -gt 150 ]; then
+            # Only now is the config worth reading, and only for wifiwatch: the
+            # same bargain the cron check below makes, where the healthy path
+            # pays nothing for a diagnosis it does not need.
+            [ "$_j" = wifiwatch ] && ! notify_wifi_expected && continue
             JOBS_STALE="$JOBS_STALE $_j"
         fi
     done

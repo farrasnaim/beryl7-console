@@ -46,10 +46,26 @@ CONF=/etc/dashboard/notify.conf
 # it is how an owner learns to ignore the alerts. The gap between the trip and
 # clear levels stops a link hovering at the threshold from flapping the phone
 # all evening.
+# EVERYTHING THIS WRITES IS PRIVATE. cron runs this with a 022 umask, so the
+# alert queue landed world-readable - and since wifiwatch started reporting the
+# guest network, that queue carries guest SSIDs and guest device names. There
+# are no non-root accounts on this router today, which is precisely why nobody
+# noticed; the next person to add one inherits the list. Set before the first
+# file is created rather than chmod'ing afterwards, so there is no window.
+umask 077
+
 STATE=/tmp/.notifystate
 QUEUE=/tmp/.notifyq
 QMAX=25
 QDROP=/tmp/.notifyqdrop
+
+# Both writers of the queue take this lock. See drain_queue for why the queue
+# needed one at all, and why nothing waits on the network while holding it.
+QLOCK=/tmp/.notifyq.lock
+
+# Files created before the umask above existed keep their old mode, so correct
+# them once. Only when they exist, which on a healthy router is almost never.
+{ [ -f "$QUEUE" ] || [ -f "$QDROP" ]; } && chmod 0600 "$QUEUE" "$QDROP" 2>/dev/null
 
 # ---- heartbeat -------------------------------------------------------------
 # The console's Jobs panel calls a cron program healthy when /tmp/.hb-<name> is
@@ -169,14 +185,24 @@ queue() { # same args; called when send failed
     # never arrived - indistinguishable from nothing having happened. Count the
     # drops instead; flush_queue reports the total once delivery works again,
     # which is the moment the owner can actually be told.
-    if [ -f "$QUEUE" ] && [ "$(wc -l < "$QUEUE" 2>/dev/null)" -ge "$QMAX" ]; then
-        _d=0; [ -r "$QDROP" ] && read -r _d < "$QDROP" 2>/dev/null
-        case "$_d" in ''|*[!0-9]*) _d=0 ;; esac
-        printf '%s\n' "$((_d + 1))" > "$QDROP" 2>/dev/null
-        logger -t notifymon "alert queue full ($QMAX) - dropped: $1"
-        return 0
-    fi
-    printf '%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" >> "$QUEUE" 2>/dev/null
+    #
+    # Under the lock, all of it: wifiwatch appends to the same file and reads
+    # the same counter, so two writers deciding independently that there was one
+    # slot left is the same class of bug as the drain race below.
+    #
+    # No `return` inside the block - the lock is released by the brace group's
+    # redirection closing, and jumping out of it only makes that harder to read.
+    {
+        flock -x 9 2>/dev/null
+        if [ -f "$QUEUE" ] && [ "$(wc -l < "$QUEUE" 2>/dev/null)" -ge "$QMAX" ]; then
+            _d=0; [ -r "$QDROP" ] && read -r _d < "$QDROP" 2>/dev/null
+            case "$_d" in ''|*[!0-9]*) _d=0 ;; esac
+            printf '%s\n' "$((_d + 1))" > "$QDROP" 2>/dev/null
+            logger -t notifymon "alert queue full ($QMAX) - dropped: $1"
+        else
+            printf '%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" >> "$QUEUE" 2>/dev/null
+        fi
+    } 9>>"$QLOCK" 2>/dev/null
 }
 
 notify() { # $1 title $2 body $3 priority $4 tags
@@ -192,23 +218,52 @@ flush_queue() {
     # when the queue is empty would put the report below out of reach in exactly
     # the case it exists for - drops recorded, queue since emptied - and the
     # count would sit in /tmp forever with nobody told.
-    [ -s "$QUEUE" ] && drain_queue
+    # $QUEUE.w is the in-flight copy drain_queue works from. It only exists if a
+    # previous run died mid-drain, and it holds real alerts, so it is a reason to
+    # drain even when the queue itself is gone.
+    { [ -s "$QUEUE" ] || [ -s "$QUEUE.w" ]; } && drain_queue
     report_drops
 }
 
 drain_queue() {
-    _tmp="$QUEUE.w"; : > "$_tmp"
+    # TAKE THE QUEUE, THEN SEND. This used to read $QUEUE in place and write the
+    # remainder back over the top, so an append from wifiwatch landing in that
+    # window was overwritten - and overwritten in silence, because the drop
+    # counter is only touched when the queue is FULL. Measured before it was
+    # changed: one line appended a second into a three-second drain vanished and
+    # no counter appeared. An alert the owner never saw and nothing said existed
+    # is the exact failure the queue was built to prevent.
+    #
+    # The rename is what makes the lock cheap. Holding it across the sends
+    # instead would be fewer lines and would block wifiwatch's event loop for as
+    # long as a stalled wget takes - on the very link outage that fills this
+    # queue in the first place, and while it is trying to report who just walked
+    # in. So: rename under the lock, send unlocked, merge back under the lock.
+    _tmp="$QUEUE.w"
+    { flock -x 9 2>/dev/null; mv "$QUEUE" "$_tmp" 2>/dev/null; } 9>>"$QLOCK" 2>/dev/null
+    [ -s "$_tmp" ] || { rm -f "$_tmp"; return 0; }
+    _un="$QUEUE.u"; : > "$_un"
     _stuck=0
     while IFS='|' read -r _t _b _p _g; do
         [ -n "$_t" ] || continue
         if [ "$_stuck" = 1 ]; then
-            printf '%s|%s|%s|%s\n' "$_t" "$_b" "$_p" "$_g" >> "$_tmp"
+            printf '%s|%s|%s|%s\n' "$_t" "$_b" "$_p" "$_g" >> "$_un"
         elif ! send "$_t" "$_b" "$_p" "$_g"; then
             _stuck=1
-            printf '%s|%s|%s|%s\n' "$_t" "$_b" "$_p" "$_g" >> "$_tmp"
+            printf '%s|%s|%s|%s\n' "$_t" "$_b" "$_p" "$_g" >> "$_un"
         fi
-    done < "$QUEUE"
-    if [ -s "$_tmp" ]; then mv "$_tmp" "$QUEUE"; else rm -f "$_tmp" "$QUEUE"; fi
+    done < "$_tmp"
+    rm -f "$_tmp"
+    # The undelivered remainder goes back IN FRONT of anything that arrived while
+    # the sends were running, so the file stays oldest-first for the next drain.
+    if [ -s "$_un" ]; then
+        {
+            flock -x 9 2>/dev/null
+            [ -s "$QUEUE" ] && cat "$QUEUE" >> "$_un"
+            mv "$_un" "$QUEUE" 2>/dev/null
+        } 9>>"$QLOCK" 2>/dev/null
+    fi
+    rm -f "$_un"
 }
 
 # Something was lost while the link was down: say so, once, at the first moment
@@ -222,7 +277,19 @@ report_drops() {
     _dn=0; read -r _dn < "$QDROP" 2>/dev/null
     case "$_dn" in ''|*[!0-9]*) _dn=0 ;; esac
     [ "$_dn" -gt 0 ] || { rm -f "$QDROP"; return 0; }
-    send "$M_QDROP_T" "$(printf "$M_QDROP_B" "$_dn")" low warning && rm -f "$QDROP"
+    send "$M_QDROP_T" "$(printf "$M_QDROP_B" "$_dn")" low warning || return 0
+    # SUBTRACT what was reported rather than deleting the file. wifiwatch may
+    # have counted another drop during the send above, and an unconditional rm
+    # would throw that away - losing the record of a lost alert, which is the one
+    # thing this counter exists to prevent.
+    {
+        flock -x 9 2>/dev/null
+        _dc=0; [ -r "$QDROP" ] && read -r _dc < "$QDROP" 2>/dev/null
+        case "$_dc" in ''|*[!0-9]*) _dc=0 ;; esac
+        _dc=$((_dc - _dn)); [ "$_dc" -gt 0 ] || _dc=0
+        if [ "$_dc" -gt 0 ]; then printf '%s\n' "$_dc" > "$QDROP" 2>/dev/null
+        else rm -f "$QDROP"; fi
+    } 9>>"$QLOCK" 2>/dev/null
 }
 
 # ---- read the facts, the same ones the console reads -----------------------
