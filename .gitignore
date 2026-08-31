@@ -65,6 +65,7 @@ backups/
 !etc/hotplug.d/net/30-tethering
 !etc/hotplug.d/net/40-rrm-neighbors
 !etc/hotplug.d/net/41-packet-steering
+!etc/hotplug.d/net/42-txpower-24
 !etc/hotplug.d/usb/40-usbmuxd
 !etc/init.d/beryl-vpndns
 !etc/init.d/wifiwatch

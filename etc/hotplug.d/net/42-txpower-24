@@ -1,0 +1,50 @@
+#!/bin/sh
+# Lower the transmit power of the 2.4 GHz radio ONLY.
+#
+# WHY NOT uci. `wireless.radio0.txpower` goes through /lib/netifd/wireless/
+# mac80211.sh, which runs `iw phy ${phy} set txpower` on the BARE phy - and phy0
+# is a single wiphy holding both radios. Measured 2026-09-01: setting
+# radio0.txpower=20 and reloading put BOTH bands at 20 dBm, so 5 GHz lost 3 dB
+# for nothing. `iw dev <iface> set txpower` is scoped to the radio that interface
+# belongs to; measured the same day, it moved all three 2.4 GHz BSSes to 20 dBm
+# and left both 5 GHz BSSes at 23. That is the whole reason this file exists.
+#
+# It is runtime state and every reload discards it, hence a hotplug hook rather
+# than a config line.
+#
+# THE NUMBER. Regulatory maximum under country ID is 26 dBm on 2.4 GHz and 23 dBm
+# on 5 GHz, and 5 GHz carries roughly 6.6 dB more path loss at the same distance.
+# So a client hears 2.4 GHz about 9.6 dB louder than 5 GHz and prefers it even
+# when 5 GHz is the better band. Lowering 2.4 narrows that gap:
+#
+#     26 dBm  ->  2.4 GHz louder by 9.6 dB   (regulatory default)
+#     20 dBm  ->  2.4 GHz louder by 3.6 dB   (this setting)
+#     17 dBm  ->  5 GHz louder by 0.6 dB     (where the balance actually flips)
+#
+# Every dB also comes off the clients that have no 5 GHz to move to. The weakest
+# station on this radio measured -63 dBm on 2026-09-01, so 20 dBm is the largest
+# cut that leaves it comfortable. Go lower only while watching that client.
+TXPOWER_DBM=20
+
+[ "$ACTION" = add ] || exit 0
+
+# phy0.0-* is the 2.4 GHz radio. phy0.1-* is 5 GHz and must never be touched
+# here - it is already at its regulatory ceiling and is the band we are trying
+# to make relatively more attractive.
+case "$INTERFACE" in
+	phy0.0-*) ;;
+	*) exit 0 ;;
+esac
+
+iw dev "$INTERFACE" set txpower fixed $((TXPOWER_DBM * 100)) >/dev/null 2>&1
+
+# READ IT BACK. `iw` returns 0 for a request the regulatory domain then clamps,
+# so the only honest confirmation is what the interface reports afterwards.
+GOT=$(iw dev "$INTERFACE" info 2>/dev/null | grep -o 'txpower [0-9]*' | awk '{print $2}')
+
+if [ "$GOT" = "$TXPOWER_DBM" ]; then
+	logger -t txpower24 "2.4 GHz radio set to ${TXPOWER_DBM} dBm (trigger: $INTERFACE)"
+else
+	logger -t txpower24 \
+		"FAILED to set 2.4 GHz power (trigger: $INTERFACE): asked ${TXPOWER_DBM} dBm, interface reports ${GOT:-nothing}"
+fi
