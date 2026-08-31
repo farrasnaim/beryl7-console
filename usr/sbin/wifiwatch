@@ -63,10 +63,19 @@ PEND=/tmp/.wifipend
 # than arriving. Beyond this it is treated as a fresh arrival.
 LEFT=/tmp/.wifileft
 
-# Which access points are worth a message. Default: only those bridged onto the
-# main LAN, which leaves the IoT SSID out - a house full of smart plugs and
-# bulbs reconnects all day and none of it is news. Set NOTIFY_WIFI_ALL_APS=1 to
-# be told about every SSID.
+# Which access points are worth a message, named by the NETWORK behind them.
+#
+# This used to be "only APs bridged onto the main LAN", which was the right
+# answer while the only other network was IoT - a house full of smart plugs
+# reconnects all day and none of it is news. It became the wrong answer the
+# moment a guest network existed: guests are people, their arrivals and
+# departures are exactly the thing worth knowing about, and a LAN-only test
+# silently excluded them for the same reason it excluded the plugs.
+#
+# So the rule is now a skip LIST rather than an allow-one. Default skips `iot`
+# alone; everything else - lan, guest, whatever comes next - notifies like the
+# main network does. NOTIFY_WIFI_SKIP overrides it (space separated), and
+# NOTIFY_WIFI_ALL_APS=1 still reports absolutely everything.
 
 # The config is PARSED, not sourced. It carries a value written by the web UI,
 # and `.` would run it as a shell script every minute as root. conf_load reads
@@ -92,6 +101,7 @@ conf_load "$CONF" || exit 0
 GRACE=${NOTIFY_WIFI_GRACE:-3}
 RETURN_WINDOW=${NOTIFY_WIFI_RETURN:-600}
 WATCH_ALL=${NOTIFY_WIFI_ALL_APS:-0}
+SKIP_NETS=${NOTIFY_WIFI_SKIP:-iot}
 
 HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-router}
 M_WIFI_JOIN_T=${MSG_WIFI_JOIN_T:-"device joined Wi-Fi"}
@@ -168,9 +178,27 @@ ap_list() { iw dev 2>/dev/null | awk '/^\tInterface /{print $2}'; }
 # client lands on, so it is the honest thing to key on.
 LANDEV=$(ubus call network.interface.lan status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
 [ -n "$LANDEV" ] || LANDEV=br-lan
+# Which network is behind this AP. Answered from the KERNEL's bridge table and
+# then resolved to a uci interface name, rather than from the wifi-iface's own
+# `network` option: bridge membership is what actually decides where a client's
+# packets go, and it stays true if someone reconfigures the section without
+# reloading. The uci lookup is only the bridge-device -> name translation.
+net_of_ap() {   # $1 = interface -> prints the network name, or fails
+    _m=$(bridge link show dev "$1" 2>/dev/null | sed -n 's/.*master \([^ ]*\).*/\1/p')
+    [ -n "$_m" ] || return 1
+    for _n in $(uci -q show network 2>/dev/null | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+        [ "$(uci -q get network.$_n.device 2>/dev/null)" = "$_m" ] && { printf '%s' "$_n"; return 0; }
+    done
+    # A LAN whose device option is implied rather than written still resolves.
+    [ "$_m" = "$LANDEV" ] && { printf 'lan'; return 0; }
+    return 1
+}
+
 watched_ap() {   # $1 = interface
     [ "$WATCH_ALL" = "1" ] && return 0
-    bridge link show dev "$1" 2>/dev/null | grep -q "master $LANDEV"
+    _wn=$(net_of_ap "$1") || return 1
+    case " $SKIP_NETS " in *" $_wn "*) return 1 ;; esac
+    return 0
 }
 
 # The hostapd ubus OBJECTS, with their ids. `wifi reload` - which the console's

@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=f4b21037"></script>
+<script src="/os.js?v=62646815"></script>
 <script>
 (function () {
 'use strict';
@@ -263,8 +263,27 @@ function model(d) {
        boundary.
        blocked/idle win, since "not connected" outranks where it would sit. */
     out.forEach(function (dv) {
+        /* WHERE THE DEVICE ACTUALLY IS beats where the class map says it is.
+           `zone` used to come from the class map alone, which is a manual
+           annotation: a guest device nobody had annotated read as zoneless and
+           filed under its BAND, mixed in with the main network - the exact
+           boundary this grouping exists to show. The AP a client is associated
+           with is a live fact and settles it. The class map still answers for
+           devices with no association at all, which is the only case left where
+           nothing else can. */
+        if (dv.links.length && dv.links[0].net) {
+            dv.zone = (dv.links[0].net === LANNET) ? '' : dv.links[0].net;
+        }
+    });
+    out.forEach(function (dv) {
+        /* The group IS the zone name for anything off the primary network.
+           It used to be the literal 'iot' for every such device, which was
+           right while IoT was the only other network and wrong the moment a
+           guest network existed: guests and smart plugs would have been piled
+           under one heading called "IoT", hiding the boundary this split was
+           added to show in the first place. */
         dv.group = (dv.medium === 'idle' || dv.medium === 'blocked') ? dv.medium
-                 : (dv.zone && dv.zone !== LANNET) ? 'iot'
+                 : (dv.zone && dv.zone !== LANNET) ? dv.zone
                  : dv.medium;
     });
     /* How many hosts sit behind each wired bridge port. One means the port's
@@ -276,9 +295,14 @@ function model(d) {
     out.forEach(function (dv) { if (dv.port) dv.portPeers = portN[dv.port]; });
 
     /* within a band: newest Wi-Fi generation first, then name A-Z */
-    var order = { eth: 0, '5': 1, '2.4': 2, iot: 3, blocked: 4, idle: 5 };
+    /* Ethernet and the two LAN bands first, then every other network in name
+       order, then the two states that mean "not here". An unknown group scores
+       3 so a new network lands in the zone band rather than at either end. */
+    var order = { eth: 0, '5': 1, '2.4': 2, blocked: 4, idle: 5 };
+    function rank(g) { return order[g] === undefined ? 3 : order[g]; }
     out.sort(function (a, b) {
-        if (order[a.group] !== order[b.group]) return order[a.group] - order[b.group];
+        if (rank(a.group) !== rank(b.group)) return rank(a.group) - rank(b.group);
+        if (rank(a.group) === 3 && a.group !== b.group) return a.group.localeCompare(b.group);
         if (a.gen !== b.gen) return b.gen - a.gen;
         return a.name.localeCompare(b.name);
     });
@@ -1041,6 +1065,7 @@ var MEDIA = {
     '5':     { k: '5 GHz',     ico: 'wifi', note: '' },
     '2.4':   { k: '2.4 GHz',   ico: 'wifi', note: '' },
     iot:     { k: 'IoT',       ico: 'wifi', note: '' },
+    guest:   { k: 'Guest',     ico: 'wifi', note: '' },
     blocked: { k: 'Blocked',   ico: 'lock', note: 'denied by MAC filter' },
     idle:    { k: 'Not connected', ico: 'dev', note: 'known, currently offline' }
 };
@@ -1072,7 +1097,16 @@ function renderClients(d, M) {
 
     /* Offline devices are counted in the header but not rendered: the
        Overview is the CURRENT state of the network, not its roster. */
-    ['eth', '5', '2.4', 'iot', 'blocked'].forEach(function (key) {
+    /* Built from what is actually present. The zone groups sit between the LAN
+       bands and Blocked, in the same order the sort above put their rows in, so
+       the headings and the rows can never disagree. */
+    var zoneKeys = [];
+    devs.forEach(function (v) {
+        if (['eth', '5', '2.4', 'blocked', 'idle'].indexOf(v.group) >= 0) return;
+        if (zoneKeys.indexOf(v.group) < 0) zoneKeys.push(v.group);
+    });
+    zoneKeys.sort();
+    ['eth', '5', '2.4'].concat(zoneKeys).concat(['blocked']).forEach(function (key) {
         var list = groups[key];
         if (!list || !list.length) return;
         /* A heading that names a radio can open to show that radio. Ethernet
@@ -1083,11 +1117,14 @@ function renderClients(d, M) {
         if (ap && radioOpen[key]) {
             K.want('rd:' + key, radioDetail).node._sync(ap, d);
         }
-        /* The per-row zone chip is suppressed under the IoT heading — it would
-           repeat "iot" on every row of a group that already says so. */
+        /* The per-row zone chip is suppressed under a zone heading — it would
+           repeat the network name on every row of a group that already says
+           it. Tested against the group, not against the literal 'iot', or the
+           guest rows would each carry a redundant "guest" chip. */
+        var inZone = zoneKeys.indexOf(key) >= 0;
         list.forEach(function (v) {
             K.want('r:' + v.mac, function () { return rowFor(v.mac); })
-             .node._sync(v, key === 'iot');
+             .node._sync(v, inZone);
             if (expanded[v.mac]) {
                 detailFor(K.want('d:' + v.mac, function () { return el('div', 'det'); }).node, v, d);
             }
@@ -1099,11 +1136,18 @@ function renderClients(d, M) {
 /* A group heading is built for the widest case — caret and all — and then told
    what it is. Building two shapes would mean rebuilding the node whenever a
    radio came or went, and a rebuilt caret cannot rotate. */
+/* A network this build has never heard of still gets a heading: its own name,
+   title-cased, on the Wi-Fi icon. Falling back rather than indexing blind is
+   what lets someone add a fourth network without editing this file. */
+function mediaOf(key) {
+    return MEDIA[key] || { k: OS.netLabel(key), ico: 'wifi', note: '' };
+}
 function groupHead(key) {
+    var m = mediaOf(key);
     var g = el('div', 'tbl__group');
-    if (MEDIA[key].ico) g.appendChild(OS.icon(MEDIA[key].ico));
-    g.appendChild(el('span', 'tbl__gk', MEDIA[key].k));
-    if (MEDIA[key].note) g.appendChild(el('span', 'row__sub', MEDIA[key].note));
+    if (m.ico) g.appendChild(OS.icon(m.ico));
+    g.appendChild(el('span', 'tbl__gk', m.k));
+    if (m.note) g.appendChild(el('span', 'row__sub', m.note));
     g._n = el('span', 'tbl__gn');
     g.appendChild(g._n);
     g._caret = el('div'); g._caret.style.cssText =

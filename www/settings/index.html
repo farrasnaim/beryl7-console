@@ -106,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=f4b21037"></script>
+<script src="/os.js?v=62646815"></script>
 <script>
 (function () {
 'use strict';
@@ -451,27 +451,28 @@ function ensureRadioPanels(radios) {
    editing would be yanked out from under them. `dirty` already guards that for
    the single-panel case; here the key has to be per-section, so an edit in one
    panel does not freeze the others. */
+/* One panel per secondary NETWORK, built from the list the API returns.
+   Keyed on the network rather than on the wifi-iface section: a single SSID on
+   both radios is two sections and one network, and two panels both titled
+   "Guest network" - each editing half of it - is how one SSID ends up with two
+   different passwords. */
 function renderSecondary(d) {
     var list = (d.wireless && d.wireless.secondary) || [];
     var host = $('#p-secondary');
     if (!host) return;
-
-    /* Nothing to show: drop everything rather than leave an empty frame. */
     if (!list.length) { clear(host); return; }
 
-    /* Rebuild only the panels that are not being edited. A panel mid-edit keeps
-       its DOM node, so the input the owner is typing into survives the poll. */
     var keep = {};
     for (var i = 0; i < list.length; i++) {
-        var sec = list[i];
-        var key = 'sec:' + sec.section;
+        var sec = list[i], key = 'sec:' + sec.network;
         keep[key] = true;
-        var node = host.querySelector('[data-sec="' + sec.section + '"]');
-        if (node && dirty[key]) continue;             /* being edited — leave it */
-        var built = buildSecondaryPanel(sec, d);
+        var node = host.querySelector('[data-sec="' + sec.network + '"]');
+        /* A panel mid-edit keeps its DOM node, so the field being typed into
+           survives the poll. */
+        if (node && dirty[key]) continue;
+        var built = buildSecondaryPanel(sec);
         if (node) host.replaceChild(built, node); else host.appendChild(built);
     }
-    /* A network removed from uci takes its panel with it. */
     var have = host.children, j = have.length;
     while (j--) {
         var nm = have[j].getAttribute('data-sec');
@@ -479,10 +480,10 @@ function renderSecondary(d) {
     }
 }
 
-function buildSecondaryPanel(sec, d) {
-    var key = 'sec:' + sec.section;
+function buildSecondaryPanel(sec) {
+    var key = 'sec:' + sec.network;
     var panel = el('section', 'panel');
-    panel.setAttribute('data-sec', sec.section);
+    panel.setAttribute('data-sec', sec.network);
     panel.style.borderTop = '1px solid var(--line)';
 
     var h = el('div', 'panel__h');
@@ -496,24 +497,33 @@ function buildSecondaryPanel(sec, d) {
     box.style.paddingTop = '4px';
     panel.appendChild(box);
 
-    /* What this network IS, in the two facts that decide whether a device can
-       use it: which band it lives on, and whether its clients are walled off
-       from the main network. `legacy` is the reason the guest SSID exists, so
-       it is stated rather than left for the owner to infer from the cipher. */
-    var facts = [bandLabel(sec.band)];
-    facts.push(sec.isolate ? 'isolated — its devices cannot reach the main network'
-                           : 'not isolated — its devices can see each other');
+    /* The two facts that decide whether a device can use this network: which
+       bands carry it, and whether its clients are walled off. Bands are listed
+       from the sections themselves, so a network on one radio reads "2.4 GHz"
+       and one on both reads "2.4 + 5 GHz" without either being hardcoded. */
+    var bands = (sec.bands || []).map(bandLabel);
+    var facts = [bands.length ? bands.join(' + ') : 'no radio'];
+    facts.push(sec.isolate ? 'isolated \u2014 its devices cannot reach the main network'
+                           : 'not isolated \u2014 its devices can see each other');
     box.appendChild(nowLine(facts));
+
+    if (sec.split) {
+        box.appendChild(OS.note('The access points on this network do not agree: their SSIDs or ' +
+            'passwords differ between bands. A device caches one profile per network name, so it ' +
+            'will connect on one band and fail on the other with no useful error. Saving below ' +
+            'writes the same name and password to both and settles it.', 'bad'));
+    }
     if (sec.legacy) {
-        /* A statement of what this network ADVERTISES, not of what it is for.
-           Both the IoT and the guest network match this test and only one of
-           them was created for old devices - saying "built for" would invent
-           an intent the router has no way to know. */
-        box.appendChild(OS.note('Old devices can join this one. It advertises WPA2-PSK alone, with no ' +
-            'protected management frames and no fast roaming \u2014 the plainest handshake still ' +
-            'worth having. The main network advertises WPA3, PMF and 802.11r beside WPA2, and ' +
-            'supplicants older than roughly 2012 refuse that beacon outright rather than skip ' +
-            'the parts they do not recognise. The cipher here is the same AES-CCMP either way.', 'ok'));
+        /* A statement of what this network ADVERTISES, not of what it is for -
+           the IoT and guest networks both match this test and only one of them
+           was created for old devices. */
+        box.appendChild(OS.note('Old devices can join this one. It advertises WPA2-PSK alone, ' +
+            'with no protected management frames and no fast roaming \u2014 the plainest ' +
+            'handshake still worth having. The main network advertises WPA3, PMF and 802.11r ' +
+            'beside WPA2, and supplicants older than roughly 2012 refuse that beacon outright ' +
+            'rather than skip the parts they do not recognise. Speed is not the trade: the ' +
+            'cipher is the same AES-CCMP, and the radio still offers every generation it has.',
+            'ok'));
     }
 
     var form = el('div');
@@ -536,15 +546,17 @@ function buildSecondaryPanel(sec, d) {
         if (last) renderSecondary(last);
     });
     ar.apply.addEventListener('click', function () {
+        var many = (sec.bands || []).length > 1;
         OS.askConfirm('Apply ' + netLabel(sec.network) + ' settings',
-            'Applying reloads the ' + bandLabel(sec.band) + ' radio briefly \u2014 devices on it ' +
-            'drop and rejoin on their own. Devices on the other networks sharing that radio drop too.',
+            'Applying reloads ' + (many ? 'both radios' : 'the ' + bands[0] + ' radio') +
+            ' briefly \u2014 devices on ' + (many ? 'them' : 'it') + ' drop and rejoin on their ' +
+            'own, including devices on the other networks sharing ' + (many ? 'those radios' : 'it') + '.',
             'Apply', !en.input.checked && !sec.disabled).then(function (go) {
             if (!go) return;
             OS.act(ar.apply, API, {
-                action: 'setiot', section: sec.section, ssid: ssid.value, key: pw.value,
+                action: 'setiot', network: sec.network, ssid: ssid.value, key: pw.value,
                 enabled: en.input.checked ? 1 : 0
-            }, { ok: 'Applied. The radio is reloading.', delay: 6000, failPrefix: 'Not applied' })
+            }, { ok: 'Applied. The radios are reloading.', delay: 8000, failPrefix: 'Not applied' })
               .then(function (j) { if (j && j.ok) markDirty(key, false); });
         });
     });

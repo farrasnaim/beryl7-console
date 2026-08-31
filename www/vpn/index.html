@@ -83,12 +83,17 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=f4b21037"></script>
+<script src="/os.js?v=62646815"></script>
 <script>
 (function () {
 'use strict';
 var API = '/cgi-bin/vpn-api', DASH = '/cgi-bin/dashboard-api';
 var el = OS.el, $ = OS.$, clear = OS.clear, setTxt = OS.setTxt;
+
+/* Networks whose devices never appear on this page. Smart-home gear does not
+   belong in a tunnel and listing it would bury the devices that do. Everything
+   else - the main network, guests - is routable and gets its own section. */
+var SKIP_NETS = ['iot'];
 
 OS.buildShell('/vpn/');
 
@@ -537,23 +542,31 @@ function loadDevices(force) {
                    given router — is excluded by the network it sits on rather
                    than by name. Matching a literal SSID both published this
                    deployment's private one and broke on any other router. */
-                if (a.network !== OS.LANNET) return;
+                /* Devices on a network OTHER than the primary one used to be
+                   dropped here, which quietly made them unroutable: the guest
+                   network's firewall zone forwards to wg, pbr would have applied
+                   a policy to them perfectly well, and the only thing missing
+                   was a row on this page. Smart-home networks stay out - a plug
+                   has no business in a tunnel and listing them is noise - but
+                   that is now a decision about WHICH network, not a blanket
+                   "anything but the LAN". */
+                if (SKIP_NETS.indexOf(a.network) >= 0) return;
                 ((a.assoc && a.assoc.results) || []).forEach(function (c) {
                     var m = String(c.mac).toUpperCase();
                     if (seen[m]) return; seen[m] = 1;
-                    push(m, a.band === '5g' ? '5 GHz' : '2.4 GHz', d);
+                    push(m, a.band === '5g' ? '5 GHz' : '2.4 GHz', d, a.network);
                 });
             });
             (d.wired || []).forEach(function (w) {
                 var m = String(w.mac || '').toUpperCase();
                 if (!m || seen[m]) return; seen[m] = 1;
-                push(m, w.link === 'wired' ? 'Ethernet' : 'Not connected', d);
+                push(m, w.link === 'wired' ? 'Ethernet' : 'Not connected', d, OS.LANNET);
             });
-            function push(m, how, d) {
+            function push(m, how, d, net) {
                 var cm = (d.classmap || {})[m] || {}, h = (d.hosts || {})[m] || {},
                     L = (d.leases || {})[m] || null;
                 out.push({
-                    mac: m, how: how, cls: cm.class || 'default',
+                    mac: m, how: how, net: net || OS.LANNET, cls: cm.class || 'default',
                     name: cm.name || (L && L.name && L.name !== '*' ? L.name : null) ||
                           (h.name ? String(h.name).replace(/\.lan$/, '') : null) || m,
                     ip: (L && L.ip) || cm.ip || (h.ipaddrs && h.ipaddrs[0]) || ''
@@ -639,6 +652,7 @@ function renderDevices(d) {
     Object.keys(assigned).forEach(function (m) {
         if (known[m]) return;
         routable.push({ mac: m, name: nameOf(m), how: 'Not connected',
+                        net: (cmap[m] && cmap[m].zone) || OS.LANNET,
                         cls: (cmap[m] && cmap[m].class) || 'default', ip: '' });
     });
     /* devices arrives sorted; the additions have to be merged into that order
@@ -648,12 +662,42 @@ function renderDevices(d) {
 
     if (!routable.length) {
         box.appendChild(OS.emptyState('No devices to route',
-            'Connected devices on the main network appear here. Offline devices are ' +
-            'left out, and smart-home devices are excluded entirely — they never route through ' +
-            'a tunnel.', 'dev'));
+            'Connected devices appear here, grouped by the network they are on. Offline ' +
+            'devices are left out, and smart-home devices are excluded entirely \u2014 they ' +
+            'never route through a tunnel.', 'dev'));
         return;
     }
-    routable.forEach(function (v) {
+
+    /* GROUPED BY NETWORK, primary first, then the rest by name. Two devices can
+       carry the same tunnel policy and mean quite different things depending on
+       which network they sit on - a guest routed through a tunnel is a guest
+       whose traffic leaves by a different country - so the page says which,
+       once per group, instead of leaving it to be inferred from a row. The sort
+       INSIDE each group is by device name, which is the order the rest of this
+       page uses and the only one worth scanning. */
+    var byNet = {};
+    routable.forEach(function (v) { (byNet[v.net] = byNet[v.net] || []).push(v); });
+    var netOrder = Object.keys(byNet).sort(function (a, b) {
+        if (a === OS.LANNET) return -1;
+        if (b === OS.LANNET) return 1;
+        return a.localeCompare(b);
+    });
+    /* One network means one group, and a heading over a single group is a label
+       for something with nothing to distinguish it from. */
+    var showHeads = netOrder.length > 1;
+
+    netOrder.forEach(function (netKey) {
+    var group = byNet[netKey].slice().sort(function (a, b) {
+        return a.name.localeCompare(b.name);
+    });
+    if (showHeads) {
+        var gh = el('div', 'tbl__group');
+        gh.appendChild(OS.icon(netKey === OS.LANNET ? 'dev' : 'wifi'));
+        gh.appendChild(el('span', 'tbl__gk', OS.netLabel(netKey)));
+        gh.appendChild(el('span', 'tbl__gn', String(group.length)));
+        box.appendChild(gh);
+    }
+    group.forEach(function (v) {
         var cur = assigned[v.mac] || '';
         var curT = tuns.filter(function (t) { return t.iface === cur; })[0];
         var r = el('div', 'row row--route');
@@ -739,6 +783,7 @@ function renderDevices(d) {
         });
         box.appendChild(r);
     });
+    });   /* end of the per-network group */
 }
 
 /* ----------------------------------------------------------- fail-mode --- */

@@ -79,12 +79,37 @@ secondary_sections() {
     done
 }
 
-# Is this a section name secondary_sections would return? Every write below
-# takes the section from the request, so this is what stops a hand-made POST
-# naming `main2g` and reconfiguring the primary network through the guest form.
-is_secondary() {
+# The distinct NETWORKS those sections belong to, in first-seen order.
+#
+# A network is the unit the owner thinks in - "my guest Wi-Fi" - while a section
+# is one AP on one radio, and a single SSID on 2.4 and 5 GHz is two sections. If
+# the page were keyed on sections it would show two panels both titled "Guest
+# network", and changing the password on one and not the other would leave one
+# SSID with two passwords: a failure that looks like a broken client.
+secondary_networks() {
+    _seen=""
+    for _s in $(secondary_sections); do
+        _n=$(uci -q get wireless.$_s.network 2>/dev/null)
+        [ -n "$_n" ] || continue
+        case " $_seen " in *" $_n "*) continue ;; esac
+        _seen="$_seen $_n"
+        printf '%s\n' "$_n"
+    done
+}
+
+# Every secondary section on one network - what a write has to apply to.
+sections_of_net() {   # $1 = network name
+    for _s in $(secondary_sections); do
+        [ "$(uci -q get wireless.$_s.network 2>/dev/null)" = "$1" ] && printf '%s\n' "$_s"
+    done
+}
+
+# Is this a network the forms below are allowed to touch? Every write takes the
+# network from the request, so this is what stops a hand-made POST naming the
+# primary network and reconfiguring it through the guest form.
+is_secondary_net() {
     [ -n "$1" ] || return 1
-    secondary_sections | grep -qxF "$1"
+    secondary_networks | grep -qxF "$1"
 }
 
 # The mac80211 phy backing a radio — `iw phy` capability queries are per-phy.
@@ -615,14 +640,17 @@ if [ "$ACTION" = "setwifi" ]; then
 fi
 
 if [ "$ACTION" = "setiot" ]; then
-    # The section is named by the caller now that there can be more than one.
-    # Omitting it keeps the old single-network behaviour rather than erroring,
-    # so a stale page open in another tab edits the same network it was showing.
-    IOTSEC=$(qs_get_dec section | tr -d '\n\r\t')
-    [ -n "$IOTSEC" ] || IOTSEC=$(secondary_sections | head -1)
-    [ -n "$IOTSEC" ] || fail "no secondary network is configured on this router"
-    is_secondary "$IOTSEC" || fail "that is not a secondary network on this router"
-    IOTRADIO=$(uci -q get wireless.$IOTSEC.device)
+    # Named by NETWORK, and applied to every AP on it. A guest SSID that lives
+    # on both radios is two wifi-iface sections and one network, and they have
+    # to move together: a client caches its security profile per SSID, so two
+    # bands under one name with different passwords is a device that connects
+    # on one band and silently fails on the other.
+    IOTNET=$(qs_get_dec network | tr -d '\n\r\t')
+    [ -n "$IOTNET" ] || IOTNET=$(secondary_networks | head -1)
+    [ -n "$IOTNET" ] || fail "no secondary network is configured on this router"
+    is_secondary_net "$IOTNET" || fail "that is not a secondary network on this router"
+    IOTSECS=$(sections_of_net "$IOTNET")
+    [ -n "$IOTSECS" ] || fail "that network has no access point to configure"
     EN=$(qs_get_dec enabled); case "$EN" in 0|1) ;; *) fail "bad enabled flag" ;; esac
     SSID=$(qs_get_dec ssid | tr -d '\n\r\t')
     KEY=$(qs_get_dec key | tr -d '\n\r')
@@ -632,13 +660,20 @@ if [ "$ACTION" = "setiot" ]; then
         KLEN=$(printf '%s' "$KEY" | wc -c)
         [ "$KLEN" -ge 8 ] && [ "$KLEN" -le 63 ] || fail "password must be 8-63 characters"
     fi
-    uci set wireless.$IOTSEC.disabled="$([ "$EN" = "1" ] && echo 0 || echo 1)"
-    uci set wireless.$IOTSEC.ssid="$SSID"
-    [ -n "$KEY" ] && uci set wireless.$IOTSEC.key="$KEY"
+    IOTRADIOS=""
+    for _sec in $IOTSECS; do
+        uci set wireless.$_sec.disabled="$([ "$EN" = "1" ] && echo 0 || echo 1)"
+        uci set wireless.$_sec.ssid="$SSID"
+        [ -n "$KEY" ] && uci set wireless.$_sec.key="$KEY"
+        _rd=$(uci -q get wireless.$_sec.device 2>/dev/null)
+        case " $IOTRADIOS " in *" $_rd "*) ;; *) IOTRADIOS="$IOTRADIOS $_rd" ;; esac
+    done
     uci commit wireless
-    logger -t settings "secondary network ($IOTSEC) applied via web UI"
+    logger -t settings "secondary network '$IOTNET' applied via web UI ($(printf '%s' "$IOTSECS" | tr '\n' ' '))"
     wifi_reloading
-    ( sleep 1; wifi reload ${IOTRADIO:-} ) >/dev/null 2>&1 &
+    # One reload per DISTINCT radio: reloading per section would restart a
+    # shared radio twice and the second would land mid-flight on the first.
+    ( sleep 1; for _rd in $IOTRADIOS; do [ -n "$_rd" ] && wifi reload "$_rd"; done ) >/dev/null 2>&1 &
     printf '{"ok":true}'
     exit 0
 fi
@@ -1160,24 +1195,38 @@ printf '"wireless":{"radios":[%s],' "$RJ"
 # sae-mixed + ieee80211w + ieee80211r advertises five AKM suites and four RSN
 # capability bits those clients were never written to parse.
 _SECJ=""
-for _sec in $(secondary_sections); do
-    _ss=$(uci -q get wireless.$_sec.ssid)
-    _sd=$(uci -q get wireless.$_sec.disabled); [ "$_sd" = "1" ] || _sd=0
-    _sdev=$(uci -q get wireless.$_sec.device)
-    _sband=$(uci -q get wireless.$_sdev.band)
-    _senc=$(uci -q get wireless.$_sec.encryption)
-    _spmf=$(uci -q get wireless.$_sec.ieee80211w); [ -n "$_spmf" ] || _spmf=0
-    _siso=$(uci -q get wireless.$_sec.isolate); [ "$_siso" = "1" ] || _siso=0
-    case "$_senc" in
-        psk2*|psk-mixed*) [ "$_spmf" = "0" ] && _leg=true || _leg=false ;;
-        *) _leg=false ;;
-    esac
-    _SECJ="$_SECJ${_SECJ:+,}$(printf '{"section":"%s","ssid":"%s","disabled":%s,"band":"%s","network":"%s","encryption":"%s","isolate":%s,"legacy":%s}' \
-        "$(esc "$_sec")" "$(esc "$_ss")" \
+for _net in $(secondary_networks); do
+    _secs=$(sections_of_net "$_net")
+    # Facts are read from the FIRST section and the rest are checked against it,
+    # because the page presents one form for the network: if the two bands have
+    # drifted apart - someone edited uci by hand - the page must say so rather
+    # than silently show one band's settings as though they were both.
+    _first=$(printf '%s' "$_secs" | head -1)
+    _ss=$(uci -q get wireless.$_first.ssid)
+    _sd=$(uci -q get wireless.$_first.disabled); [ "$_sd" = "1" ] || _sd=0
+    _siso=$(uci -q get wireless.$_first.isolate); [ "$_siso" = "1" ] || _siso=0
+    _bands=""; _seclist=""; _leg=true; _split=false
+    for _sec in $_secs; do
+        _sdev=$(uci -q get wireless.$_sec.device)
+        _sband=$(uci -q get wireless.$_sdev.band)
+        case " $_bands " in *" $_sband "*) ;; *) _bands="$_bands $_sband" ;; esac
+        _seclist="$_seclist${_seclist:+,}\"$(esc "$_sec")\""
+        _senc=$(uci -q get wireless.$_sec.encryption)
+        _spmf=$(uci -q get wireless.$_sec.ieee80211w); [ -n "$_spmf" ] || _spmf=0
+        case "$_senc" in
+            psk2*|psk-mixed*) [ "$_spmf" = "0" ] || _leg=false ;;
+            *) _leg=false ;;
+        esac
+        # SSID or key drifted between the bands of one network
+        [ "$(uci -q get wireless.$_sec.ssid)" = "$_ss" ] || _split=true
+        [ "$(uci -q get wireless.$_sec.key)" = "$(uci -q get wireless.$_first.key)" ] || _split=true
+    done
+    _bandj=""
+    for _b in $_bands; do _bandj="$_bandj${_bandj:+,}\"$(esc "$_b")\""; done
+    _SECJ="$_SECJ${_SECJ:+,}$(printf '{"network":"%s","sections":[%s],"bands":[%s],"ssid":"%s","disabled":%s,"isolate":%s,"legacy":%s,"split":%s}' \
+        "$(esc "$_net")" "$_seclist" "$_bandj" "$(esc "$_ss")" \
         "$([ "$_sd" = "1" ] && echo true || echo false)" \
-        "$(esc "$_sband")" "$(esc "$(uci -q get wireless.$_sec.network)")" \
-        "$(esc "$_senc")" \
-        "$([ "$_siso" = "1" ] && echo true || echo false)" "$_leg")"
+        "$([ "$_siso" = "1" ] && echo true || echo false)" "$_leg" "$_split")"
 done
 printf '"secondary":[%s]},' "$_SECJ"
 printf '"lan":{"ipaddr":"%s","netmask":"%s","dhcp":{"start":%s,"limit":%s,"leasetime":"%s"}},' \
