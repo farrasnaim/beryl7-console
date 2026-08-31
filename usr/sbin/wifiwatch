@@ -492,6 +492,16 @@ OBJS=$(ubus list 2>/dev/null | grep '^hostapd\.')
 [ -n "$OBJS" ] || exit 0
 FP0=$(ap_fingerprint); FPTICK=0
 
+# Consecutive failures to parse an event that SHOULD have parsed. Reset by any
+# event whose address and interface come out, including one we then drop for
+# being on a skipped network - that one parsed fine, which is what this counts.
+# Three rather than one: a single malformed line is a transient, three in a row
+# with no good one between them is the schema having moved. Rare events make
+# that slow to trip, which is proportionate - if events are rare, few are being
+# lost; if they are frequent, this trips in seconds.
+PFAIL=0
+PFAIL_MAX=3
+
 # A FIFO rather than a pipe, so the reader can WAKE ON A TIMER as well as on an
 # event. That matters: a held departure has to be confirmed after GRACE seconds
 # even if the airwaves then go completely silent, and a plain `ubus | while
@@ -528,7 +538,18 @@ while :; do
     # the read returned, which IS the loop turning, and it cannot be starved by
     # a `continue` added later. Rate-limited inside beat, so all but one pass in
     # thirty is a /proc read and an arithmetic test.
-    beat
+    #
+    # WITH ONE EXCEPTION, AND IT IS THE WHOLE OF WHY THIS IS NOT AN UNCONDITIONAL
+    # BEAT. Two of the three `continue`s below are benign and constant - hostapd
+    # probe chatter, and events on a network the owner asked not to hear about -
+    # and stamping through those is exactly the false-stale this stamp was moved
+    # up to kill. The third is not benign: failing to parse an event's address
+    # or interface means a REAL event was DISCARDED, and that branch has no
+    # logger line and no counter, so a hostapd schema change would silently end
+    # every Wi-Fi alert. Beating through that would trade a false stale for a
+    # false HEALTHY, which is the worse direction. So the stamp stops once the
+    # parse has failed PFAIL_MAX times with no success in between.
+    [ "$PFAIL" -lt "$PFAIL_MAX" ] && beat
 
     if IFS= read -r -t 1 line <&3; then
         case "$line" in
@@ -537,7 +558,18 @@ while :; do
         esac
         mac=$(printf '%s' "$line" | sed -n 's/.*"address":"\([0-9a-fA-F:]*\)".*/\1/p' | tr 'A-F' 'a-f')
         ifc=$(printf '%s' "$line" | sed -n 's/.*"ifname":"\([^"]*\)".*/\1/p')
-        [ -n "$mac" ] && [ -n "$ifc" ] || { resolve_pending; continue; }
+        if [ -z "$mac" ] || [ -z "$ifc" ]; then
+            PFAIL=$((PFAIL + 1))
+            # Logged once, at the threshold, not per event: the log is where the
+            # cause is, the panel is where the owner looks, and a line per
+            # dropped event would bury the one that matters.
+            [ "$PFAIL" = "$PFAIL_MAX" ] && \
+                logger -t wifiwatch "cannot parse address/ifname out of hostapd events - $PFAIL in a row, events are being dropped; the panel will report this stale"
+            resolve_pending; continue
+        fi
+        # It parsed. Whatever happens to the event after this, the pipeline is
+        # intact, so the failure run ends here.
+        PFAIL=0
         # Resolved once and carried, rather than asked for again inside the
         # skip test: the network is now needed by every branch below, not just
         # by the filter.

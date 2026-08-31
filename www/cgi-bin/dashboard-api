@@ -1098,6 +1098,16 @@ else
     # Its heartbeat is written every 30s from the event loop rather than at the
     # end of a run, so the same 150s bar allows five missed beats. See the note
     # in wifiwatch on why a daemon's heartbeat means the loop turning.
+    #
+    # THE FIVE ARE NOT EQUIVALENT, AND THIS ROW IS THE WEAKEST OF THEM. The four
+    # cron programs beat as their FINAL statement, so their stamp means a run
+    # finished; this one means the loop turned, which is a smaller claim. It was
+    # smaller still until 2026-08-31, when a flood of unparseable hostapd events
+    # was found to keep it stamping while every real event was being discarded -
+    # so the loop now stops stamping once the parse has failed three times in a
+    # row with no success between. The stamp therefore means the loop turned AND
+    # its event pipeline is intact, which is what makes merging it into this row
+    # defensible rather than merely convenient.
     for _j in dashmon apwatch vpnwatch notifymon wifiwatch; do
         # A dead vpnwatch under the CLOSED fail mode is latent, not present, harm:
         # it has nothing to release. Warning about it here would be warning about
