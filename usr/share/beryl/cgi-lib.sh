@@ -277,6 +277,19 @@ notify_flag_on() {   # $1 = raw value; unset or empty means on
 # Caps at three, which is the widest caption shipped. A four-slot override takes
 # the three-slot branch and renders its fourth conversion empty: wrong, but
 # quietly wrong rather than doubled, and four is not a supported arity.
+# A FORMAT CONTAINING A NEWLINE WOULD CORRUPT THIS, and the only reason it
+# cannot happen is a guarantee that lives in another function. awk runs the block
+# once per record, so a two-line caption would emit two count digits and take its
+# slots from the first line alone. Captions come from two places and neither can
+# carry a newline: the shipped defaults are single-line string literals, and an
+# override reaches here through conf_load, which reads its file A LINE AT A TIME
+# and therefore cannot produce a value with a newline in it.
+#
+# That is a coupling, not a property of this function. If conf_load ever learns
+# to join continuation lines, this breaks silently and the notification is the
+# only place it shows. Left unfixed deliberately: the defect is unreachable, and
+# this function has been rewritten twice in one day with the first attempt
+# breaking three shapes it was not aimed at. See the matching note at conf_load.
 cap_fmt() {   # $1 = format, $2..$4 = values
     # ONE PASS OVER THE FORMAT, because the three things that matter about a
     # percent cannot be decided independently:
@@ -391,6 +404,12 @@ wifi_reloading() { printf '%s\n' "$(cut -d. -f1 /proc/uptime)" > /tmp/.wifi-relo
 #
 # Returns 1 if the file cannot be read, so a caller can tell "absent" from
 # "present but empty" instead of guessing.
+# SOMETHING DEPENDS ON THE LINE-AT-A-TIME READ BELOW, and it is not obvious from
+# here. cap_fmt formats notification captions with awk, which is record-oriented,
+# so a caption containing a newline would corrupt every message using it. The
+# only thing preventing that is this loop: `read -r` takes one line, so no value
+# this function produces can contain a newline. If that ever changes - a
+# continuation syntax, a multi-line value - fix cap_fmt in the same commit.
 conf_load() {
     [ -r "$1" ] || return 1
     while IFS= read -r _cl || [ -n "$_cl" ]; do
@@ -487,7 +506,30 @@ guard_post() {
     case "$gp_src" in
         "") gp_ok=0 ;;
         localhost|127.0.0.1|::1) gp_ok=1 ;;
-        *) for gp_ip in $(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}'); do
+        # THE ADDRESSES THE SERVER ACTUALLY ANSWERS ON, not every address the
+        # router happens to hold. This walked `ip -o addr`, which on this box is
+        # seven addresses - the WAN lease, the guest gateway, the IoT gateway and
+        # two tunnel endpoints among them - while uhttpd binds exactly one. Inert
+        # only because nothing serves HTTP on the other six; the guard was simply
+        # wider than the surface it guards, and the widening lived in a different
+        # file from the check.
+        #
+        # Read from uci EVERY TIME rather than computed once: settings-api
+        # rewrites uhttpd's listen address as part of a LAN move, and an address
+        # captured earlier would lock the console out on exactly the operation
+        # that is supposed to keep working.
+        #
+        # Falls back to the interface list when uhttpd names no address of its
+        # own - a wildcard bind, or a deployment that configures it elsewhere.
+        # Failing closed there would be a console nobody can use.
+        *) gp_binds=$(uci -q get uhttpd.main.listen_http; uci -q get uhttpd.main.listen_https)
+           gp_binds=$(printf '%s' "$gp_binds" | tr ' ' '\n' |
+                      sed -e 's/^\[//' -e 's/\].*$//' -e 's/:[0-9]*$//' | grep -v '^$')
+           case "$gp_binds" in
+               ''|0.0.0.0|'::'|*0.0.0.0*|*'::'*)
+                   gp_binds=$(ip -o addr 2>/dev/null | awk '{split($4,x,"/"); print x[1]}') ;;
+           esac
+           for gp_ip in $gp_binds; do
              [ "$gp_ip" = "$gp_src" ] && { gp_ok=1; break; }
            done
            # ...and the names this router answers to. Opening the console by
