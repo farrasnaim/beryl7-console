@@ -212,6 +212,51 @@ read_body() {
     return 0
 }
 
+# ------------------------------------------------ read a config as DATA ------
+# Load KEY=value lines from a config file WITHOUT handing them to the shell as
+# code. Every caller of this used to run `. /etc/dashboard/notify.conf`, and
+# that file carries a value written by the web UI - so a string arriving over
+# HTTP became a line in a file that four root programs then EXECUTED, once a
+# minute from cron. Validating the string on the way in is necessary but is not
+# the durable fix: it leaves the class open to the next writer, and it does
+# nothing about a file that was already written.
+#
+# The defence is structural. The only thing from the file that ever reaches the
+# shell as text is the KEY, which is checked against the portable name charset
+# first. The VALUE reaches it only as `$_cv` - a parameter expansion in an
+# assignment, which the shell does not re-parse, does not word-split and does
+# not glob. A value of `x$(cmd)` therefore ASSIGNS those eight characters
+# instead of running anything, and the same is true of a backtick, a semicolon,
+# a pipe or an embedded newline. An already-poisoned file is defused on its
+# first read after this lands; it is not cleaned up, but it cannot execute.
+#
+# One layer of matching quotes is stripped, because `.` used to consume them
+# and the documented override examples in notifymon are written with them.
+# Unlike `.`, a trailing `# comment` after a value is NOT stripped - it becomes
+# part of the value. Nothing in the shipped format uses one.
+#
+# Returns 1 if the file cannot be read, so a caller can tell "absent" from
+# "present but empty" instead of guessing.
+conf_load() {
+    [ -r "$1" ] || return 1
+    while IFS= read -r _cl || [ -n "$_cl" ]; do
+        case "$_cl" in ''|'#'*) continue ;; esac
+        _ck=${_cl%%=*}
+        [ "$_ck" = "$_cl" ] && continue                 # no '=' on the line
+        case "$_ck" in
+            ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;;      # not a shell name
+        esac
+        _cv=${_cl#*=}
+        case "$_cv" in
+            '"'*'"') _cv=${_cv#\"}; _cv=${_cv%\"} ;;
+            "'"*"'") _cv=${_cv#\'}; _cv=${_cv%\'} ;;
+        esac
+        eval "$_ck=\$_cv"
+    done < "$1"
+    unset _cl _ck _cv
+    return 0
+}
+
 # URL-decode in awk, not sed: busybox sed silently drops the backslash in a
 # `\\x\1` replacement, so the usual sed+printf%b trick returns the string with
 # its escapes stripped and every parsed field comes back empty. awk builds the

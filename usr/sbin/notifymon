@@ -50,8 +50,19 @@ STATE=/tmp/.notifystate
 QUEUE=/tmp/.notifyq
 QMAX=25
 
-[ -r "$CONF" ] || exit 0
-. "$CONF" 2>/dev/null
+# The config is PARSED, not sourced. It carries a value written by the web UI,
+# and `.` would run it as a shell script every minute as root. conf_load reads
+# it as data; see the note on that function. There is no fallback to `.` here
+# on purpose - if the library is missing the safe outcome is not to run.
+BERYL_LIB=/usr/share/beryl/cgi-lib.sh
+if [ -r "$BERYL_LIB" ]; then
+    . "$BERYL_LIB"
+else
+    logger -t notifymon "missing $BERYL_LIB - cannot read the config safely, not running"
+    exit 0
+fi
+
+conf_load "$CONF" || exit 0
 [ "$NOTIFY_ENABLED" = "1" ] || exit 0
 [ -n "$NOTIFY_URL" ] || exit 0
 

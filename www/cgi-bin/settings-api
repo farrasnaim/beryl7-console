@@ -915,16 +915,52 @@ fi
 # traffic contents.
 NOTIFYCONF=/etc/dashboard/notify.conf
 if [ "$ACTION" = "setnotify" ]; then
-    NENABLED=$(qs_get enabled); NURL=$(qs_get_dec url)
+    NENABLED=$(qs_get enabled)
+    # CR and LF are stripped before anything else looks at the value, the same
+    # way ssid and key are handled above. This file is line-structured: a
+    # newline inside a value does not corrupt a string, it forges a whole extra
+    # LINE, and every defence that reasons about "the value" would be reasoning
+    # about only the first one.
+    NURL=$(qs_get_dec url | tr -d '\n\r')
     case "$NENABLED" in 0|1) ;; *) fail "enabled must be 0 or 1" ;; esac
-    if [ "$NENABLED" = "1" ]; then
-        # Refused rather than escaped: this string is handed to a shell as a
-        # command argument by the monitor.
+
+    # VALIDATED ON EVERY PATH, not only when the toggle is on. These checks used
+    # to sit inside `if [ "$NENABLED" = "1" ]`, so saving with the toggle OFF
+    # stored the address unchecked - and the file is read by root programs
+    # whether notifications are enabled or not, because the read happens before
+    # the enabled test in both daemons. "Off" was never a quiet path.
+    #
+    # An empty address is allowed ONLY with the toggle off, which is how the
+    # feature is cleared; with it on, an empty address would arm a monitor that
+    # can never deliver.
+    if [ -z "$NURL" ]; then
+        [ "$NENABLED" = "1" ] && fail "enter the address to send to before switching notifications on"
+    else
         case "$NURL" in
             https://*|http://*) ;;
             *) fail "the address must start with https:// or http://" ;;
         esac
-        case "$NURL" in *[!A-Za-z0-9:/._~-]*) fail "that address has characters this cannot pass on safely" ;; esac
+        [ "${#NURL}" -gt 512 ] && fail "that address is longer than 512 characters"
+        # RFC 3986 characters only. The old list was A-Za-z0-9:/._~- which
+        # rejects ? & and =, so no webhook carrying a query string could be
+        # saved with the toggle ON - and that strictness is what pushed a real
+        # URL down the unvalidated toggle-OFF path. Everything a URI may
+        # legitimately contain is accepted here EXCEPT the apostrophe, which is
+        # legal per RFC but appears in no webhook and complicates every layer
+        # that has to quote this value. Characters that are not URI characters
+        # at all - backslash, backtick, quote, space, angle brackets, braces,
+        # pipe, caret, and every control byte - are refused by that rule alone.
+        #
+        # $ ( ) are legal URI sub-delims and are dropped from the list ANYWAY.
+        # They are the command-substitution set, no real webhook contains one,
+        # and if anyone ever reintroduces a `.` on this file the stored value
+        # still could not substitute a command. Note what this does NOT buy:
+        # & and ; are equally dangerous to a sourced line and CANNOT be dropped,
+        # because query strings need them. That is the whole reason "widen the
+        # allowlist" and "keep sourcing it" were never both available - the
+        # parse in conf_load is what makes accepting & safe, not this list.
+        _urlbad=$(printf '%s' "$NURL" | tr -d 'A-Za-z0-9:/?#[]@!&*+,;=._~%-')
+        [ -n "$_urlbad" ] && fail "that address contains characters a URL cannot hold"
     fi
     mkdir -p /etc/dashboard
     printf 'NOTIFY_ENABLED=%s\nNOTIFY_URL=%s\n' "$NENABLED" "$NURL" > "$NOTIFYCONF.tmp" 2>/dev/null \
@@ -938,8 +974,7 @@ if [ "$ACTION" = "setnotify" ]; then
 fi
 
 if [ "$ACTION" = "testnotify" ]; then
-    [ -r "$NOTIFYCONF" ] || fail "notifications have never been set up — enter an address and enable them above, then test"
-    . "$NOTIFYCONF" 2>/dev/null
+    conf_load "$NOTIFYCONF" || fail "notifications have never been set up — enter an address and enable them above, then test"
     [ "$NOTIFY_ENABLED" = "1" ] && [ -n "$NOTIFY_URL" ] || fail "notifications are switched off — enable them above first, then test"
     _hn=$(uci -q get system.@system[0].hostname); _hn=${_hn:-router}
     if wget -q -T 8 -O /dev/null --header="Title: $_hn: test" --header="Tags: bell" \
@@ -1024,7 +1059,7 @@ printf '"lan":{"ipaddr":"%s","netmask":"%s","dhcp":{"start":%s,"limit":%s,"lease
     "$(jnum "$(uci -q get dhcp.lan.start)")" "$(jnum "$(uci -q get dhcp.lan.limit)")" \
     "$(esc "$(uci -q get dhcp.lan.leasetime)")"
 NOTIFY_ENABLED=0; NOTIFY_URL=""
-[ -r /etc/dashboard/notify.conf ] && . /etc/dashboard/notify.conf 2>/dev/null
+conf_load /etc/dashboard/notify.conf >/dev/null 2>&1
 # The queue file exists only while a send is stranded, i.e. almost never.
 # TEST for it rather than redirecting from it: `wc -l < missing 2>/dev/null`
 # does NOT stay quiet, because the failing redirection is performed by the
