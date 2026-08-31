@@ -505,10 +505,20 @@ resolve_pending() {
             # and busybox printf repeats its format rather than ignoring extra
             # arguments, so the sentence would be printed twice if this just fed
             # it three. Count the slots and pass exactly that many.
-            # The hand-rolled slot count that used to live here is now
-            # cap_fmt, shared with every other caption in both programs. The
-            # ordering below is what the two-slot form expects: device, then
-            # band, because the old sentence had no network in it.
+            # THIS GLOB IS A SECOND PLACE THAT COUNTS SLOTS, and cap_fmt is
+            # the first. It survives because it is not really counting - it is
+            # choosing WHICH VALUES to pass, and the two arities want different
+            # ones: three slots take device, network, band, while the old
+            # two-slot form takes device and band, because that sentence had no
+            # network in it. No argument order satisfies both, so the choice has
+            # to be made before the call.
+            #
+            # It does share cap_fmt's blind spot without sharing its fix: `%%` is
+            # not treated as one token here, so a hand-written override using it
+            # could pick the wrong arm. Unreachable today - this router's config
+            # holds no MSG_* keys at all - and left alone rather than given a
+            # third copy of the counting logic. If cap_fmt's parsing changes,
+            # change this with it: they are two, and only this comment says so.
             _dn=$(dev_name "$_pm")
             case "$M_WIFI_LEAVE_B" in
                 *%s*%s*%s*) _db=$(cap_fmt "$M_WIFI_LEAVE_B" "$_dn" "$_pl" "$_pb") ;;

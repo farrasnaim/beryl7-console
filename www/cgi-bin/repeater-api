@@ -383,8 +383,15 @@ scan_says_encrypted() {
         /^\tInterface / { ifc=$2 }
         /^\t\tchannel / { f=$3; sub(/\(/,"",f); if (f+0 >= 3000) { print ifc; exit } }')
     { [ -n "$_ss_i24" ] && iw dev "$_ss_i24" scan dump 2>/dev/null
-      [ -n "$_ss_i5"  ] && iw dev "$_ss_i5"  scan dump 2>/dev/null; } | awk -v want="$_ss_want" '
-        BEGIN { for (i=0; i<16; i++) { h=sprintf("%X",i); HX[h]=i; HX[tolower(h)]=i } }
+      # ENVIRON, not -v: awk PROCESSES BACKSLASH ESCAPES in a -v value, so an
+      # SSID containing a backslash arrived here already mangled and the
+      # comparison below could never match it. The check fails OPEN - the join
+      # proceeds either way - so all that was lost was the helpful message, but
+      # a comparison that cannot match is worse than no comparison at all.
+      [ -n "$_ss_i5"  ] && iw dev "$_ss_i5"  scan dump 2>/dev/null; } |
+        SS_WANT="$_ss_want" awk '
+        BEGIN { want = ENVIRON["SS_WANT"]
+                for (i=0; i<16; i++) { h=sprintf("%X",i); HX[h]=i; HX[tolower(h)]=i } }
         # iw renders every non-ASCII SSID byte as the literal text \xNN, so a
         # hotspot named with a curly apostrophe arrives here in a form that never
         # equals the decoded string the form submitted. Decoding it is what makes
