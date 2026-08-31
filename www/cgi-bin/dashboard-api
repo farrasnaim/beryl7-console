@@ -1045,19 +1045,23 @@ printf '"ovl_total":%s,"ovl_used":%s,"wan_uptime":%s,"firewall":"%s"},' \
 # keys matter and only their yes/no matters, so the quoted forms conf_load
 # accepts are matched literally instead. Last line wins, as conf_load does.
 notify_wifi_expected() {
-    _nwe=0; _nwu=0; _nww=1
+    _nwe=0; _nwu=0; _nwwv=
     [ -r /etc/dashboard/notify.conf ] || return 1
     while IFS= read -r _nwl || [ -n "$_nwl" ]; do
         case "$_nwl" in
             NOTIFY_ENABLED=1|NOTIFY_ENABLED=\"1\"|NOTIFY_ENABLED=\'1\') _nwe=1 ;;
             NOTIFY_ENABLED=*) _nwe=0 ;;
-            NOTIFY_WIFI=0|NOTIFY_WIFI=\"0\"|NOTIFY_WIFI=\'0\') _nww=0 ;;
-            NOTIFY_WIFI=*) _nww=1 ;;
+            NOTIFY_WIFI=*) _nwwv=${_nwl#NOTIFY_WIFI=} ;;
             NOTIFY_URL=|NOTIFY_URL=\"\"|NOTIFY_URL=\'\') _nwu=0 ;;
             NOTIFY_URL=*) _nwu=1 ;;
         esac
     done < /etc/dashboard/notify.conf
-    [ "$_nwe" = 1 ] && [ "$_nwu" = 1 ] && [ "$_nww" = 1 ]
+    # The Wi-Fi switch is read through the shared helper rather than matched
+    # here, because the daemon gates on the same key and the two readings had
+    # drifted: this one treated anything but 0 as on, the daemon demanded
+    # exactly 1. A value of `yes` made the daemon exit while this kept expecting
+    # its heartbeat, which is a permanent false stale with no way to see why.
+    [ "$_nwe" = 1 ] && [ "$_nwu" = 1 ] && notify_flag_on "$_nwwv"
 }
 
 JOBS_STATE=ok; JOBS_STALE=""; JOBS_CRON=true

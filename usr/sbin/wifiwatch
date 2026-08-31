@@ -106,7 +106,7 @@ fi
 conf_load "$CONF" || exit 0
 [ "$NOTIFY_ENABLED" = "1" ] || exit 0
 [ -n "$NOTIFY_URL" ] || exit 0
-[ "${NOTIFY_WIFI:-1}" = "1" ] || exit 0
+notify_flag_on "$NOTIFY_WIFI" || exit 0    # see cgi-lib: only an explicit 0 is off
 
 # NOTE: every ${NOTIFY_*:-default} below MUST stay after the source above.
 # They were written before it and silently used their defaults forever - the

@@ -227,6 +227,33 @@ read_body() {
     return 0
 }
 
+# --------------------------------------------- one reading of a flag ----------
+# Is a NOTIFY_* switch on?
+#
+# It had two readings. wifiwatch required exactly "1" and exited otherwise; the
+# console's job check treated anything that was not "0" as on. So NOTIFY_WIFI=yes
+# made the watcher exit while the console went on expecting its heartbeat - a
+# permanent "Wi-Fi alerts have stopped" with nothing in the UI able to explain
+# it, because the UI believed they were switched on.
+#
+# THE LOOSE READING WINS: only an explicit 0 turns one off. These knobs default
+# to on and they gate alerting, so the two mistakes are not symmetric. Under the
+# strict reading a typo silently disables a safety feature and reports itself as
+# a fault; under this one a typo leaves it running, which is the direction a
+# misconfigured alarm should fail in.
+#
+# Takes the raw value, quotes and all, because the two callers get it from
+# different places: one from conf_load, which has already stripped them, and one
+# from a line-by-line read of the file, which has not.
+notify_flag_on() {   # $1 = raw value; unset or empty means on
+    _nfv=$1
+    case "_$_nfv" in
+        '_"'*'"') _nfv=${_nfv#\"}; _nfv=${_nfv%\"} ;;
+        "_'"*"'") _nfv=${_nfv#\'}; _nfv=${_nfv%\'} ;;
+    esac
+    [ "$_nfv" != "0" ]
+}
+
 # ------------------------------------------- fill a caption safely ------------
 # Fill a message body with AT MOST as many arguments as it has conversions.
 #
