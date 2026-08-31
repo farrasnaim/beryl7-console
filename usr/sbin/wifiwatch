@@ -511,6 +511,22 @@ beat
 
 while :; do
     kill -0 "$UBPID" 2>/dev/null || break
+
+    # STAMPED HERE, AT THE TOP, and deliberately not at the bottom where it used
+    # to be. The body has three `continue`s - hostapd probe/auth chatter, an
+    # event whose fields will not parse, and an event on a network we do not
+    # report on - and every one of them jumped over a bottom-of-loop stamp. So a
+    # busy IoT network, or a burst of association noise, could hold the loop at
+    # full speed for minutes while the console reported Wi-Fi alerts stale. That
+    # fails safe - a false alarm, never a false all-clear - but a panel that
+    # cries wolf is one nobody reads on the day it is right.
+    #
+    # The top of the body is also the honest place for it: reaching here means
+    # the read returned, which IS the loop turning, and it cannot be starved by
+    # a `continue` added later. Rate-limited inside beat, so all but one pass in
+    # thirty is a /proc read and an arithmetic test.
+    beat
+
     if IFS= read -r -t 1 line <&3; then
         case "$line" in
             *'"sta-authorized"'*|*'"disassoc"'*|*'"deauth"'*) ;;
@@ -613,11 +629,6 @@ while :; do
     # seconds later - the read timeout was the real floor on how fast a
     # departure could be reported, not the grace itself
     resolve_pending
-
-    # The loop turned, which is the whole of what this program promises to be
-    # doing when nothing is happening. Rate-limited inside beat, so this is a
-    # /proc read and an arithmetic test on all but one pass in thirty.
-    beat
 
     # Re-check the subscription target, not just the process. If hostapd's
     # objects were rebuilt underneath us the subscriber is deaf; ending the
