@@ -378,6 +378,7 @@ if [ "$ACTION" = "fixradio" ] || [ "$ACTION" = "fix24g" ] || [ "$ACTION" = "fix5
         [ "$_r" = "$R" ] && { _okr=1; break; }
     done
     [ "$_okr" = "1" ] || { printf '{"ok":false,"error":"unknown radio"}'; exit 0; }
+    wifi_reloading
     ( wifi down "$R" >/dev/null 2>&1; sleep 2; wifi up "$R" >/dev/null 2>&1 ) >/dev/null 2>&1 &
     printf '{"ok":true,"action":"%s","radio":"%s"}' "$ACTION" "$(esc "$R")"
     exit 0
@@ -405,6 +406,7 @@ if [ "$ACTION" = "aclset" ]; then
     # everything only if the section names no device.
     SECRADIO=$(uci -q get wireless.$SEC.device)
     reload_sec() {
+        wifi_reloading
         if [ -n "$SECRADIO" ]; then wifi reload "$SECRADIO" >/dev/null 2>&1 &
         else wifi reload >/dev/null 2>&1 & fi
     }

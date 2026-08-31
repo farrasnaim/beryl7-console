@@ -62,6 +62,22 @@ uptime_s=$(cut -d. -f1 /proc/uptime 2>/dev/null); : "${uptime_s:=0}"
 # A repeater connect legitimately tears radios down for a few seconds.
 [ -f /tmp/.repeater-trying ] && { beat; exit 0; }
 
+# So does any DELIBERATE radio reload - a Wi-Fi or secondary-network change from
+# the console, a width change on a new uplink, the repeater hook switching the
+# non-primary SSIDs. Those paths leave an uptime stamp; anything inside 30s of it
+# is our own reload in flight, not a fault. Measured: a reload has every AP back
+# within about eight seconds, so 30 is generous and still under one cron tick -
+# at worst this skips a single sample, where acting instead would stack a
+# `wifi up` on a reload that is already running.
+if [ -r /tmp/.wifi-reloading ]; then
+    read -r wr_at < /tmp/.wifi-reloading 2>/dev/null
+    case "$wr_at" in ''|*[!0-9]*) wr_at=-1 ;; esac
+    if [ "$wr_at" -ge 0 ]; then
+        wr_age=$((uptime_s - wr_at))
+        [ "$wr_age" -ge 0 ] && [ "$wr_age" -le 30 ] && { beat; exit 0; }
+    fi
+fi
+
 # Which AP sections are *supposed* to be running right now?
 want=0; have=0; missing=""
 for sec in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do

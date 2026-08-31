@@ -212,6 +212,25 @@ read_body() {
     return 0
 }
 
+# --------------------------------------- announce a deliberate radio reload ---
+# apwatch runs once a minute and treats an AP that is configured-but-absent as a
+# fault worth acting on IMMEDIATELY - strike one is `wifi up`. That is right when
+# a radio has genuinely died: this is a travel router, and an AP that is down is
+# the difference between having a way in and not.
+#
+# It is wrong while WE are the reason the AP is missing. A radio reload takes
+# about eight seconds, apwatch samples every sixty, so roughly one reload in
+# seven is sampled mid-flight - measured today, when adding a third AP produced
+# "AP(s) missing: guest2g (3/4 up) - strike 1" followed by a `wifi up` stacked on
+# top of a reload that was already running. It recovered, but that stacking is
+# exactly how the 2026-08-10 outage escalated, and apwatch's own header says so.
+#
+# So every deliberate reload leaves a note first. The repeater path has had this
+# for months as /tmp/.repeater-trying; this is the same idea for the four other
+# paths that reload a radio. Uptime, not wall clock: monotonic, so an NTP step
+# cannot make a stale marker look fresh.
+wifi_reloading() { printf '%s\n' "$(cut -d. -f1 /proc/uptime)" > /tmp/.wifi-reloading 2>/dev/null; }
+
 # ------------------------------------------------ read a config as DATA ------
 # Load KEY=value lines from a config file WITHOUT handing them to the shell as
 # code. Every caller of this used to run `. /etc/dashboard/notify.conf`, and

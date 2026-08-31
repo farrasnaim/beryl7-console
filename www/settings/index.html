@@ -37,11 +37,7 @@
       </div>
       <!-- Hidden until the router turns out to have a network beside the main
            one; most do not. -->
-      <section class="panel" id="p-iot" hidden style="border-top:1px solid var(--line)">
-        <div class="panel__h"><span class="panel__t" id="iotTitle">Secondary network</span>
-          <div class="panel__aside" id="st-iot"></div></div>
-        <div class="panel__b" id="b-iot"></div>
-      </section>
+      <div id="p-secondary"></div>
       <section class="panel" style="border-top:1px solid var(--line)">
         <div class="panel__h"><span class="panel__t">Blocked devices</span>
           <div class="panel__aside"><span class="row__cap" id="st-acl"></span></div></div>
@@ -110,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=02227c11"></script>
+<script src="/os.js?v=f4b21037"></script>
 <script>
 (function () {
 'use strict';
@@ -446,47 +442,113 @@ function ensureRadioPanels(radios) {
     });
 }
 
-function renderIot(d) {
-    var iot = d.wireless.iot;
-    var panel = $('#p-iot');
-    if (!iot) { panel.hidden = true; return; }
-    panel.hidden = false;
-    setTxt($('#iotTitle'), netLabel(iot.network));
-    var st = $('#st-iot'); clear(st);
-    st.appendChild(iot.disabled ? OS.stateWord('OFF', 'idle') : OS.stateWord('UP', 'ok'));
-    if (dirty.iot) { markDirty('iot', true); return; }
-    var box = $('#b-iot'); clear(box);
+/* One panel per secondary network, built from the list the API returns rather
+   than from a fixed section in the markup. There used to be exactly one, and the
+   page assumed it: a second network would have been silently unmanageable, and
+   whichever one uci listed first would have taken the other's name and switch.
 
-    box.appendChild(nowLine([bandLabel(iot.band), 'isolated — its devices cannot reach the main network']));
+   Panels are rebuilt on every poll, so a form the owner is part-way through
+   editing would be yanked out from under them. `dirty` already guards that for
+   the single-panel case; here the key has to be per-section, so an edit in one
+   panel does not freeze the others. */
+function renderSecondary(d) {
+    var list = (d.wireless && d.wireless.secondary) || [];
+    var host = $('#p-secondary');
+    if (!host) return;
+
+    /* Nothing to show: drop everything rather than leave an empty frame. */
+    if (!list.length) { clear(host); return; }
+
+    /* Rebuild only the panels that are not being edited. A panel mid-edit keeps
+       its DOM node, so the input the owner is typing into survives the poll. */
+    var keep = {};
+    for (var i = 0; i < list.length; i++) {
+        var sec = list[i];
+        var key = 'sec:' + sec.section;
+        keep[key] = true;
+        var node = host.querySelector('[data-sec="' + sec.section + '"]');
+        if (node && dirty[key]) continue;             /* being edited — leave it */
+        var built = buildSecondaryPanel(sec, d);
+        if (node) host.replaceChild(built, node); else host.appendChild(built);
+    }
+    /* A network removed from uci takes its panel with it. */
+    var have = host.children, j = have.length;
+    while (j--) {
+        var nm = have[j].getAttribute('data-sec');
+        if (nm && !keep['sec:' + nm]) host.removeChild(have[j]);
+    }
+}
+
+function buildSecondaryPanel(sec, d) {
+    var key = 'sec:' + sec.section;
+    var panel = el('section', 'panel');
+    panel.setAttribute('data-sec', sec.section);
+    panel.style.borderTop = '1px solid var(--line)';
+
+    var h = el('div', 'panel__h');
+    h.appendChild(el('span', 'panel__t', netLabel(sec.network)));
+    var aside = el('div', 'panel__aside');
+    aside.appendChild(sec.disabled ? OS.stateWord('OFF', 'idle') : OS.stateWord('UP', 'ok'));
+    h.appendChild(aside);
+    panel.appendChild(h);
+
+    var box = el('div', 'panel__b');
+    box.style.paddingTop = '4px';
+    panel.appendChild(box);
+
+    /* What this network IS, in the two facts that decide whether a device can
+       use it: which band it lives on, and whether its clients are walled off
+       from the main network. `legacy` is the reason the guest SSID exists, so
+       it is stated rather than left for the owner to infer from the cipher. */
+    var facts = [bandLabel(sec.band)];
+    facts.push(sec.isolate ? 'isolated — its devices cannot reach the main network'
+                           : 'not isolated — its devices can see each other');
+    box.appendChild(nowLine(facts));
+    if (sec.legacy) {
+        /* A statement of what this network ADVERTISES, not of what it is for.
+           Both the IoT and the guest network match this test and only one of
+           them was created for old devices - saying "built for" would invent
+           an intent the router has no way to know. */
+        box.appendChild(OS.note('Old devices can join this one. It advertises WPA2-PSK alone, with no ' +
+            'protected management frames and no fast roaming \u2014 the plainest handshake still ' +
+            'worth having. The main network advertises WPA3, PMF and 802.11r beside WPA2, and ' +
+            'supplicants older than roughly 2012 refuse that beacon outright rather than skip ' +
+            'the parts they do not recognise. The cipher here is the same AES-CCMP either way.', 'ok'));
+    }
 
     var form = el('div');
     var g = el('div', 'fgrid');
-    var ssid = el('input', 'input'); ssid.value = iot.ssid; ssid.maxLength = 32;
+    var ssid = el('input', 'input'); ssid.value = sec.ssid; ssid.maxLength = 32;
     g.appendChild(field('Network name', ssid));
-    var key = el('input', 'input'); key.type = 'password';
-    key.placeholder = 'unchanged'; key.autocomplete = 'new-password'; key.maxLength = 63;
-    g.appendChild(field('Wi-Fi password', key));
+    var pw = el('input', 'input'); pw.type = 'password';
+    pw.placeholder = 'unchanged'; pw.autocomplete = 'new-password'; pw.maxLength = 63;
+    g.appendChild(field('Wi-Fi password', pw));
     form.appendChild(g);
-    var en = checkRow('Network enabled', !iot.disabled);
+    var en = checkRow('Network enabled', !sec.disabled);
     form.appendChild(en.row);
     var ar = applyRow();
     form.appendChild(ar.row);
     box.appendChild(form);
-    watch('iot', form, ar.apply);
+    watch(key, form, ar.apply);
 
-    ar.reset.addEventListener('click', function () { markDirty('iot', false); renderIot(d); });
+    ar.reset.addEventListener('click', function () {
+        markDirty(key, false);
+        if (last) renderSecondary(last);
+    });
     ar.apply.addEventListener('click', function () {
-        OS.askConfirm('Apply IoT network settings',
-            'Applying reloads the ' + bandLabel(iot.band) + ' radio briefly — devices on it drop and rejoin on their own.',
-            'Apply', !en.input.checked && !iot.disabled).then(function (go) {
+        OS.askConfirm('Apply ' + netLabel(sec.network) + ' settings',
+            'Applying reloads the ' + bandLabel(sec.band) + ' radio briefly \u2014 devices on it ' +
+            'drop and rejoin on their own. Devices on the other networks sharing that radio drop too.',
+            'Apply', !en.input.checked && !sec.disabled).then(function (go) {
             if (!go) return;
             OS.act(ar.apply, API, {
-                action: 'setiot', ssid: ssid.value, key: key.value,
+                action: 'setiot', section: sec.section, ssid: ssid.value, key: pw.value,
                 enabled: en.input.checked ? 1 : 0
             }, { ok: 'Applied. The radio is reloading.', delay: 6000, failPrefix: 'Not applied' })
-              .then(function (j) { if (j && j.ok) markDirty('iot', false); });
+              .then(function (j) { if (j && j.ok) markDirty(key, false); });
         });
     });
+    return panel;
 }
 
 /* ---------------------------------------------------------------- blocked -- */
@@ -1134,13 +1196,13 @@ function renderSys(d) {
     var row = el('div', 'inline');
     var lbl = el('div');
     lbl.style.cssText = 'font-size:12.5px;color:var(--ink-2);flex:1;min-width:200px';
-    lbl.textContent = 'Restarting takes about a minute. Wi-Fi, the VPN tunnels and the IoT network all ' +
-        'drop and come back on their own.';
+    lbl.textContent = 'Restarting takes about a minute. Every Wi-Fi network and the VPN tunnels ' +
+        'all drop and come back on their own.';
     row.appendChild(lbl);
     var rb = el('button', 'btn btn--sm btn--danger', 'Restart router');
     rb.addEventListener('click', function () {
         OS.askConfirm('Restart the router',
-            'Everything drops — Wi-Fi, VPN tunnels, the IoT network — while the router boots. ' +
+            'Everything drops — every Wi-Fi network, the VPN tunnels — while the router boots. ' +
             'This page reconnects on its own when it is back.',
             'Restart', true).then(function (go) {
             if (!go) return;
@@ -1456,7 +1518,7 @@ function render(d) {
     ensureRadioPanels(radios);
     radios.forEach(renderRadio);
     equaliseNoteSlots();
-    renderIot(d);
+    renderSecondary(d);
     renderLan(d);
     renderIpv6(d);
     renderNotify(d);

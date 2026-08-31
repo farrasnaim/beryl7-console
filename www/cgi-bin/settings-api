@@ -59,15 +59,32 @@ ap_section_of() {   # $1 = radioN
     printf '%s' "$_first"
 }
 
-# The first AP that is NOT on the primary network — the "IoT"/secondary SSID.
-# Most routers have none, and the UI hides the panel when this is empty.
-secondary_section() {
+# EVERY AP that is not on the primary network, one per line, in uci order.
+#
+# This used to return the FIRST one and stop, which was true right up until there
+# were two. Adding a guest SSID beside the IoT one made "the secondary network"
+# an ordering accident: whichever section uci happened to list first became the
+# one the Settings page edited and the one the repeater hook switched off, and
+# the other was invisible and unmanaged. Nothing announced the swap.
+#
+# So the plural is the honest shape, and it is derived at runtime rather than
+# from any list of names — a router with none emits an empty list and the UI
+# renders no panel, exactly as before; a router with three gets three.
+secondary_sections() {
     for _s in $(wifi_sections); do
         _m=$(uci -q get wireless.$_s.mode 2>/dev/null)
         [ -z "$_m" ] || [ "$_m" = "ap" ] || continue
         _n=$(uci -q get wireless.$_s.network 2>/dev/null)
-        [ -n "$_n" ] && [ "$_n" != "$LANNET" ] && { printf '%s' "$_s"; return 0; }
+        [ -n "$_n" ] && [ "$_n" != "$LANNET" ] && printf '%s\n' "$_s"
     done
+}
+
+# Is this a section name secondary_sections would return? Every write below
+# takes the section from the request, so this is what stops a hand-made POST
+# naming `main2g` and reconfiguring the primary network through the guest form.
+is_secondary() {
+    [ -n "$1" ] || return 1
+    secondary_sections | grep -qxF "$1"
 }
 
 # The mac80211 phy backing a radio — `iw phy` capability queries are per-phy.
@@ -588,6 +605,7 @@ if [ "$ACTION" = "setwifi" ]; then
     logger -t settings "wifi $RADIO applied via web UI (ch=$CH $HT)"
     # the whole subshell must drop stdout, or uhttpd holds the response open
     # until the reload finishes
+    wifi_reloading
     ( sleep 1; wifi reload $RADIO ) >/dev/null 2>&1 &
     # Echo the committed values back: proof the write landed, not just that the
     # request arrived. The radio itself confirms on the next status poll.
@@ -597,8 +615,13 @@ if [ "$ACTION" = "setwifi" ]; then
 fi
 
 if [ "$ACTION" = "setiot" ]; then
-    IOTSEC=$(secondary_section)
+    # The section is named by the caller now that there can be more than one.
+    # Omitting it keeps the old single-network behaviour rather than erroring,
+    # so a stale page open in another tab edits the same network it was showing.
+    IOTSEC=$(qs_get_dec section | tr -d '\n\r\t')
+    [ -n "$IOTSEC" ] || IOTSEC=$(secondary_sections | head -1)
     [ -n "$IOTSEC" ] || fail "no secondary network is configured on this router"
+    is_secondary "$IOTSEC" || fail "that is not a secondary network on this router"
     IOTRADIO=$(uci -q get wireless.$IOTSEC.device)
     EN=$(qs_get_dec enabled); case "$EN" in 0|1) ;; *) fail "bad enabled flag" ;; esac
     SSID=$(qs_get_dec ssid | tr -d '\n\r\t')
@@ -614,6 +637,7 @@ if [ "$ACTION" = "setiot" ]; then
     [ -n "$KEY" ] && uci set wireless.$IOTSEC.key="$KEY"
     uci commit wireless
     logger -t settings "secondary network ($IOTSEC) applied via web UI"
+    wifi_reloading
     ( sleep 1; wifi reload ${IOTRADIO:-} ) >/dev/null 2>&1 &
     printf '{"ok":true}'
     exit 0
@@ -1125,20 +1149,37 @@ RJ=""
 for _r in $RADIOS; do RJ="$RJ${RJ:+,}$(radio_json "$_r")"; done
 printf '"wireless":{"radios":[%s],' "$RJ"
 
-# The secondary network is optional: emit null (not an empty object) so the UI
-# can drop the panel entirely rather than render a form with nothing behind it.
-IOTSEC=$(secondary_section)
-if [ -n "$IOTSEC" ]; then
-    IOT_SSID=$(uci -q get wireless.$IOTSEC.ssid)
-    IOT_DIS=$(uci -q get wireless.$IOTSEC.disabled); [ "$IOT_DIS" = "1" ] || IOT_DIS=0
-    IOT_DEV=$(uci -q get wireless.$IOTSEC.device)
-    IOT_BAND=$(uci -q get wireless.$IOT_DEV.band)
-    printf '"iot":{"ssid":"%s","disabled":%s,"band":"%s","network":"%s"}},' \
-        "$(esc "$IOT_SSID")" "$([ "$IOT_DIS" = "1" ] && echo true || echo false)" \
-        "$(esc "$IOT_BAND")" "$(esc "$(uci -q get wireless.$IOTSEC.network)")"
-else
-    printf '"iot":null},'
-fi
+# Secondary networks are optional and there may be several: emit an ARRAY, empty
+# when there are none, so the UI renders one panel per network and no panel at
+# all on a router that has none. Each entry carries its own section name because
+# that is what the write action needs back.
+#
+# `legacy` is reported rather than inferred in the page, and it is the whole
+# point of the guest SSID: an AP that advertises only WPA-PSK with no PMF is one
+# a pre-2012 supplicant can actually associate with, where the main SSID's
+# sae-mixed + ieee80211w + ieee80211r advertises five AKM suites and four RSN
+# capability bits those clients were never written to parse.
+_SECJ=""
+for _sec in $(secondary_sections); do
+    _ss=$(uci -q get wireless.$_sec.ssid)
+    _sd=$(uci -q get wireless.$_sec.disabled); [ "$_sd" = "1" ] || _sd=0
+    _sdev=$(uci -q get wireless.$_sec.device)
+    _sband=$(uci -q get wireless.$_sdev.band)
+    _senc=$(uci -q get wireless.$_sec.encryption)
+    _spmf=$(uci -q get wireless.$_sec.ieee80211w); [ -n "$_spmf" ] || _spmf=0
+    _siso=$(uci -q get wireless.$_sec.isolate); [ "$_siso" = "1" ] || _siso=0
+    case "$_senc" in
+        psk2*|psk-mixed*) [ "$_spmf" = "0" ] && _leg=true || _leg=false ;;
+        *) _leg=false ;;
+    esac
+    _SECJ="$_SECJ${_SECJ:+,}$(printf '{"section":"%s","ssid":"%s","disabled":%s,"band":"%s","network":"%s","encryption":"%s","isolate":%s,"legacy":%s}' \
+        "$(esc "$_sec")" "$(esc "$_ss")" \
+        "$([ "$_sd" = "1" ] && echo true || echo false)" \
+        "$(esc "$_sband")" "$(esc "$(uci -q get wireless.$_sec.network)")" \
+        "$(esc "$_senc")" \
+        "$([ "$_siso" = "1" ] && echo true || echo false)" "$_leg")"
+done
+printf '"secondary":[%s]},' "$_SECJ"
 printf '"lan":{"ipaddr":"%s","netmask":"%s","dhcp":{"start":%s,"limit":%s,"leasetime":"%s"}},' \
     "$(esc "$(uci -q get network.lan.ipaddr)")" "$(esc "$(uci -q get network.lan.netmask)")" \
     "$(jnum "$(uci -q get dhcp.lan.start)")" "$(jnum "$(uci -q get dhcp.lan.limit)")" \

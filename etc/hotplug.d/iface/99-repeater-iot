@@ -10,28 +10,38 @@
 # Driven by hotplug rather than the /repeater page so it holds however the
 # uplink changes: the web UI, LuCI, a reboot, or the hotel AP dropping out.
 #
-# The section is found, not named: it is the first AP on a network other than
-# the primary one. Set IOT_SECTION below to pin a specific one if your router
-# has several secondary SSIDs and you only want one of them managed.
+# The sections are found, not named: every AP on a network other than the primary
+# one. There is no knob to manage only some of them, and that is deliberate - the
+# reason to switch these off while travelling is that they broadcast home network
+# names in a public place, and that reason applies to all of them equally.
 
 [ "$INTERFACE" = "wwan" ] || exit 0
 
-IOT_SECTION=""
+# THE FILENAME SAYS "iot" AND THE SCOPE IS NOW WIDER THAN THAT.
+#
+# Not renamed on purpose: this path is named in .gitignore's exception list,
+# install.sh's preserve loop and /etc/sysupgrade.conf, and a rename that misses
+# one of those is exactly the class of silent gap that left notifymon out of
+# every backup for two days. The name is stale; the registration is correct.
+#
+# What changed: this took the FIRST wifi-iface not on the primary network and
+# switched only that one. That was right while there was one. With a guest SSID
+# beside the IoT SSID it becomes an ordering accident - one of the two would go
+# on broadcasting a home network name in a hotel lobby, and which one depended
+# on uci section order. Every non-primary AP is switched now.
+IOT_SECTIONS=""
 LOCK=/tmp/.repeater-iot.lock
 LOG="logger -t repeater-iot"
 
-if [ -z "$IOT_SECTION" ]; then
-    for _s in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
-        _m=$(uci -q get wireless.$_s.mode 2>/dev/null)
-        [ -z "$_m" ] || [ "$_m" = "ap" ] || continue
-        _n=$(uci -q get wireless.$_s.network 2>/dev/null)
-        [ -n "$_n" ] && [ "$_n" != "lan" ] && { IOT_SECTION="$_s"; break; }
-    done
-fi
+for _s in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+    _m=$(uci -q get wireless.$_s.mode 2>/dev/null)
+    [ -z "$_m" ] || [ "$_m" = "ap" ] || continue
+    _n=$(uci -q get wireless.$_s.network 2>/dev/null)
+    [ -n "$_n" ] && [ "$_n" != "lan" ] && IOT_SECTIONS="$IOT_SECTIONS $_s"
+done
 
 # nothing to do if this router has no secondary SSID
-[ -n "$IOT_SECTION" ] || exit 0
-[ "$(uci -q get wireless.$IOT_SECTION)" = "wifi-iface" ] || exit 0
+[ -n "$IOT_SECTIONS" ] || exit 0
 
 case "$ACTION" in
     ifup)   want_disabled=1 ;;   # uplink present -> travelling -> IoT off
@@ -39,26 +49,34 @@ case "$ACTION" in
     *) exit 0 ;;
 esac
 
-cur_disabled=$(uci -q get wireless.$IOT_SECTION.disabled)
-[ -n "$cur_disabled" ] || cur_disabled=0
-
-# Already in the desired state: do nothing. Without this guard every uplink
-# renewal/keepalive event would trigger another `wifi reload` and needlessly
-# bounce all Wi-Fi clients.
-[ "$cur_disabled" = "$want_disabled" ] && exit 0
+# Nothing to do unless at least one of them actually needs changing, tested
+# BEFORE taking the lock. An ifupdate storm would otherwise reload the radios
+# once per event for a change already made, and these radios are shared with
+# the primary network - every one of those reloads drops every client.
+NEED=""
+for _s in $IOT_SECTIONS; do
+    _cur=$(uci -q get wireless.$_s.disabled)
+    [ -n "$_cur" ] || _cur=0
+    [ "$_cur" = "$want_disabled" ] || NEED="$NEED $_s"
+done
+[ -n "$NEED" ] || exit 0
 
 # Serialise: ifup/ifdown can fire in quick succession on a flapping uplink.
 exec 9>>"$LOCK"
 flock -n 9 2>/dev/null || exit 0
 
-uci set wireless.$IOT_SECTION.disabled="$want_disabled"
+IOT_RADIOS=""
+for _s in $NEED; do
+    uci set wireless.$_s.disabled="$want_disabled"
+    if [ "$want_disabled" = "1" ]; then
+        $LOG "uplink up -> disabling non-primary SSID '$(uci -q get wireless.$_s.ssid)' ($_s)"
+    else
+        $LOG "uplink down -> re-enabling non-primary SSID '$(uci -q get wireless.$_s.ssid)' ($_s)"
+    fi
+    _r=$(uci -q get wireless.$_s.device 2>/dev/null)
+    case " $IOT_RADIOS " in *" $_r "*) ;; *) IOT_RADIOS="$IOT_RADIOS $_r" ;; esac
+done
 uci commit wireless
-
-if [ "$want_disabled" = "1" ]; then
-    $LOG "uplink up -> disabling IoT SSID '$(uci -q get wireless.$IOT_SECTION.ssid)'"
-else
-    $LOG "uplink down -> re-enabling IoT SSID '$(uci -q get wireless.$IOT_SECTION.ssid)'"
-fi
 
 # Backgrounded: hotplug handlers should return promptly, and `wifi reload`
 # re-enters netifd (which is what invoked us).
@@ -69,9 +87,14 @@ fi
 # rehearsal: six disconnects on the IoT AP, which is the point, and two more on
 # the main 2.4 GHz AP, which is not. Falls back to reloading everything if the
 # radio cannot be read, which is the previous behaviour.
-IOT_RADIO=$(uci -q get wireless.$IOT_SECTION.device 2>/dev/null)
-if [ -n "$IOT_RADIO" ]; then
-    ( sleep 1; wifi reload "$IOT_RADIO" ) >/dev/null 2>&1 &
+# One reload per DISTINCT radio, after every section is committed. Reloading
+# inside the loop above would restart a shared radio once per SSID on it, and
+# the second reload would land while the first was still bringing interfaces
+# up - the mid-flight sampling that turned into the 2026-08-10 outage.
+if [ -n "$(printf '%s' "$IOT_RADIOS" | tr -d ' ')" ]; then
+    # tell apwatch this AP gap is ours, not a fault (see cgi-lib wifi_reloading)
+    printf '%s\n' "$(cut -d. -f1 /proc/uptime)" > /tmp/.wifi-reloading 2>/dev/null
+    ( sleep 1; for _r in $IOT_RADIOS; do [ -n "$_r" ] && wifi reload "$_r"; done ) >/dev/null 2>&1 &
 else
     ( sleep 1; wifi reload ) >/dev/null 2>&1 &
 fi

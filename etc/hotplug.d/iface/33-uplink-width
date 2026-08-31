@@ -71,6 +71,8 @@ restore() {
     uci commit wireless
     rm -f "$STATE"
     $LOG "off the Wi-Fi uplink -> $_r restored to $_h"
+    # tell apwatch this AP gap is ours, not a fault (see cgi-lib wifi_reloading)
+    printf '%s\n' "$(cut -d. -f1 /proc/uptime)" > /tmp/.wifi-reloading 2>/dev/null
     ( wifi reload "$_r" ) >/dev/null 2>&1 &
 }
 
@@ -164,4 +166,6 @@ case "$W" in ''|*[!0-9]*) exit 0 ;; esac
 uci set wireless.$RADIO.htmode="$GEN$MAXW"
 uci commit wireless
 $LOG "uplink on ch$FREQ MHz allows $MAXW MHz -> $RADIO $HT to $GEN$MAXW so the AP can still run"
+# tell apwatch this AP gap is ours, not a fault (see cgi-lib wifi_reloading)
+printf '%s\n' "$(cut -d. -f1 /proc/uptime)" > /tmp/.wifi-reloading 2>/dev/null
 ( wifi reload "$RADIO" ) >/dev/null 2>&1 &
