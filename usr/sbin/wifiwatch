@@ -457,7 +457,7 @@ resolve_pending() {
             # association that predates this process. A late crossing beats the
             # silence, which is what this whole path was producing before.
             notify "$M_WIFI_MOVE_T" \
-                 "$(printf "$M_WIFI_MOVE_B" "$(dev_name "$_pm")" "$_pl" "$_cl")" low iphone
+                 "$(cap_fmt "$M_WIFI_MOVE_B" "$(dev_name "$_pm")" "$_pl" "$_cl")" low iphone
         elif [ "$_here" = 1 ]; then
             :   # back on the same network inside the window - a roam, not news
         else
@@ -465,11 +465,14 @@ resolve_pending() {
             # and busybox printf repeats its format rather than ignoring extra
             # arguments, so the sentence would be printed twice if this just fed
             # it three. Count the slots and pass exactly that many.
+            # The hand-rolled slot count that used to live here is now
+            # cap_fmt, shared with every other caption in both programs. The
+            # ordering below is what the two-slot form expects: device, then
+            # band, because the old sentence had no network in it.
             _dn=$(dev_name "$_pm")
             case "$M_WIFI_LEAVE_B" in
-                *%s*%s*%s*) _db=$(printf "$M_WIFI_LEAVE_B" "$_dn" "$_pl" "$_pb") ;;
-                *%s*%s*)    _db=$(printf "$M_WIFI_LEAVE_B" "$_dn" "$_pb") ;;
-                *)          _db=$M_WIFI_LEAVE_B ;;
+                *%s*%s*%s*) _db=$(cap_fmt "$M_WIFI_LEAVE_B" "$_dn" "$_pl" "$_pb") ;;
+                *)          _db=$(cap_fmt "$M_WIFI_LEAVE_B" "$_dn" "$_pb") ;;
             esac
             notify "$M_WIFI_LEAVE_T" "$_db" min iphone
             # Remember that we ANNOUNCED this one. If it reappears shortly the
@@ -567,7 +570,7 @@ while :; do
                     if [ -n "$net" ] && [ -n "$_pnet" ] && [ "$_pnet" != "-" ] && \
                        [ "$_pnet" != "$net" ]; then
                         notify "$M_WIFI_MOVE_T" \
-                             "$(printf "$M_WIFI_MOVE_B" "$(dev_name "$mac")" \
+                             "$(cap_fmt "$M_WIFI_MOVE_B" "$(dev_name "$mac")" \
                                 "${_plab:-Wi-Fi}" "$label")" low iphone
                     fi
                 elif _o=$(assoc_net "$mac" "$ifc"); then
@@ -578,7 +581,7 @@ while :; do
                     _onet=${_o%% *}; _olab=${_o#* }
                     if [ -n "$net" ] && [ "$_onet" != "-" ] && [ "$_onet" != "$net" ]; then
                         notify "$M_WIFI_MOVE_T" \
-                             "$(printf "$M_WIFI_MOVE_B" "$(dev_name "$mac")" "$_olab" "$label")" \
+                             "$(cap_fmt "$M_WIFI_MOVE_B" "$(dev_name "$mac")" "$_olab" "$label")" \
                              low iphone
                     fi
                 else
@@ -594,13 +597,13 @@ while :; do
                     fi
                     if [ -n "$_away" ]; then
                         notify "$M_WIFI_BACK_T" \
-                             "$(printf "$M_WIFI_BACK_B" "$(dev_name "$mac")" "$_away")" low iphone
+                             "$(cap_fmt "$M_WIFI_BACK_B" "$(dev_name "$mac")" "$_away")" low iphone
                     else
                         # the label, not a second ssid_of: same string when the
                         # radio answers, and the network name rather than an
                         # empty gap in the sentence when it does not
                         notify "$M_WIFI_JOIN_T" \
-                             "$(printf "$M_WIFI_JOIN_B" "$(dev_name "$mac")" "$label" "$band")" \
+                             "$(cap_fmt "$M_WIFI_JOIN_B" "$(dev_name "$mac")" "$label" "$band")" \
                              low iphone
                     fi
                 fi

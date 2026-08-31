@@ -227,6 +227,39 @@ read_body() {
     return 0
 }
 
+# ------------------------------------------- fill a caption safely ------------
+# Fill a message body with AT MOST as many arguments as it has conversions.
+#
+# WHY THIS EXISTS AT ALL: busybox printf REPEATS its whole format string when it
+# is handed more arguments than the format has conversions, rather than ignoring
+# the surplus. So a caption the owner reworded in notify.conf with one %s too
+# few does not lose a value - it prints the entire sentence twice, the second
+# copy filled with whatever was left over. Measured:
+#
+#     $ printf '%s disconnected from %s GHz.' dev net 5
+#     dev disconnected from net GHz.5 disconnected from  GHz.
+#
+# Too few arguments is the quiet direction: the surplus conversions render as
+# empty strings, leaving gaps and stray punctuation.
+#
+# One caption was hardened against this by hand when its arity changed, and its
+# ten siblings were not - which is the four-of-five shape this project keeps
+# producing. This is the whole class, in one place, so a new caption is safe by
+# default rather than by remembering.
+#
+# Caps at three, which is the widest caption shipped. A four-slot override takes
+# the three-slot branch and renders its fourth conversion empty: wrong, but
+# quietly wrong rather than doubled, and four is not a supported arity.
+cap_fmt() {   # $1 = format, $2..$4 = values
+    _cf=$1; shift
+    case "$_cf" in
+        *%s*%s*%s*) printf "$_cf" "${1:-}" "${2:-}" "${3:-}" ;;
+        *%s*%s*)    printf "$_cf" "${1:-}" "${2:-}" ;;
+        *%s*)       printf "$_cf" "${1:-}" ;;
+        *)          printf '%s' "$_cf" ;;
+    esac
+}
+
 # --------------------------------------- announce a deliberate radio reload ---
 # apwatch runs once a minute and treats an AP that is configured-but-absent as a
 # fault worth acting on IMMEDIATELY - strike one is `wifi up`. That is right when

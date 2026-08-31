@@ -123,20 +123,13 @@ HOSTN=$(uci -q get system.@system[0].hostname 2>/dev/null); HOSTN=${HOSTN:-route
 # with no %s is used verbatim. Never put a | in one - it separates fields in
 # the retry queue.
 #
-# THE SLOT COUNT IS PART OF THE CONTRACT. Every caption here is fed a FIXED
-# number of arguments and assumes the shipped count - none of them counts the
-# slots in an override first. That is safe as long as an arity never changes,
-# and it has not for these, but it makes a wrong count in notify.conf worse than
-# a typo. busybox printf REPEATS its whole format when handed more arguments
-# than conversions rather than ignoring the extras. Measured on this router:
-#
-#     $ printf '%s disconnected from %s GHz.' dev net 5
-#     dev disconnected from net GHz.5 disconnected from  GHz.
-#
-# Too few arguments is quieter and just as wrong: the surplus conversions render
-# as empty strings. Match the slot count in the comment above each caption.
-# (wifiwatch's MSG_WIFI_LEAVE_B is the one exception in either file, and only
-# because its arity changed - it counts the slots before filling.)
+# THE SLOT COUNT IS PART OF THE CONTRACT, and getting it wrong used to be worse
+# than a typo: busybox printf REPEATS its whole format when handed more
+# arguments than conversions, so a caption reworded with one %s too few printed
+# the entire sentence twice. Every caption here now goes through cap_fmt, which
+# passes only as many values as the format has slots, so a wrong count degrades
+# instead of doubling. Match the count in the comment above each caption anyway
+# - cap_fmt stops the damage, it cannot guess what you meant.
 M_HELLO_T=${MSG_HELLO_T:-"monitoring started"}
 M_HELLO_B=${MSG_HELLO_B:-"Watching the internet link, connection quality, VPN tunnels, Wi-Fi devices, IPv6, firewall, DNS upstreams and traffic accounting."}
 M_WAN_DOWN_T=${MSG_WAN_DOWN_T:-"internet is down"}
@@ -292,7 +285,7 @@ report_drops() {
     _dn=0; read -r _dn < "$QDROP" 2>/dev/null
     case "$_dn" in ''|*[!0-9]*) _dn=0 ;; esac
     [ "$_dn" -gt 0 ] || { rm -f "$QDROP"; return 0; }
-    send "$M_QDROP_T" "$(printf "$M_QDROP_B" "$_dn")" low warning || return 0
+    send "$M_QDROP_T" "$(cap_fmt "$M_QDROP_B" "$_dn")" low warning || return 0
     # SUBTRACT what was reported rather than deleting the file. wifiwatch may
     # have counted another drop during the send above, and an unconditional rm
     # would throw that away - losing the record of a lost alert, which is the one
@@ -520,10 +513,10 @@ else
     esac
     if [ "$was_link" = "ok" ] && [ "$bad_run" -ge "$NEED" ]; then
         was_link=bad
-        notify "$M_LINK_BAD_T" "$(printf "$M_LINK_BAD_B" "$q_rtt" "$q_loss")" high warning
+        notify "$M_LINK_BAD_T" "$(cap_fmt "$M_LINK_BAD_B" "$q_rtt" "$q_loss")" high warning
     elif [ "$was_link" = "bad" ] && [ "$good_run" -ge "$NEED" ]; then
         was_link=ok
-        notify "$M_LINK_OK_T" "$(printf "$M_LINK_OK_B" "$q_rtt" "$q_loss")" default white_check_mark
+        notify "$M_LINK_OK_T" "$(cap_fmt "$M_LINK_OK_B" "$q_rtt" "$q_loss")" default white_check_mark
     fi
 
     # VPN tunnels, per tunnel, edge-triggered like everything else
@@ -533,9 +526,9 @@ else
             *" $_tn:$_ts "*) ;;
             *" $_tn:"*)
                 if [ "$_ts" = down ]; then
-                    notify "$M_VPN_DOWN_T" "$(printf "$M_VPN_DOWN_B" "$_tn")" high warning
+                    notify "$M_VPN_DOWN_T" "$(cap_fmt "$M_VPN_DOWN_B" "$_tn")" high warning
                 else
-                    notify "$M_VPN_UP_T" "$(printf "$M_VPN_UP_B" "$_tn")" default white_check_mark
+                    notify "$M_VPN_UP_T" "$(cap_fmt "$M_VPN_UP_B" "$_tn")" default white_check_mark
                 fi ;;
             *) ;;   # newly routed tunnel: the device message below covers it
         esac
@@ -546,7 +539,7 @@ else
         case " $was_vdev " in
             *" $_p "*) ;;
             *) notify "$M_VPNDEV_ON_T" \
-                   "$(printf "$M_VPNDEV_ON_B" "$(dev_name "${_p%%>*}")" "${_p##*>}")" \
+                   "$(cap_fmt "$M_VPNDEV_ON_B" "$(dev_name "${_p%%>*}")" "${_p##*>}")" \
                    default lock ;;
         esac
     done
@@ -554,7 +547,7 @@ else
         case " $now_vdev " in
             *" $_p "*) ;;
             *) notify "$M_VPNDEV_OFF_T" \
-                   "$(printf "$M_VPNDEV_OFF_B" "$(dev_name "${_p%%>*}")")" \
+                   "$(cap_fmt "$M_VPNDEV_OFF_B" "$(dev_name "${_p%%>*}")")" \
                    default unlock ;;
         esac
     done
