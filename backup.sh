@@ -41,8 +41,9 @@ SSH_USER=${SSH_USER:-root}
 TARGET="$SSH_USER@$ROUTER"
 OUTDIR=${2:-"$(dirname "$0")/backups"}
 
-say() { printf '\033[1m%s\033[0m\n' "$*"; }
-ok()  { printf '  . %s\n' "$*"; }
+say()  { printf '\033[1m%s\033[0m\n' "$*"; }
+ok()   { printf '  . %s\n' "$*"; }
+warn() { printf '  ! %s\n' "$*"; }
 
 say "Backing up $TARGET"
 mkdir -p "$OUTDIR"
@@ -57,6 +58,19 @@ ssh -n "$TARGET" 'cat /tmp/beryl7-backup.tar.gz' > "$STEM.tar.gz"
 ssh -n "$TARGET" 'rm -f /tmp/beryl7-backup.tar.gz'
 [ -s "$STEM.tar.gz" ] || { echo "backup came back empty — aborting"; rm -f "$STEM.tar.gz"; exit 1; }
 ok "config + console: $(basename "$STEM.tar.gz") ($(wc -c < "$STEM.tar.gz") bytes, $(tar -tzf "$STEM.tar.gz" | wc -l) entries)"
+
+# restore.sh reads the bundle's OWN /etc/sysupgrade.conf to work out which files
+# in /usr/sbin and /etc/init.d belong to the console rather than to the system —
+# there is no other way to tell them apart, and globbing those directories would
+# chmod busybox. A bundle without that file therefore restores into a router
+# whose console programs are all non-executable and whose services are none of
+# them enabled, and says nothing. sysupgrade -b has always included it; assert it
+# rather than assume it, because the failure it guards against is silent.
+if ! tar -tzf "$STEM.tar.gz" | grep -qx "etc/sysupgrade.conf"; then
+    warn "bundle contains no etc/sysupgrade.conf — restore.sh cannot tell console"
+    warn "files from system ones, so a restore from this bundle would leave every"
+    warn "console program non-executable. Do not rely on it."
+fi
 
 # --- package list ------------------------------------------------------------
 # Restoring config onto a fresh firmware is not enough: pbr, wireguard-tools and

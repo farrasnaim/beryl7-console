@@ -91,19 +91,39 @@ ok "configuration and console files written"
 # The CGI exec bits do not survive every transport; a non-executable CGI is a
 # 403 with nothing in the log to explain it.
 #
-# Directories are globbed rather than listed file by file. Every name spelled out
-# here is a name that has to be remembered again the next time something is
-# added, and it was not: pingmon, beryl-pbrtbl and the usb hotplug had all been
-# added to install.sh and never to this list, so a restored router came back
-# with them non-executable — no ping history, no fwmark helper, no iPhone
-# tethering, and nothing anywhere saying why.
+# NOTHING IS LISTED BY NAME HERE. Every name spelled out is a name that has to be
+# remembered again the next time something is added, and it was not: pingmon,
+# beryl-pbrtbl and the usb hotplug had all been added to install.sh and never to
+# this list, so a restored router came back with them non-executable — no ping
+# history, no fwmark helper, no iPhone tethering, and nothing anywhere saying why.
+#
+# The fix at the time globbed /www/cgi-bin and /etc/hotplug.d and left the other
+# two directories as lists — eight /usr/sbin names and four /etc/init.d names,
+# sitting directly under a comment claiming everything was globbed. Both lists
+# happened to be complete, which is the only reason it never cost anything a
+# second time. The next addition would have come back non-executable again.
+#
+# Those two cannot simply be globbed: /usr/sbin/* is busybox and every system
+# binary on the router, and /etc/init.d/* is every system service. What separates
+# a console file from the system's own in those directories is that the console
+# asked for it to be kept — install.sh writes every path it ships into
+# /etc/sysupgrade.conf, `sysupgrade -b` carries that file inside the bundle, and
+# the `sysupgrade -r` above has just restored it. So the bundle names its own
+# files, and this reads them back out. Checked against the live router: the 12
+# paths it selects are exactly the 12 the two lists spelled out, and none of the
+# other 44 files in /usr/sbin.
+#
+# A path listed there that the bundle did not carry simply does not exist, and
+# the -f test skips it.
 ssh -n $SSHOPT "$TARGET" 'chmod 755 /www/cgi-bin/*-api 2>/dev/null
-    chmod 755 /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch \
-              /usr/sbin/beryl-vpndns /usr/sbin/beryl-pbrtbl /usr/sbin/pingmon \
-              /usr/sbin/notifymon /usr/sbin/wifiwatch 2>/dev/null
     chmod 755 /etc/hotplug.d/iface/* /etc/hotplug.d/net/* /etc/hotplug.d/usb/* 2>/dev/null
-    chmod 755 /etc/init.d/cpugovernor /etc/init.d/pingmon /etc/init.d/beryl-vpndns \
-              /etc/init.d/wifiwatch 2>/dev/null
+    if [ -f /etc/sysupgrade.conf ]; then
+        while read -r p; do
+            case "$p" in
+                /usr/sbin/*|/etc/init.d/*) [ -f "$p" ] && chmod 755 "$p" ;;
+            esac
+        done < /etc/sysupgrade.conf
+    fi
     true'
 ok "executable bits reapplied"
 
@@ -112,10 +132,17 @@ ok "executable bits reapplied"
 # re-derives the links from the scripts - idempotent, so it costs nothing when
 # they already exist. The ordinary UPGRADE path (no restore run) gets the same
 # healing from /etc/hotplug.d/iface/12-console-services at first boot.
-ssh -n $SSHOPT "$TARGET" 'for s in pingmon cpugovernor beryl-vpndns wifiwatch; do
-        [ -x "/etc/init.d/$s" ] || continue
-        /etc/init.d/$s enable >/dev/null 2>&1
-    done
+#
+# Same four names as the chmod list above, and the same fix: the bundle's own
+# /etc/sysupgrade.conf says which init scripts belong to the console, so a
+# service added to install.sh is enabled here without this line being touched.
+ssh -n $SSHOPT "$TARGET" 'if [ -f /etc/sysupgrade.conf ]; then
+        while read -r p; do
+            case "$p" in
+                /etc/init.d/*) [ -x "$p" ] && "$p" enable >/dev/null 2>&1 ;;
+            esac
+        done < /etc/sysupgrade.conf
+    fi
     true'
 ok "services enabled for boot"
 

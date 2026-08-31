@@ -128,6 +128,10 @@ say "Installing"
 ssh -n "$TARGET" 'set -e
 S=/tmp/beryl7
 
+# NOTE: no apostrophes anywhere in this block, comments included. It lives
+# inside a single-quoted ssh argument, and one apostrophe ends the quote and
+# breaks the installer.
+
 # INSTALL A FILE AND SET ITS MODE IN THE SAME STATEMENT.
 #
 # There used to be a copy list and, forty lines below it, a hand-maintained
@@ -140,18 +144,37 @@ S=/tmp/beryl7
 # a firmware upgrade AND what backup.sh reads to decide what to save.
 #
 # The two lists cannot drift now because there is only one: the mode is applied
-# to the file this call just wrote, named from the source argument. A program
-# added to the repo under usr/sbin, etc/init.d or etc/hotplug.d is installed and
-# made executable with no list to update anywhere.
+# to the file this call just wrote, named from the source argument. Anything
+# added to the repo under www, usr/sbin, etc/init.d or etc/hotplug.d is
+# installed, and made executable where that applies, with no list to update
+# anywhere.
 inst_x() { cp "$1" "$2/" && chmod 755 "$2/${1##*/}"; }
 inst_r() { cp "$1" "$2/" && chmod 644 "$2/${1##*/}"; }
 
 # Web pages and CGI. The console never replaces LuCI: it installs alongside it
 # and LuCI stays reachable at /cgi-bin/luci/.
+#
+# ONE GLOB OVER www/ FOR BOTH HALVES. The comment above claims the install is
+# glob-driven with no list to update anywhere, and that was true of usr/sbin,
+# init.d, hotplug and cgi-bin but FALSE here: the pages were a fixed six-name
+# `cp -r` and the three top-level assets were named one by one. A new page
+# directory was therefore uploaded, was walked by the preserve check, and was
+# never copied. Add its preserve entry as well and the entire run passed clean
+# with the page absent from the router.
+# cgi-bin is the one directory skipped, because its files are installed below at
+# mode 755; a `cp -r` of the directory would carry whatever mode the staging tar
+# happened to leave, and a CGI that is not executable returns 403.
 mkdir -p /www/cgi-bin
-for f in $S/www/os.css $S/www/os.js $S/www/theme.css; do inst_r "$f" /www; done
-cp -r $S/www/dashboard $S/www/vpn $S/www/repeater $S/www/tethering $S/www/settings /www/
-cp -r $S/www/legacy /www/
+for f in $S/www/*; do
+    # `case` rather than `[ -d "$f" ] && continue`: a false test as the last
+    # command of a loop body returns 1, and this whole block runs under `set -e`.
+    if [ -d "$f" ]; then
+        case "${f##*/}" in cgi-bin) continue ;; esac
+        cp -r "$f" /www/
+    else
+        inst_r "$f" /www
+    fi
+done
 for f in $S/www/cgi-bin/*-api; do inst_x "$f" /www/cgi-bin; done
 
 # The helpers every CGI sources. Outside /www on purpose: uhttpd would serve
@@ -191,45 +214,91 @@ fi
 
 # cron. dashmon feeds the Overview history panels; the two watchdogs are
 # optional but harmless. Added only if absent, so re-running does not duplicate.
+#
+# The jobs come from the repo copy of etc/crontabs/root, which is staged like
+# any other file, so adding a scheduled program there is the whole change - the
+# four names used to be spelled out here as well, a second place to forget.
+# The grep matches on the PROGRAM rather than the whole line, deliberately: a
+# schedule you have edited by hand still counts as present, where matching the
+# whole line would quietly append the shipped copy beside yours.
 touch /etc/crontabs/root
-for job in /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/notifymon; do
-    grep -qF "$job" /etc/crontabs/root || echo "* * * * * $job" >> /etc/crontabs/root
-done
+while read -r m h dom mon dow prog; do
+    case "$m" in ""|\#*) continue ;; esac
+    grep -qF "$prog" /etc/crontabs/root || echo "$m $h $dom $mon $dow $prog" >> /etc/crontabs/root
+done < $S/etc/crontabs/root
 /etc/init.d/cron enable >/dev/null 2>&1 || true
 /etc/init.d/cron restart >/dev/null 2>&1 || true
 echo "  . cron entries present"
 
-# The one always-running piece: a 1-second probe whose 5-minute ring is what
-# makes the Overview ping / loss / jitter history survive the dashboard being
-# closed. procd rather than cron, because cron floors at a minute and a
-# five-minute chart needs seconds. See the header of /usr/sbin/pingmon.
-/etc/init.d/pingmon enable  >/dev/null 2>&1 || true
-/etc/init.d/wifiwatch enable  >/dev/null 2>&1 || true
-/etc/init.d/wifiwatch restart >/dev/null 2>&1 || true
-/etc/init.d/pingmon restart >/dev/null 2>&1 || true
-echo "  . pingmon running"
-
-# Recomputes the VPN nftables rules at boot, BEFORE fw4 loads them: S18 against
-# S19 for the firewall. Without it the last generated file — including a
-# degraded one — is what comes back after every reboot. It owns no process, so
-# there is nothing to start here beyond registering the boot link.
+# REGISTER EVERY INIT SCRIPT THIS CONSOLE SHIPS, DERIVED FROM THE STAGED TREE.
 #
-# NOTE: no apostrophes anywhere in this block. It lives inside a single-quoted
-# ssh argument, and one apostrophe ends the quote and breaks the installer.
-/etc/init.d/beryl-vpndns enable >/dev/null 2>&1 || true
-echo "  . vpn rules regenerate at boot"
-
-# cpugovernor was copied and made executable but never enabled, so on a fresh
-# install it sat there doing nothing: the governor tuning is silent either way,
-# which is exactly why nobody noticed. Enabling it here is what makes a clean
-# install work. Across a FIRMWARE UPGRADE none of these enables survive - the
-# keep list preserves init scripts, not rc.d links - and the boot-time guard
+# The four names used to be spelled out across three paragraphs here, and the
+# cost of that was cpugovernor: copied, made executable, and never enabled, so
+# on a fresh install it sat there doing nothing. Governor tuning is silent
+# either way, which is exactly why nobody noticed. Adding etc/init.d/<name> to
+# the repo is now the whole change.
+#
+# Across a FIRMWARE UPGRADE none of these enables survive - the keep list
+# preserves init scripts, not rc.d links - and the boot-time guard
 # /etc/hotplug.d/iface/12-console-services re-registers whatever is missing.
-/etc/init.d/cpugovernor enable  >/dev/null 2>&1 || true
-/etc/init.d/cpugovernor restart >/dev/null 2>&1 || true
-echo "  . cpugovernor running"
+for f in $S/etc/init.d/*; do
+    /etc/init.d/${f##*/} enable >/dev/null 2>&1 || true
+done
+echo "  . services registered for boot"
+
+# STARTED HERE BY NAME, and this list is deliberate rather than forgotten: what
+# distinguishes these is a reason to be running BEFORE the next reboot rather
+# than after it. beryl-vpndns is the counter-example and must NOT be started -
+# it recomputes the VPN nftables rules at boot, S18 against fw4 at S19, so
+# running it now would rewrite the live ruleset for no benefit.
+#   pingmon     a 1-second probe whose 5-minute ring is what makes the Overview
+#               ping / loss / jitter history survive the dashboard being closed.
+#               procd rather than cron, because cron floors at a minute and a
+#               five-minute chart needs seconds. See /usr/sbin/pingmon.
+#   wifiwatch   nothing collects radio state until it runs.
+#   cpugovernor one-shot governor tuning, silent either way.
+# `if`, and an explicit `|| true`, because `[ -x ... ] && cmd` under `set -e`
+# aborts the whole block the moment cmd fails - the trailing status of an AND
+# list is the status of its last command, and set -e does not forgive that one.
+for s in pingmon wifiwatch cpugovernor; do
+    if [ -x "/etc/init.d/$s" ]; then
+        /etc/init.d/$s restart >/dev/null 2>&1 || true
+    fi
+done
+echo "  . pingmon, wifiwatch and cpugovernor running"
 
 # Keep everything across a sysupgrade.
+#
+# THE ONE LIST IN THIS FILE THAT IS DELIBERATELY HAND-WRITTEN, because it has to
+# name paths the staged tree cannot know about: runtime state (/etc/dashboard),
+# generated output (/etc/nftables.d/30-beryl-vpndns.nft), and files that belong
+# to packages the console only wires up. What keeps it honest is the Verifying
+# section below, which walks the staged tree and fails when a shipped file is
+# not covered here - so the reconciliation is derived even though the list is
+# not.
+#
+# Checked against /lib/upgrade/keep.d on the router before adding anything, and
+# entries the base system already covers are deliberately absent: /etc/rc.local
+# and /etc/lockdown come from base-files-essential and usbmuxd. /etc/crontabs
+# and /etc/nftables.d are likewise covered by busybox and firewall4, and are
+# named anyway - narrowing a directory the base system keeps wholesale costs
+# nothing and documents what this console depends on.
+#
+# /etc/dnsmasq.conf and /etc/nlbwmon were missing here while the live router had
+# both, which is the drift this closes: keep.d covers /etc/dnsmasq.d/ but NOT
+# /etc/dnsmasq.conf, and covers /etc/nlbwmon not at all.
+#   /etc/nlbwmon      the Traffic panel history. Not owned by any package - the
+#                     database directory nlbwmon is pointed at - so nothing else
+#                     preserves it and a firmware upgrade silently starts the
+#                     per-device accounting over from zero.
+#   /etc/dnsmasq.conf hand-owned on this router because https-dns-proxy is set
+#                     to dnsmasq_config_update=- , which stops anything from
+#                     regenerating it. MEASURED, not assumed: today the file is
+#                     the packaged sample and holds no active directive at all -
+#                     the AdGuard forwarding lives in uci dhcp, which keep.d
+#                     already preserves under /etc/config/ - so losing it breaks
+#                     nothing TODAY. It is kept because the setting above makes
+#                     it the only place a hand-written dnsmasq directive can go.
 touch /etc/sysupgrade.conf
 for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/vpn \
          /www/repeater /www/tethering /www/settings \
@@ -253,6 +322,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /www/cgi-bin/version-api \
          /etc/init.d/beryl-vpndns \
          /etc/nftables.d/30-beryl-vpndns.nft \
+         /etc/dnsmasq.conf /etc/nlbwmon \
          /etc/adguardhome; do
     grep -qxF "$p" /etc/sysupgrade.conf || echo "$p" >> /etc/sysupgrade.conf
 done
@@ -270,10 +340,25 @@ BASE=$(ssh -n "$TARGET" 'a=$(uci -q get uhttpd.main.listen_http 2>/dev/null | tr
     [ -n "$a" ] || a=$(uci -q get network.lan.ipaddr 2>/dev/null)
     [ -n "$a" ] || a=127.0.0.1
     echo "$a"')
-for ep in dashboard-api rate-api vpn-api repeater-api tethering-api settings-api probe-api; do
+# The endpoints come from the tree, not from a list written here. The list here
+# named seven of the eight shipped CGI, and the one it left out was version-api —
+# precisely the endpoint an install can break without anyone seeing it. os.js
+# compares its own build stamp against what version-api answers, so if that
+# endpoint is dead the comparison never runs and a cached page keeps claiming to
+# be current for as long as the browser holds it. Reading the names from the
+# repo is safe here: the staged tree was already proved identical to it above.
+EPBAD=0
+for f in "$SRC"/www/cgi-bin/*-api; do
+    ep=${f##*/}
     CODE=$(ssh -n "$TARGET" "uclient-fetch -q -O /dev/null http://$BASE/cgi-bin/$ep 2>&1 && echo 200 || echo ERR")
+    [ "$CODE" = 200 ] || EPBAD=$((EPBAD + 1))
     printf '  %-14s %s\n' "$ep" "$CODE"
 done
+# Not fatal - a re-install onto a working console answers 200 whether or not this
+# run did anything, so these are the weak half and the block below is the real
+# check. But a silent ERR in a column of 200s is exactly the kind of thing that
+# gets scrolled past, so say it in words.
+[ "$EPBAD" = 0 ] || warn "$EPBAD endpoint(s) did not answer — installed, but not being served"
 
 # ENDPOINTS ARE THE EASY HALF, AND THEY LIE ON A RE-INSTALL. cp over an existing
 # file keeps the destination's mode, so on a router that already had a working
@@ -283,28 +368,49 @@ done
 # for a day while absent from /etc/sysupgrade.conf, so every backup taken in that
 # window silently lacked the file. Checking it here is what would have said so.
 say "Verifying the quiet half"
-# The preserve check walks the STAGING TREE, not a list written here. Staging is
-# the repo, so this asks the only question worth asking - "is every file this
-# console ships going to survive a firmware upgrade, and therefore appear in a
-# backup?" - and it keeps asking it correctly for files that do not exist yet.
-# A hardcoded list here would be a fourth list to forget, which is the defect
-# this whole change is about.
+# EVERY CHECK BELOW READS THE STAGING TREE, not a list written here. Staging is
+# the repo, so this asks the only questions worth asking - "did every file this
+# console ships actually arrive, and will it survive a firmware upgrade and
+# therefore appear in a backup?" - and it keeps asking them correctly for files
+# that do not exist yet.
+#
+# THE PREVIOUS VERSION COULD PASS ON AN ABSENCE. Its service loop read four
+# hardcoded names and skipped any whose init script was missing, so deleting one
+# from the repo produced a clean pass and exit 0: the check was satisfied by the
+# very file it existed to check being gone. Its cron loop read four more names
+# that had to be kept in step with the shipped crontab by hand. And it asked
+# only whether files were PRESERVED, never whether they were INSTALLED, so a
+# page directory that was staged, listed for preservation and never copied also
+# passed clean. All three are read from the tree now.
+#
+# NOTE: no apostrophes anywhere in this block either - single-quoted ssh
+# argument, same rule as the install block above.
 ssh -n "$TARGET" '
     rc=0
-    for j in dashmon apwatch vpnwatch notifymon; do
-        grep -qF "/usr/sbin/$j" /etc/crontabs/root || { echo "  ! cron entry missing: $j"; rc=1; }
-    done
-    for svc in pingmon cpugovernor beryl-vpndns wifiwatch; do
-        [ -x "/etc/init.d/$svc" ] || continue
+    S=/tmp/beryl7
+    cd $S || { echo "  ! staging tree is gone - nothing was verified"; exit 1; }
+
+    while read -r m h dom mon dow prog; do
+        case "$m" in ""|\#*) continue ;; esac
+        grep -qF "$prog" /etc/crontabs/root || { echo "  ! cron entry missing: $prog"; rc=1; }
+    done < $S/etc/crontabs/root
+
+    for f in $S/etc/init.d/*; do
+        svc=${f##*/}
+        # No `continue` on absence. A staged init script that is not on the
+        # router is the failure, not a reason to skip the test.
+        [ -x "/etc/init.d/$svc" ] || {
+            echo "  ! init script missing or not executable: /etc/init.d/$svc"; rc=1; continue; }
         ls /etc/rc.d/ 2>/dev/null | grep -q "^S[0-9]*$svc$" || { echo "  ! not enabled for boot: $svc"; rc=1; }
     done
-    cd /tmp/beryl7 || exit 1
+
     find www usr etc -type f | while read -r rel; do
-        # the two files that do not install under their own name
+        # the one file that does not install under its own name
         case "$rel" in
             etc/dashboard/classmap.example) dst=/etc/dashboard/classmap ;;
             *)                              dst="/$rel" ;;
         esac
+        [ -e "$dst" ] || echo "  ! STAGED BUT NEVER INSTALLED: $dst"
         # covered by its own entry, or by any ancestor directory entry
         hit=0; probe="$dst"
         while [ -n "$probe" ] && [ "$probe" != "/" ]; do
@@ -312,10 +418,34 @@ ssh -n "$TARGET" '
             probe="${probe%/*}"
         done
         [ "$hit" = 1 ] || echo "  ! NOT PRESERVED across sysupgrade, so NOT in backups: $dst"
-    done > /tmp/beryl7-unpreserved
-    if [ -s /tmp/beryl7-unpreserved ]; then cat /tmp/beryl7-unpreserved; rc=1; fi
-    rm -f /tmp/beryl7-unpreserved
-    [ "$rc" = 0 ] && echo "  . cron, boot links and the preserve list all check out"
+    done > /tmp/beryl7-findings
+    if [ -s /tmp/beryl7-findings ]; then cat /tmp/beryl7-findings; rc=1; fi
+    rm -f /tmp/beryl7-findings
+
+    # THE SAME RECONCILIATION THE OTHER WAY ROUND, and it is the half the walk
+    # above cannot do. That walk reads the staged tree, so it is blind to a file
+    # DELETED from the repo: nothing stages it, nothing checks it, and
+    # /etc/sysupgrade.conf goes on naming a path that will never exist again.
+    # Deleting etc/init.d/pingmon from the repo passed clean for exactly that
+    # reason, while /usr/sbin/pingmon was still shipped and could no longer be
+    # started by anything.
+    #
+    # Only the directories this repo owns are checked. Entries outside them are
+    # skipped deliberately: /etc/dashboard runtime state, the /etc/nftables.d
+    # file beryl-vpndns writes at boot, and the packages the console only wires
+    # up are all legitimately absent on a fresh install.
+    #
+    # A path YOU added under these directories by hand will trip this too. That
+    # is the intended reading of the message: something is on the preserve list
+    # that the console does not ship.
+    while read -r p; do
+        case "$p" in
+            /www/*|/usr/sbin/*|/usr/share/beryl/*|/etc/init.d/*|/etc/hotplug.d/*|/etc/sysctl.d/*) ;;
+            *) continue ;;
+        esac
+        [ -e "$S$p" ] || { echo "  ! preserved but not shipped: $p"; rc=1; }
+    done < /etc/sysupgrade.conf
+    [ "$rc" = 0 ] && echo "  . files, cron, boot links and the preserve list all check out"
     rm -rf /tmp/beryl7
     exit $rc'
 
