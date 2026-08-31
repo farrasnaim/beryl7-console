@@ -50,8 +50,12 @@ printf 'Cache-Control: no-store\r\n\r\n'
 
 read_body
 
+# No default. An absent action used to become `set`, which is the WRITE action -
+# the inverse of the convention every other endpoint follows, where an empty
+# action is the read path and anything unrecognised is refused. Nothing depended
+# on it: `set` with no address argument terminates at the same fail() an empty
+# action now reaches, so this deletes a line rather than replacing one.
 ACTION=$(qs_get action)
-[ -n "$ACTION" ] || ACTION=set
 
 # `list` reads and changes nothing, so it stays a GET. The POST rule exists to
 # stop a foreign page issuing a WRITE through your browser; a read cannot be
