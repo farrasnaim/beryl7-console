@@ -595,7 +595,6 @@ if [ "$ACTION" = "setwifi" ]; then
     KEY=$(qs_get_dec key | tr -d '\n\r')
     CH=$(qs_get_dec channel)
     HT=$(qs_get_dec htmode)
-    TX=$(qs_get_dec txpower)
 
     SLEN=$(printf '%s' "$SSID" | wc -c)
     [ "$SLEN" -ge 1 ] && [ "$SLEN" -le 32 ] || fail "network name must be 1-32 characters"
@@ -614,16 +613,14 @@ if [ "$ACTION" = "setwifi" ]; then
     gens_of "$BN" | grep -q "\"$GEN\"" || fail "$GEN is not supported on this band"
     [ "$W" -le "$MAXW" ] || fail "channel $CH supports at most $MAXW MHz"
 
-    if [ -n "$TX" ]; then
-        case "$TX" in *[!0-9]*) fail "bad transmit power" ;; esac
-        [ "$TX" -ge 1 ] && [ "$TX" -le 30 ] || fail "transmit power out of range"
-    fi
-
     uci set wireless.$RADIO.disabled="$([ "$EN" = "1" ] && echo 0 || echo 1)"
     uci set wireless.$RADIO.channel="$CH"
     uci set wireless.$RADIO.htmode="$HT"
-    if [ -n "$TX" ]; then uci set wireless.$RADIO.txpower="$TX"
-    else uci -q delete wireless.$RADIO.txpower; fi
+    # Power is no longer a setwifi concern - it moved to setpower, which goes
+    # through `iw dev` because the uci option here is phy-wide (one wiphy, two
+    # radios: setting it dragged BOTH bands, measured 2026-09-01). The delete
+    # stands guard so a stale option can never reappear and drag them again.
+    uci -q delete wireless.$RADIO.txpower
     uci set wireless.$IFSEC.ssid="$SSID"
     [ -n "$KEY" ] && uci set wireless.$IFSEC.key="$KEY"
     uci commit wireless
@@ -636,6 +633,52 @@ if [ "$ACTION" = "setwifi" ]; then
     # request arrived. The radio itself confirms on the next status poll.
     printf '{"ok":true,"applied":{"channel":"%s","htmode":"%s","ssid":"%s"}}' \
         "$(esc "$CH")" "$(esc "$HT")" "$(esc "$SSID")"
+    exit 0
+fi
+
+if [ "$ACTION" = "setpower" ]; then
+    # Percent of this radio's regulatory maximum, in tens. Applied at once
+    # through `iw dev` - radio-scoped, no reload, no client drops - and made
+    # durable in /etc/dashboard/txpower, which the 42-txpower hotplug hook
+    # re-applies whenever a netdev is created (boot, wifi down/up, a
+    # security-settings reload). The whole percent->dBm calculation lives in
+    # that hook; this action only validates, persists, and asks it to apply.
+    RADIO=$(qs_get_dec radio)
+    _okr=0
+    for _r in $RADIOS; do [ "$_r" = "$RADIO" ] && { _okr=1; break; }; done
+    [ "$_okr" = "1" ] || fail "bad radio"
+    PCT=$(qs_get_dec pct)
+    case "$PCT" in 10|20|30|40|50|60|70|80|90|100) ;; *) fail "power must be 10-100 in steps of 10" ;; esac
+    BAND=$(uci -q get wireless.$RADIO.band)
+    case "$BAND" in 2g|5g) ;; *) fail "radio has no band" ;; esac
+
+    # The file is rewritten canonically - both lines, fixed order - so junk can
+    # never accumulate in it. The other band's value is carried over through
+    # the same grid-hardening the readers use.
+    _oth=$([ "$BAND" = "2g" ] && echo 5g || echo 2g)
+    _op=$(awk -v b="$_oth" '$1 == b { print $2; exit }' /etc/dashboard/txpower 2>/dev/null)
+    case "$_op" in 10|20|30|40|50|60|70|80|90|100) ;; *) _op=100 ;; esac
+    if [ "$BAND" = "2g" ]; then _l1="2g $PCT"; _l2="5g $_op"; else _l1="2g $_op"; _l2="5g $PCT"; fi
+    # length-verified write, then an atomic rename: a partial file can never
+    # be the live file, and a full /tmp cannot truncate it in place
+    _tmp=/etc/dashboard/.txpower.new
+    printf '%s\n%s\n' "$_l1" "$_l2" > "$_tmp" || { rm -f "$_tmp"; fail "could not write the power file"; }
+    [ "$(wc -c < "$_tmp")" -eq "$(( ${#_l1} + ${#_l2} + 2 ))" ] \
+        || { rm -f "$_tmp"; fail "power file write came up short"; }
+    mv "$_tmp" /etc/dashboard/txpower || fail "could not replace the power file"
+
+    _tif=$(ubus call network.wireless status 2>/dev/null | jsonfilter -e "@.${RADIO}.interfaces[0].ifname")
+    if [ -n "$_tif" ]; then
+        sh /etc/hotplug.d/net/42-txpower apply "$_tif"
+        # the hook read back what the interface reports; report the same thing
+        # here rather than assuming the request landed
+        _dbm=$(iw dev "$_tif" info 2>/dev/null | sed -n 's/.*txpower \([0-9]*\)\..*/\1/p')
+        logger -t settings "txpower $RADIO ($BAND) ${PCT}% via web UI -> ${_dbm:-?} dBm"
+        printf '{"ok":true,"pct":%s,"dbm":%s,"applied":true}' "$PCT" "$(jnum "$_dbm")"
+    else
+        logger -t settings "txpower $RADIO ($BAND) saved at ${PCT}% via web UI; radio down, applies when it returns"
+        printf '{"ok":true,"pct":%s,"dbm":null,"applied":false}' "$PCT"
+    fi
     exit 0
 fi
 
@@ -1342,7 +1385,6 @@ radio_json() {  # $1 = radioN
     DIS=$(uci -q get wireless.$R.disabled); [ "$DIS" = "1" ] || DIS=0
     CH=$(uci -q get wireless.$R.channel)
     HT=$(uci -q get wireless.$R.htmode)
-    TX=$(uci -q get wireless.$R.txpower)
     CTRY=$(uci -q get wireless.$R.country)
     SSID=$(uci -q get wireless.$IFSEC.ssid)
     ENC=$(uci -q get wireless.$IFSEC.encryption)
@@ -1364,10 +1406,24 @@ radio_json() {  # $1 = radioN
         }')
     [ -n "$CUR" ] || CUR=null
 
-    printf '{"id":"%s","band":"%s","disabled":%s,"channel":"%s","htmode":"%s","txpower":%s,"country":"%s",' \
+    # Transmit power, percent-of-maximum. The percent lives in
+    # /etc/dashboard/txpower (grid-hardened here exactly as the hook hardens
+    # it, so page and radio can never disagree about an off-grid value), and
+    # the percent->dBm table comes from the hook's own table mode - one copy
+    # of that arithmetic, owned by the thing that applies it. No uci: the uci
+    # txpower path runs `iw phy` on the bare phy and one wiphy holds both
+    # radios here, so it moved BOTH bands - measured 2026-09-01.
+    _txp=$(awk -v b="$BAND" '$1 == b { print $2; exit }' /etc/dashboard/txpower 2>/dev/null)
+    case "$_txp" in 10|20|30|40|50|60|70|80|90|100) ;; *) _txp=100 ;; esac
+    _tif=$(ubus call network.wireless status 2>/dev/null | jsonfilter -e "@.${R}.interfaces[0].ifname")
+    _topts=""
+    [ -n "$_tif" ] && _topts=$(sh /etc/hotplug.d/net/42-txpower table "$_tif" 2>/dev/null \
+        | awk '{ printf "%s[%d,%d]", (NR > 1 ? "," : ""), $1, $2 }')
+
+    printf '{"id":"%s","band":"%s","disabled":%s,"channel":"%s","htmode":"%s","txpct":%s,"txopts":[%s],"country":"%s",' \
         "$R" "$(esc "$BAND")" "$([ "$DIS" = "1" ] && echo true || echo false)" \
         "$(esc "$CH")" "$(esc "$HT")" \
-        "$([ -n "$TX" ] && jnum "$TX" || echo null)" "$(esc "$CTRY")"
+        "$_txp" "$_topts" "$(esc "$CTRY")"
     printf '"gens":%s,"channels":%s,"current":%s,' "$(gens_of "$BN")" "$(chan_json "$BN")" "$CUR"
     printf '"ssid":"%s","enc":"%s","iface_disabled":%s}' \
         "$(esc "$SSID")" "$(esc "$ENC")" "$([ "$IDIS" = "1" ] && echo true || echo false)"

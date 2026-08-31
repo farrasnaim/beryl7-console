@@ -106,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=0e496657"></script>
+<script src="/os.js?v=cb401f9d"></script>
 <script>
 (function () {
 'use strict';
@@ -319,16 +319,41 @@ function renderRadio(r) {
         'Width and PHY generation. Only combinations this channel supports are listed.');
     form.appendChild(modeField);
 
+    /* Transmit power is NOT part of the Apply form. It goes through `iw dev`,
+       which is scoped to this radio and needs no reload, so it applies the
+       moment it is picked and nothing disconnects. The control it replaces
+       went through uci, and that path runs `iw phy` on the bare phy - one
+       wiphy holds both radios here, so "lower 2.4 GHz" lowered 5 GHz with it.
+       Measured, which is why this is its own action rather than a setwifi
+       field, and why its old hint about "briefly clamping the other band"
+       understated what actually happened. */
     var txSel = el('select', 'select');
-    [['', 'Maximum'], ['20', '20 dBm'], ['17', '17 dBm'], ['14', '14 dBm'], ['10', '10 dBm'], ['7', '7 dBm']]
-        .forEach(function (o) {
-            var op = el('option', null, o[1]); op.value = o[0];
-            if (String(r.txpower == null ? '' : r.txpower) === o[0]) op.selected = true;
-            txSel.appendChild(op);
-        });
+    (r.txopts || []).forEach(function (o) {
+        /* the dBm is computed server-side from the ceiling of the channel the
+           radio is on right now; the driver only takes whole dBm, so
+           neighbouring steps can honestly share one */
+        var op = el('option', null, o[0] + '% (' + o[1] + ' dBm)');
+        op.value = o[0];
+        if (o[0] === r.txpct) op.selected = true;
+        txSel.appendChild(op);
+    });
+    if (!(r.txopts || []).length) {
+        txSel.appendChild(el('option', null, (r.txpct || 100) + '% \u2014 radio is off'));
+        txSel.disabled = true;
+    }
+    /* A select fires input AND change, both bubble, and watch() listens for
+       both on the form - which would flag the panel unsaved for a setting
+       that is already applied. Stop both here. */
+    txSel.addEventListener('input', function (e) { e.stopPropagation(); });
+    txSel.addEventListener('change', function (e) {
+        e.stopPropagation();
+        OS.act(txSel, API, { action: 'setpower', radio: r.id, pct: txSel.value },
+               { ok: 'Transmit power applied.', failPrefix: 'Not applied' })
+          .then(function (j) { if (j && j.ok) r.txpct = j.pct; });
+    });
     form.appendChild(field('Transmit power', txSel,
-        'Maximum is the regulatory limit for the region. Both bands share one chip, so lowering ' +
-        'one can briefly clamp the other until it reloads.'));
+        'Percent of this band\u2019s legal maximum on the current channel. Applies immediately ' +
+        '\u2014 no reload, nothing disconnects \u2014 and holds across reboots.'));
 
     var en = checkRow('Radio enabled', !r.disabled);
     form.appendChild(en.row);
@@ -382,7 +407,7 @@ function renderRadio(r) {
                 action: 'setwifi', radio: r.id,
                 ssid: ssid.value, key: key.value,
                 channel: chSel.value, htmode: modeSel.value,
-                txpower: txSel.value, enabled: en.input.checked ? 1 : 0
+                enabled: en.input.checked ? 1 : 0
             }, { ok: 'Applied. The radio is reloading.', delay: 6000, failPrefix: 'Not applied' })
               .then(function (j) { if (j && j.ok) markDirty(r.id, false); });
         });

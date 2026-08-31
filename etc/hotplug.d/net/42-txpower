@@ -1,0 +1,146 @@
+#!/bin/sh
+# Per-band transmit power, from /etc/dashboard/txpower.
+#
+# WHY NOT uci. `wireless.radioN.txpower` goes through mac80211.sh, which runs
+# `iw phy ${phy} set txpower` on the BARE phy - and phy0 is a single wiphy
+# holding both radios. Measured 2026-09-01: radio0.txpower=20 plus a reload put
+# BOTH bands at 20 dBm. `iw dev <iface> set txpower` is scoped to the radio the
+# interface belongs to - measured the same day, it moved the three 2.4 GHz BSSes
+# and left 5 GHz alone. That is runtime state, discarded whenever a netdev is
+# recreated (boot, wifi down/up, a security-settings reload), hence this hook.
+#
+# THE FILE holds one line per band, and nothing else is accepted:
+#
+#     2g 60
+#     5g 100
+#
+# The value is PERCENT OF MAXIMUM TRANSMIT POWER, in tens. Percent is linear
+# power, so the dB offset is 10*log10(pct/100); the driver only takes whole dBm
+# (fractional mBm returns "Not supported (-95)" - measured), so offsets are
+# rounded and neighbouring steps can land on the same dBm. 100 means `auto`,
+# which is the regulatory maximum and the state a radio is in with no file.
+# A missing file, a missing line, or a value off the grid all mean 100: the
+# failure mode is "full power", never "no power" and never a syntax error - the
+# file is parsed, not sourced.
+#
+#     pct     10   20   30   40   50   60   70   80   90   100
+#     dB     -10   -7   -5   -4   -3   -2   -2   -1    0     0
+#
+# The dBm ceiling is read live from `iw phy` for the frequency the radio is ON
+# RIGHT NOW, never hardcoded: regulatory maxima differ per channel range, so a
+# future channel change keeps the arithmetic honest. (A channel change that does
+# not recreate the netdev does not re-fire this hook; the percent is re-derived
+# on the next boot, recreate, or setting change.)
+#
+# ALSO A COMMAND-LINE TOOL, so the percent->dBm table lives in exactly one
+# place and the settings API calls it instead of keeping a second copy:
+#
+#     42-txpower apply <iface>    apply the file to that interface's radio
+#     42-txpower table <iface>    print "pct dBm" lines for that radio, 10..100
+#
+# Every apply is READ BACK from the interface: `iw` returns 0 for a request the
+# regulatory domain then clamps, so the only honest confirmation is what the
+# interface reports afterwards. The log names the asked and the got.
+
+CONF=/etc/dashboard/txpower
+
+# dB offset for a percent step; empty for anything off the grid
+off_of() {
+	case "$1" in
+		10) echo -10 ;;  20) echo -7 ;;  30) echo -5 ;;  40) echo -4 ;;
+		50) echo -3 ;;   60) echo -2 ;;  70) echo -2 ;;  80) echo -1 ;;
+		90) echo 0 ;;    100) echo 0 ;;
+	esac
+}
+
+freq_of() {	# operating frequency in MHz, from the first channel line
+	iw dev "$1" info 2>/dev/null \
+		| sed -n 's/.*channel [0-9]* (\([0-9]*\) MHz.*/\1/p' | head -1
+}
+
+phyname_of() {	# wiphy index -> phyN, discovered rather than assumed phy0
+	local i
+	i=$(iw dev "$1" info 2>/dev/null | sed -n 's/.*wiphy \([0-9]*\).*/\1/p')
+	[ -n "$i" ] && echo "phy$i"
+}
+
+max_of() {	# $1=phy $2=freq -> the regulatory ceiling for that frequency, dBm
+	iw phy "$1" info 2>/dev/null \
+		| sed -n "s/.*\* $2\.0 MHz \[[0-9]*\] (\([0-9]*\)\(\.[0-9]*\)\{0,1\} dBm).*/\1/p" \
+		| head -1
+}
+
+pct_of() {	# $1=band -> percent from the file, hardened to the grid
+	local p
+	p=$(awk -v b="$1" '$1 == b { print $2; exit }' "$CONF" 2>/dev/null)
+	[ -n "$(off_of "$p")" ] && echo "$p" || echo 100
+}
+
+got_of() {	# what the interface reports now, whole dBm
+	iw dev "$1" info 2>/dev/null | sed -n 's/.*txpower \([0-9]*\)\..*/\1/p'
+}
+
+# ---------------------------------------------------------------- resolve ---
+# Everything both modes need about one interface. Sets FREQ, MAX, BAND;
+# returns 1 (with a log line, since hotplug output goes nowhere) if the radio
+# is not far enough up to answer.
+resolve() {
+	local phy
+	FREQ=$(freq_of "$1")
+	case "$FREQ" in ''|*[!0-9]*)
+		logger -t txpower "cannot read frequency of $1 - radio still settling? nothing set"
+		return 1 ;;
+	esac
+	phy=$(phyname_of "$1")
+	MAX=$([ -n "$phy" ] && max_of "$phy" "$FREQ")
+	case "$MAX" in ''|*[!0-9]*)
+		logger -t txpower "no regulatory ceiling found for $FREQ MHz on ${phy:-?} - nothing set"
+		return 1 ;;
+	esac
+	[ "$FREQ" -lt 3000 ] && BAND=2g || BAND=5g
+}
+
+apply() {
+	local pct off want got
+	resolve "$1" || return 0
+	pct=$(pct_of "$BAND")
+	off=$(off_of "$pct")
+	want=$((MAX + off))
+	if [ "$pct" = 100 ]; then
+		# auto, not fixed-at-max: the driver's own default state, which also
+		# tracks a regulatory ceiling change without a re-apply
+		iw dev "$1" set txpower auto 2>/dev/null
+	else
+		iw dev "$1" set txpower fixed $((want * 100)) 2>/dev/null
+	fi
+	got=$(got_of "$1")
+	if [ "$got" = "$want" ]; then
+		logger -t txpower "$BAND at ${pct}% = ${got} dBm (via $1)"
+	else
+		logger -t txpower \
+			"FAILED on $BAND (via $1): asked ${pct}% = ${want} dBm, interface reports ${got:-nothing}"
+	fi
+}
+
+table() {
+	local p
+	resolve "$1" || return 1
+	for p in 10 20 30 40 50 60 70 80 90 100; do
+		echo "$p $((MAX + $(off_of "$p")))"
+	done
+}
+
+# ------------------------------------------------------------- entry points --
+# CLI first: the two verbs cannot collide with hotplug, whose $1 is empty when
+# hotplug-call sources this file.
+case "$1" in
+	apply) apply "$2"; exit 0 ;;
+	table) table "$2"; exit $? ;;
+esac
+
+[ "$ACTION" = add ] || exit 0
+case "$INTERFACE" in
+	phy*) ;;
+	*) exit 0 ;;
+esac
+apply "$INTERFACE"

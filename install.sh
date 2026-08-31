@@ -318,7 +318,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
          /etc/hotplug.d/net/40-rrm-neighbors \
          /etc/hotplug.d/net/41-packet-steering \
-         /etc/hotplug.d/net/42-txpower-24 \
+         /etc/hotplug.d/net/42-txpower \
          /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
          /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api \
          /www/cgi-bin/version-api \
