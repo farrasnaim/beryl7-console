@@ -66,6 +66,12 @@
     </div>
 
     <div class="face">
+      <section class="panel" id="p-tdns" hidden>
+        <div class="panel__h"><span class="panel__t">Resolver path</span>
+          <div class="panel__aside" id="tdnsState"></div></div>
+        <div class="panel__b" id="tdns" style="padding-top:4px"></div>
+      </section>
+
       <section class="panel" id="p-agh" hidden>
         <div class="panel__h"><span class="panel__t">Content filtering</span>
           <div class="panel__aside" id="aghState"></div></div>
@@ -77,7 +83,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=8af8c82c"></script>
+<script src="/os.js?v=02227c11"></script>
 <script>
 (function () {
 'use strict';
@@ -939,6 +945,48 @@ $('#rescanDev').addEventListener('click', function () {
    file, and the whole panel stays hidden: nothing on this console may render
    an instrument for hardware or software the router does not have. */
 function renderAdguard(d) {
+    /* The travel-DNS fallback, rendered ABOVE AdGuard on purpose: while it is
+       active, everything the AdGuard panel says below is true and beside the
+       point, because dnsmasq is answering from an upstream AdGuard never sees.
+       Hidden entirely in the ordinary case - a panel that says "normal" on
+       every load of every day is one nobody reads on the day it does not. */
+    var t = d.traveldns;
+    var tsec = $('#p-tdns');
+    if (tsec) {
+        if (!t || t.state === 'off' || t.state === 'unknown') {
+            tsec.hidden = true;
+        } else {
+            tsec.hidden = false;
+            var tst = $('#tdnsState'); clear(tst);
+            var tbox = $('#tdns'); clear(tbox);
+            var srv = (t.servers && t.servers.length) ? t.servers.join(', ') : 'this network\u2019s resolver';
+            if (t.state === 'active') {
+                tst.appendChild(OS.stateWord('PLAINTEXT FALLBACK', 'warn'));
+                tbox.appendChild(OS.note('This network\u2019s own resolver (' + srv + ') has been ' +
+                    'added alongside the encrypted upstreams, so a captive portal has something to ' +
+                    'hijack and sign-in can work. dnsmasq answers from whichever replies first, so ' +
+                    'an unknown share of queries is resolved in cleartext by the network you are on ' +
+                    '\u2014 visible to it, and NOT filtered by AdGuard, whatever the panel below ' +
+                    'reports. This is deliberate and it reverts by itself once the normal uplink ' +
+                    'carries the default route again.', 'warn'));
+            } else if (t.state === 'settling') {
+                tst.appendChild(OS.stateWord('SWITCHING', 'warn'));
+                tbox.appendChild(OS.note('The travel fallback (' + srv + ') has just been written ' +
+                    'and dnsmasq is restarting to pick it up. That restart is deliberately detached ' +
+                    '— running it inline stalls the firewall and routing handlers behind it ' +
+                    '— so it can take up to a minute. Nothing is wrong yet; this panel will ' +
+                    'say what the resolver path ended up being.', 'warn'));
+            } else if (t.state === 'pending') {
+                tst.appendChild(OS.stateWord('FALLBACK NOT LOADED', 'bad'));
+                tbox.appendChild(OS.note('The travel fallback (' + srv + ') was written to ' +
+                    'dnsmasq\u2019s runtime config, but dnsmasq has been running since before it ' +
+                    'was written and has not picked it up. Encrypted DNS is intact, so this is not ' +
+                    'a leak \u2014 but a captive portal still has no plaintext DNS to hijack, so ' +
+                    'sign-in will keep failing. Reload it over SSH: /etc/init.d/dnsmasq reload', 'bad'));
+            }
+        }
+    }
+
     var a = d.adguard;
     var sec = $('#p-agh'); if (!sec) return;
     if (!a) { sec.hidden = true; return; }

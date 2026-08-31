@@ -898,4 +898,58 @@ if [ -r "$AGH_AUTH" ]; then
     fi
 fi
 printf '"adguard":%s,' "$AGHJ"
+# ---- travel-DNS fallback ------------------------------------------------------
+# 15-travel-dns adds the local network's own resolver alongside DoH so a captive
+# portal has plaintext DNS to hijack, which is the difference between signing in
+# at a hotel and being stranded. It is deliberate and it stays. What was missing
+# is that NOTHING said when it was on: neither API described the resolver chain,
+# no page mentioned travel or plaintext, and the one visible DNS surface -
+# AdGuard - keeps reporting up:true and protection:true throughout, because the
+# daemon really is healthy. It is simply no longer on the path for the queries
+# that dnsmasq answers from the other upstream.
+#
+# READ FROM THE LIVE STATE, NOT FROM A MARKER. The hook could write a flag and
+# this could read it, and that flag would be a claim about what the hook did
+# rather than about what dnsmasq is doing - the proxy-measuring shape that has
+# cost this project real time more than once. The authority is the file dnsmasq
+# actually loads, in its runtime conf-dir.
+#
+# Four states, because "no fallback" and "cannot tell" are different answers:
+#   off      the conf-dir exists and holds no fallback - strict DoH, today's state
+#   active   the fallback is installed AND dnsmasq started after it was written,
+#            so the running resolver has it
+#   settling installed seconds ago and dnsmasq has not restarted YET. The hook
+#            detaches the restart on purpose - running it inline stalled the
+#            firewall and pbr handlers behind it for a measured 55s at boot - so
+#            this window is the normal path, not a fault, and must not be
+#            reported as one. Anything past 90s is no longer settling.
+#   pending  installed long enough ago that the detached restart should have
+#            finished, and dnsmasq still predates the file: the restart did not
+#            happen, and the portal still has no plaintext DNS to hijack
+#   unknown  no dnsmasq conf-dir found at all - this router is not arranged the
+#            way the hook assumes, so no claim either way
+TDCONF=""; TDSTATE=unknown; TDSRV=""
+for _d in /tmp/dnsmasq.*.d; do [ -d "$_d" ] && TDCONF="$_d/travel-dns.conf" && break; done
+if [ -n "$TDCONF" ]; then
+    if [ -s "$TDCONF" ]; then
+        TDSRV=$(awk -F= '/^server=/{printf "%s%s", (n++?",":""), "\"" $2 "\""}' "$TDCONF" 2>/dev/null)
+        _dmp=$(pgrep -f '^/usr/sbin/dnsmasq' 2>/dev/null | head -1)
+        # field 22 of /proc/PID/stat is start time in ticks since boot; the comm
+        # field can hold spaces, so cut everything up to the last ')' first.
+        _dmst=$(sed 's/.*) //' "/proc/$_dmp/stat" 2>/dev/null | awk '{print int($20/100)}')
+        _fmt=$(date -r "$TDCONF" +%s 2>/dev/null)
+        _nowe=$(date +%s); _upe=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+        case "$_dmst$_fmt$_upe" in ''|*[!0-9]*) TDSTATE=active ;; *)
+            # both expressed as seconds-since-boot so they are comparable
+            _fmup=$((_fmt - (_nowe - _upe)))
+            if [ "$_fmup" -le "$_dmst" ]; then TDSTATE=active
+            elif [ $((_nowe - _fmt)) -lt 90 ]; then TDSTATE=settling
+            else TDSTATE=pending; fi ;;
+        esac
+        [ -n "$TDSRV" ] || TDSTATE=off
+    else
+        TDSTATE=off
+    fi
+fi
+printf '"traveldns":{"state":"%s","servers":[%s]},' "$TDSTATE" "$TDSRV"
 printf '"vpnwatch":%s}' "$(jnum "$VW")"
