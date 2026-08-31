@@ -159,6 +159,32 @@ function bandLabel(b) {
     return b === '2g' ? '2.4 GHz' : b === '5g' ? '5 GHz' : b === '6g' ? '6 GHz' : (b || 'Radio');
 }
 /* "iot" -> "IoT", "guest" -> "Guest": a network's own name, presented. */
+/* THE ORDER NETWORKS ARE SHOWN IN, everywhere: main first, then guest, then
+   IoT, then anything else alphabetically.
+
+   This is the one thing about a network the router cannot tell you. Guest and
+   IoT are both isolated, both non-primary, both on their own bridge in their own
+   firewall zone - nothing at runtime separates "people visiting" from "things
+   that plug into a wall". The distinction is the owner's, so the order is
+   written down rather than derived, and it lives here so that four pages cannot
+   drift into four different answers.
+
+   The primary network is found by comparison rather than by name, so this stays
+   correct on a router whose LAN is called something else. Only the two names
+   below are literal, and only as a display preference - nothing's BEHAVIOUR
+   keys on them. */
+var NET_ORDER = ['guest', 'iot'];
+function netRank(n) {
+    if (!n || n === LANNET) return -1;
+    var i = NET_ORDER.indexOf(String(n).toLowerCase());
+    return i >= 0 ? i : NET_ORDER.length;
+}
+/* Sort comparator for anything keyed on a network name. */
+function netCmp(a, b) {
+    var d = netRank(a) - netRank(b);
+    return d !== 0 ? d : String(a).localeCompare(String(b));
+}
+
 function netLabel(n) {
     if (!n) return 'Secondary';
     if (n.toLowerCase() === 'iot') return 'IoT';
@@ -733,7 +759,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = 'a18ab13323';
+var CONSOLE_VERSION = '60d4169183';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1498,6 +1524,7 @@ global.OS = {
     bytes: bytes, rate: rate, brate: brate, dur: dur, ago: ago, clock: clock,
     bars: bars, signalWord: signalWord, genOf: genOf, GEN: GEN,
     LANNET: LANNET, bandLabel: bandLabel, netLabel: netLabel,
+    netRank: netRank, netCmp: netCmp,
     meter: meter, meterSet: meterSet, readout: readout, chip: chip,
     emptyState: emptyState, note: note,
     spark: spark, ribbon: ribbon,

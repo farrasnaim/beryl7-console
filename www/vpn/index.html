@@ -83,7 +83,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=6299388b"></script>
+<script src="/os.js?v=2a966323"></script>
 <script>
 (function () {
 'use strict';
@@ -677,11 +677,9 @@ function renderDevices(d) {
        page uses and the only one worth scanning. */
     var byNet = {};
     routable.forEach(function (v) { (byNet[v.net] = byNet[v.net] || []).push(v); });
-    var netOrder = Object.keys(byNet).sort(function (a, b) {
-        if (a === OS.LANNET) return -1;
-        if (b === OS.LANNET) return 1;
-        return a.localeCompare(b);
-    });
+    /* Main first, then guest, then anything else - the shared order, so this
+       page and the Overview cannot disagree about which comes first. */
+    var netOrder = Object.keys(byNet).sort(OS.netCmp);
     /* One network means one group, and a heading over a single group is a label
        for something with nothing to distinguish it from. */
     var showHeads = netOrder.length > 1;

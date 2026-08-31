@@ -79,7 +79,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=6299388b"></script>
+<script src="/os.js?v=2a966323"></script>
 <script>
 (function () {
 'use strict';
@@ -310,10 +310,15 @@ function ownSsids(d) {
    twice reads like a bug in the sentence that is trying to reassure them. */
 function travelOff(d) {
     var seen = {}, names = [];
-    (d.own_ssids || []).forEach(function (o) {
-        if (!o || !o.travel_off || !o.name || seen[o.name]) return;
-        seen[o.name] = 1; names.push(o.name);
-    });
+    /* uci order, which is creation order, would name IoT before Guest. Sorted
+       into the order every other surface uses so the sentence reads the same
+       way the Overview and Settings do. */
+    (d.own_ssids || []).slice()
+        .sort(function (x, y) { return OS.netCmp(x && x.network, y && y.network); })
+        .forEach(function (o) {
+            if (!o || !o.travel_off || !o.name || seen[o.name]) return;
+            seen[o.name] = 1; names.push(o.name);
+        });
     return names;
 }
 function quotedList(names) {

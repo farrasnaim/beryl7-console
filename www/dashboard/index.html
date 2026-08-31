@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=6299388b"></script>
+<script src="/os.js?v=2a966323"></script>
 <script>
 (function () {
 'use strict';
@@ -298,11 +298,15 @@ function model(d) {
     /* Ethernet and the two LAN bands first, then every other network in name
        order, then the two states that mean "not here". An unknown group scores
        3 so a new network lands in the zone band rather than at either end. */
+    /* Ethernet and the two LAN bands first, then the other networks in the
+       order OS.netRank fixes - guest before IoT - then the two states that mean
+       "not here". A group not in this map is a network, and scores 3 so it lands
+       in that band; OS.netCmp then orders the band. */
     var order = { eth: 0, '5': 1, '2.4': 2, blocked: 4, idle: 5 };
     function rank(g) { return order[g] === undefined ? 3 : order[g]; }
     out.sort(function (a, b) {
         if (rank(a.group) !== rank(b.group)) return rank(a.group) - rank(b.group);
-        if (rank(a.group) === 3 && a.group !== b.group) return a.group.localeCompare(b.group);
+        if (rank(a.group) === 3 && a.group !== b.group) return OS.netCmp(a.group, b.group);
         if (a.gen !== b.gen) return b.gen - a.gen;
         return a.name.localeCompare(b.name);
     });
@@ -1105,7 +1109,7 @@ function renderClients(d, M) {
         if (['eth', '5', '2.4', 'blocked', 'idle'].indexOf(v.group) >= 0) return;
         if (zoneKeys.indexOf(v.group) < 0) zoneKeys.push(v.group);
     });
-    zoneKeys.sort();
+    zoneKeys.sort(OS.netCmp);   /* guest before IoT, not alphabetical by luck */
     ['eth', '5', '2.4'].concat(zoneKeys).concat(['blocked']).forEach(function (key) {
         var list = groups[key];
         if (!list || !list.length) return;

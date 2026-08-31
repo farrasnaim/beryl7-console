@@ -106,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=6299388b"></script>
+<script src="/os.js?v=2a966323"></script>
 <script>
 (function () {
 'use strict';
@@ -457,7 +457,11 @@ function ensureRadioPanels(radios) {
    "Guest network" - each editing half of it - is how one SSID ends up with two
    different passwords. */
 function renderSecondary(d) {
-    var list = (d.wireless && d.wireless.secondary) || [];
+    /* uci order is whatever order the sections were added in, which put IoT
+       above Guest purely because it was created first. Sorted so the panels read
+       the way every other surface does. */
+    var list = ((d.wireless && d.wireless.secondary) || [])
+        .slice().sort(function (a, b) { return OS.netCmp(a.network, b.network); });
     var host = $('#p-secondary');
     if (!host) return;
     if (!list.length) { clear(host); return; }
