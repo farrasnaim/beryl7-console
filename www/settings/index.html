@@ -106,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=2a966323"></script>
+<script src="/os.js?v=56755b64"></script>
 <script>
 (function () {
 'use strict';
@@ -520,14 +520,28 @@ function buildSecondaryPanel(sec) {
     if (sec.legacy) {
         /* A statement of what this network ADVERTISES, not of what it is for -
            the IoT and guest networks both match this test and only one of them
-           was created for old devices. */
-        box.appendChild(OS.note('Old devices can join this one. It advertises WPA2-PSK alone, ' +
+           was created for old devices.
+
+           DESKTOP ONLY. Six lines of background on a phone push the form that
+           actually does something off the screen, and nothing here is
+           actionable: it explains why the network is configured as it is, which
+           is a thing to read once. Reusing `desk-only`, which already exists
+           and already means this, rather than inventing a way to say it twice.
+
+           Note what is NOT hidden: every warning and every fault, and the radio
+           divergence note a few panels up, whose own comment records that a
+           phone is exactly where that one gets read. "Explanatory" is a
+           judgement per note, not something the tone can be trusted to encode -
+           hiding by tone would have taken that one with it. */
+        var leg = OS.note('Old devices can join this one. It advertises WPA2-PSK alone, ' +
             'with no protected management frames and no fast roaming \u2014 the plainest ' +
             'handshake still worth having. The main network advertises WPA3, PMF and 802.11r ' +
             'beside WPA2, and supplicants older than roughly 2012 refuse that beacon outright ' +
             'rather than skip the parts they do not recognise. Speed is not the trade: the ' +
             'cipher is the same AES-CCMP, and the radio still offers every generation it has.',
-            'ok'));
+            'ok');
+        leg.classList.add('desk-only');
+        box.appendChild(leg);
     }
 
     var form = el('div');

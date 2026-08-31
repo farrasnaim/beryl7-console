@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=2a966323"></script>
+<script src="/os.js?v=56755b64"></script>
 <script>
 (function () {
 'use strict';
@@ -1457,8 +1457,13 @@ function detailFor(box, v, d) {
         if (flags.length) kv3('Association', flags.join(' · '));
         det.appendChild(d3);
         if (st.tx && +st.tx.failed > 0 && +st.tx.failed === +st.tx.retries) {
+            /* Desktop only, for the same reason as the network background note
+               in Settings: it explains why two numbers look alike, which is
+               read once and never acted on, and it sits inside an already-tall
+               expanded device row. */
             var w = OS.note('Retries and failures read identically here — a known mt76 ' +
                             'counter quirk on this chip, not a real error rate.', null);
+            w.classList.add('desk-only');
             w.style.marginTop = '10px';
             det.appendChild(w);
         }
