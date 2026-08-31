@@ -404,6 +404,17 @@ ssh -n "$TARGET" '
         ls /etc/rc.d/ 2>/dev/null | grep -q "^S[0-9]*$svc$" || { echo "  ! not enabled for boot: $svc"; rc=1; }
     done
 
+    # COUNTED BEFORE IT IS WALKED. What follows reports problems by PRINTING
+    # them, and the caller then treats an empty report as a pass - so a walk
+    # that examined nothing at all reads exactly like a walk that found nothing
+    # wrong. That is the same shape as the vacuous service check this block was
+    # rewritten to remove, one level up: the staging tree not being where we
+    # think it is would have been reported as everything checking out.
+    _nwalk=$(find www usr etc -type f 2>/dev/null | wc -l)
+    if [ "${_nwalk:-0}" -lt 1 ]; then
+        echo "  ! the staged tree is empty or unreadable — nothing was verified"
+        rc=1
+    fi
     find www usr etc -type f | while read -r rel; do
         # the one file that does not install under its own name
         case "$rel" in
@@ -421,6 +432,9 @@ ssh -n "$TARGET" '
     done > /tmp/beryl7-findings
     if [ -s /tmp/beryl7-findings ]; then cat /tmp/beryl7-findings; rc=1; fi
     rm -f /tmp/beryl7-findings
+    # Said out loud, so a number that is obviously too small is visible rather
+    # than having to be inferred from the absence of complaints.
+    echo "  . $_nwalk staged files checked against the preserve list"
 
     # THE SAME RECONCILIATION THE OTHER WAY ROUND, and it is the half the walk
     # above cannot do. That walk reads the staged tree, so it is blind to a file

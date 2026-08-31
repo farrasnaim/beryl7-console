@@ -83,7 +83,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=ff4b3b8c"></script>
+<script src="/os.js?v=624feacc"></script>
 <script>
 (function () {
 'use strict';
@@ -1044,6 +1044,22 @@ function renderAdguard(d) {
                     'resolver has picked it up. Assume plaintext DNS MAY be on the path. ' +
                     'Check over SSH with logread -e dnsmasq, and reload it if in doubt: ' +
                     '/etc/init.d/dnsmasq reload', 'warn'));
+            } else {
+                /* A state this page has never heard of. It used to fall out of
+                   the chain with the panel already shown and both slots empty,
+                   so the reader got a bare "Resolver path" heading and no way
+                   to tell whether that meant nothing or meant something.
+                   The endpoint gained a state once already and will again; the
+                   honest answer is to say which state it is and that this page
+                   is the half that is behind, rather than to hide the panel -
+                   the panel is only ever shown when a fallback IS installed. */
+                tst.appendChild(OS.stateWord('UNRECOGNISED', 'warn'));
+                tbox.appendChild(OS.note('A travel-DNS fallback (' + srv + ') is installed, but ' +
+                    'the router reported its status as \u201c' + String(t.state) + '\u201d and ' +
+                    'this page does not know that word \u2014 it is older than the endpoint ' +
+                    'serving it. Assume plaintext DNS MAY be on the path until you can check. ' +
+                    'Reloading the page picks up a newer copy; if the word persists, the console ' +
+                    'needs reinstalling so both halves match.', 'warn'));
             }
         }
     }
