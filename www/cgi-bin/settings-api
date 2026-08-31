@@ -721,8 +721,65 @@ if [ "$ACTION" = "setlan" ]; then
         # and only when its bind moved: the restart is what re-binds the UI,
         # and the seconds it costs sit inside a window where dnsmasq is being
         # restarted anyway.
+        #
+        # THE AdGuard RESTART IS VERIFIED, AND HAS A LADDER UNDER IT.
+        #
+        # Every LAN client resolves through AdGuard: dnsmasq runs no-resolv with
+        # 127.0.0.1:5300 as its only upstream, so an AdGuard that does not come
+        # back takes ALL DNS with it - at the exact moment the console has moved
+        # to an address the owner may not be able to reach yet. Firing a restart
+        # and never looking is how that becomes silent. Measured on this router
+        # on 2026-08-31, from a config edit rather than a LAN move: AdGuard
+        # refused to start, procd respawned it three times, and DNS was down for
+        # about fifteen seconds with nothing but the system log saying so.
+        #
+        # The likely cause here is not a bad config but a race: the new address
+        # may not be up yet when AdGuard tries to bind it. So the ladder is
+        # patience first, and only then a retreat that keeps DNS alive:
+        #
+        #   1. restart, then poll for up to 20s for it to answer
+        #   2. still silent - wait and restart once more (the address has had
+        #      another 20s to appear by now)
+        #   3. still silent - bind the UI to loopback and restart again. The
+        #      admin UI is then reachable only through an SSH tunnel, which is
+        #      a bad day; DNS for the whole house working is worth more than
+        #      the panel being clickable, and this is recorded plainly in the
+        #      log rather than quietly repaired.
+        #
+        # Every branch logs what it did, and the /vpn page reports AdGuard down
+        # independently of anything written here.
         ( sleep 2; /etc/init.d/network reload; sleep 2; /etc/init.d/uhttpd reload; /etc/init.d/dnsmasq restart
-          [ "$AGH_MOVED" = 1 ] && /etc/init.d/adguardhome restart ) >/dev/null 2>&1 &
+          if [ "$AGH_MOVED" = 1 ]; then
+              agh_alive() {
+                  _n=0
+                  while [ "$_n" -lt 20 ]; do
+                      # An answer on the port is the test, not the process being
+                      # alive: it stayed alive through all three failed starts.
+                      nslookup openwrt.org 127.0.0.1:5300 2>&1 | grep -qE '^Name:' && return 0
+                      _n=$((_n + 1)); sleep 1
+                  done
+                  return 1
+              }
+              /etc/init.d/adguardhome restart
+              if agh_alive; then
+                  logger -t settings "AdGuard answering on $IP after the LAN move"
+              else
+                  logger -t settings "AdGuard did NOT answer after the LAN move - retrying once"
+                  sleep 5; /etc/init.d/adguardhome restart
+                  if agh_alive; then
+                      logger -t settings "AdGuard answering after the second restart"
+                  else
+                      logger -t settings "AdGuard still dead and ALL DNS is down - binding its UI to loopback to get DNS back"
+                      sed -i "s|^  address: $IP:3010\$|  address: 127.0.0.1:3010|" /etc/adguardhome/adguardhome.yaml 2>/dev/null
+                      /etc/init.d/adguardhome restart
+                      if agh_alive; then
+                          logger -t settings "DNS restored - AdGuard UI is on 127.0.0.1:3010 and needs an SSH tunnel until its bind is fixed by hand"
+                      else
+                          logger -t settings "AdGuard will not start at all - DNS is DOWN; fix /etc/adguardhome/adguardhome.yaml over SSH"
+                      fi
+                  fi
+              fi
+          fi ) >/dev/null 2>&1 &
         printf '{"ok":true,"moved":"%s"}' "$(esc "$IP")"
     else
         # The restart is NOT unconditional. dnsmasq derives its dhcp-range from
