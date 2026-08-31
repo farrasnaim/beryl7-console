@@ -106,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=624feacc"></script>
+<script src="/os.js?v=6299388b"></script>
 <script>
 (function () {
 'use strict';
@@ -1113,9 +1113,14 @@ function renderNotify(d) {
     var n = d.notify; if (!n) return;
     var box = $('#b-notify'); clear(box);
     var st = $('#st-notify'); if (st) clear(st);
-    if (st) st.appendChild(n.weak ? OS.stateWord('WEAK ADDRESS', 'warn')
-                                  : n.enabled ? OS.stateWord('ON', 'ok')
-                                              : OS.stateWord('OFF', null));
+    /* Weak AUGMENTS the state, it does not replace it. Replacing meant that with
+       a weak address stored the panel stopped saying whether alerts were on or
+       off at all - two facts collapsed into one slot, and the one that went
+       missing is the one the panel exists to report. */
+    if (st) {
+        st.appendChild(n.enabled ? OS.stateWord('ON', 'ok') : OS.stateWord('OFF', null));
+        if (n.weak) st.appendChild(OS.stateWord('WEAK ADDRESS', 'warn'));
+    }
 
     /* The router refuses to SAVE an address this guessable, but the one already
        stored predates that rule, and enforcement the owner cannot see is
@@ -1179,7 +1184,14 @@ function renderNotify(d) {
                replacing the address, which is not a requirement anyone
                intended. */
             action: 'setnotify', enabled: chk.input.checked ? '1' : '0',
-            keepurl: (u.value.trim() === (n.url || '')) ? '1' : '0',
+            /* An EMPTY field is never a keep. '' === '' satisfied the match
+               when nothing was stored, so the request arrived as "keep the
+               stored address" with no stored address to keep and the endpoint
+               refused it. Two ways in: clearing the address and pressing Apply
+               again, and the first run on a fresh install where nothing is
+               stored and the field is empty by definition. Empty means clear,
+               which the endpoint already handles. */
+            keepurl: (u.value.trim() !== '' && u.value.trim() === (n.url || '')) ? '1' : '0',
             url: u.value.trim()
         }, { ok: 'Saved.', delay: 800, failPrefix: 'Not saved' }).then(function (j) {
             if (j && j.ok) markDirty('notify', false);
