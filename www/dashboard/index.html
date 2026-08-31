@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=56755b64"></script>
+<script src="/os.js?v=b1de1c0d"></script>
 <script>
 (function () {
 'use strict';
@@ -367,12 +367,20 @@ function renderTopo(d, M) {
     M.aps.forEach(function (ap) {
         if (ap.network === LANNET) return;
         var k = ap.network || 'other';
-        if (!extra[k]) { extra[k] = { clients: 0, active: false, band: ap.band }; extraOrder.push(k); }
+        if (!extra[k]) { extra[k] = { clients: 0, active: false, bands: [] }; extraOrder.push(k); }
+        if (extra[k].bands.indexOf(ap.band) < 0) extra[k].bands.push(ap.band);
         extra[k].clients += ((ap.assoc && ap.assoc.results) || []).length;
         if (act[ap.ifname]) extra[k].active = true;
     });
+    /* Same order as every other surface: guest before IoT, not uci order. */
+    extraOrder.sort(OS.netCmp);
     extraOrder.forEach(function (k) {
-        lanes.push({ name: netLabel(k) + ' ' + bandLabel(extra[k].band),
+        /* The band is only named when there is ONE of it. This took the band of
+           whichever access point was seen first, so a network on both radios was
+           labelled with half of itself — the guest lane read "2.4 GHz" while it
+           was also carrying 5. A bare network name is honest at any count. */
+        var b = extra[k].bands;
+        lanes.push({ name: netLabel(k) + (b.length === 1 ? ' ' + bandLabel(b[0]) : ''),
                      clients: extra[k].clients, active: extra[k].active });
     });
     var ethN = M.devices.filter(function (v) { return v.medium === 'eth'; }).length;

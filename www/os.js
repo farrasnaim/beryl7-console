@@ -759,7 +759,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '8438e2bbda';
+var CONSOLE_VERSION = '35efa8f97f';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1430,12 +1430,34 @@ function topologyV(m) {
 
 function topology(m, compact) {
     if (compact) return topologyV(m);
-    var W = 980, H = m.vpn ? 216 : 170;
+    /* HEIGHT GROWS WITH THE LANE COUNT. It used to be the constant 170, or 216
+       with a VPN node, chosen when this router had four lanes. The lanes are
+       drawn centred on midY and 40 apart, so each one added pushes 20px past
+       BOTH ends: at five - which is what adding a guest network produced - the
+       first box started at -11 and the last ended at 179, and the wrapper's
+       overflow clipped the bottom one. The numbers below reproduce 170 and 216
+       exactly at four lanes or fewer, so nothing moves on a router that has
+       not grown one.
+
+       AND THE HEIGHT IS NO LONGER PINNED IN PIXELS. `meet` scales the drawing
+       to fit its box and centres what is left over, so a fixed 170px box at any
+       width between the 660px minimum and the 980px viewBox left the drawing
+       shrunk in the middle with empty bands above and below it - the gap that
+       showed up under the last lane. `auto` lets the height follow the aspect
+       ratio instead, so the drawing always fills the space it is given. */
+    var W = 980, laneH = 40;
+    var laneN = (m.lanes || []).length;
+    var half = laneN > 1 ? (laneN - 1) * (laneH / 2) + 21 : 45;
+    var midY = Math.max(m.vpn ? 92 : 84, half);
+    /* 124 is what sits below midY today with a VPN node: the block starts 78
+       down, is 30 tall, and keeps a margin. It has to grow with the lanes too
+       - leaving it constant reproduced the same bug one lane count further
+       out, which the geometry test caught at seven. */
+    var H = midY + (m.vpn ? Math.max(124, half) : Math.max(86, half));
     var s = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, 'class': 'topo',
                         preserveAspectRatio: 'xMinYMid meet' });
     s.style.minWidth = '660px';
-    s.style.height = H + 'px';
-    var midY = m.vpn ? 92 : 84;
+    s.style.height = 'auto';
 
     function node(x, y, w, hh, cls) {
         s.appendChild(sv('rect', { 'class': 'nodebox ' + (cls || ''), x: x, y: y,
