@@ -674,7 +674,11 @@ if [ "$ACTION" = "setpower" ]; then
         # here rather than assuming the request landed
         _dbm=$(iw dev "$_tif" info 2>/dev/null | sed -n 's/.*txpower \([0-9]*\)\..*/\1/p')
         logger -t settings "txpower $RADIO ($BAND) ${PCT}% via web UI -> ${_dbm:-?} dBm"
-        printf '{"ok":true,"pct":%s,"dbm":%s,"applied":true}' "$PCT" "$(jnum "$_dbm")"
+        # null, not jnum, when the read-back came back empty: jnum turns an
+        # unreadable value into 0, which would report the radio as sitting at
+        # 0 dBm rather than saying the reading failed. The applied:false branch
+        # below already uses null for "not known"; this matches it.
+        printf '{"ok":true,"pct":%s,"dbm":%s,"applied":true}'             "$PCT" "$([ -n "$_dbm" ] && jnum "$_dbm" || echo null)"
     else
         logger -t settings "txpower $RADIO ($BAND) saved at ${PCT}% via web UI; radio down, applies when it returns"
         printf '{"ok":true,"pct":%s,"dbm":null,"applied":false}' "$PCT"
