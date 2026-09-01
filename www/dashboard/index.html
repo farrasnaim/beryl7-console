@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=cb401f9d"></script>
+<script src="/os.js?v=2ea64322"></script>
 <script>
 (function () {
 'use strict';
@@ -800,7 +800,12 @@ function paintProbe() {
 
 function setProbe(sel, ip) {
     probeBusy = true;
-    var body = 'sel=' + encodeURIComponent(sel) + (ip ? '&ip=' + encodeURIComponent(ip) : '');
+    /* action named EXPLICITLY. This body used to carry no action at all and
+       leaned on probe-api treating an absent action as set - the write action.
+       The 2026-09-01 review removed that inverted default believing nothing
+       depended on it; this call did, and the dropdown answered every change
+       with "unknown action" until the action was spelled out here. */
+    var body = 'action=set&sel=' + encodeURIComponent(sel) + (ip ? '&ip=' + encodeURIComponent(ip) : '');
     fetch(PROBE_API, {
         method: 'POST', cache: 'no-store',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
