@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=2ea64322"></script>
+<script src="/os.js?v=b21f8853"></script>
 <script>
 (function () {
 'use strict';
@@ -1273,7 +1273,21 @@ function rowFor(mac) {
             subBits.push(L.band + ' GHz');
             subBits.push(OS.GEN[OS.genOf(st)]);
         } else if (v.medium === 'eth') {
-            subBits.push('wired');
+            /* The WIRED badge on the right already says it is a cable. The
+               subtitle carries what the cable NEGOTIATED - the same reading
+               the detail panel shows, so one card never spells one number two
+               ways. It is the router's end of the port: the device's own link
+               when it is alone on that port, the trunk when a switch sits in
+               between, which is labelled rather than passed off as the
+               device's. A port that is down or unreadable (sysfs speed -1)
+               has nothing honest to say, so the word 'wired' stays for it. */
+            if (v.portSpeed) {
+                subBits.push(ethSpeed(v.portSpeed) +
+                             (v.portDuplex ? ' (' + v.portDuplex + ' duplex)' : '') +
+                             (v.portPeers > 1 ? '  \u00b7  via switch' : ''));
+            } else {
+                subBits.push('wired');
+            }
         }
         if (v.ip) subBits.push(v.ip);
         setTxt(r._sub, subBits.join('  ·  ') || v.mac);
