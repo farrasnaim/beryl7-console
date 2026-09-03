@@ -323,15 +323,40 @@ pgrep -f '[n]lbwmon -o' >/dev/null 2>&1 && now_acct=ok || now_acct=stopped
 # Encrypted-DNS upstream failures, the F-042 fact: AdGuard's own record of
 # giving up on an upstream, counted inside a 30-minute window. Two or more is
 # a pattern; one is a transient and stays quiet.
+#
+# COUNTED BY NAME, NOT BY LINE. A client resolving one name asks for it as
+# several record types at once - A, AAAA, HTTPS - and when the upstream stalls,
+# every one of those times out and AdGuard writes a line for each. One stuck
+# lookup therefore produced two or three lines inside the same second, which
+# is what this counter used to compare against the threshold of two: a single
+# transient paged the owner as a pattern, and then again as a recovery. On
+# 2026-09-03 that was `unleash.premid.app` failing as HTTPS and as AAAA in one
+# second. Distinct names in the window is what "two or more" was always meant
+# to measure; the four-name stall at 11:41 the same day still counts as four.
 now_dns=ok
 if [ -r /etc/dashboard/agh-auth ]; then
-    _n=0; _cut=$(( $(date +%s) - 1800 ))
+    _n=0; _names=""; _cut=$(( $(date +%s) - 1800 ))
+    # one line per failure: "timestamp|name" - the name is what AdGuard prints
+    # after question=";  up to the first backslash, tab, or quote. All three
+    # are cut on because the suffix (\tIN\t TYPE") reaches the log either as
+    # a literal backslash-t (measured: bytes 5c 74) or as a real tab depending
+    # on who quoted it, and the counter must not depend on which.
     logread -l 3000 2>/dev/null | grep 'dnsproxy: exchange failed' | grep 'upstream=127.0.0.1:50' |
-        tail -40 | awk '{print $1" "$2" "$3" "$4" "$5}' > /tmp/.nmuf.$$ 2>/dev/null
-    while read -r _ts; do
+        tail -40 | awk '{
+            ts = $1 " " $2 " " $3 " " $4 " " $5
+            q = ""; i = index($0, "question=\";")
+            if (i) { q = substr($0, i + 11); if (match(q, /[\\\t"]/)) q = substr(q, 1, RSTART - 1) }
+            print ts "|" q
+        }' > /tmp/.nmuf.$$ 2>/dev/null
+    while IFS='|' read -r _ts _q; do
         _e=$(date -D '%a %b %e %T %Y' -d "$_ts" +%s 2>/dev/null)
         case "$_e" in ''|*[!0-9]*) continue ;; esac
-        [ "$_e" -ge "$_cut" ] && _n=$((_n + 1))
+        [ "$_e" -ge "$_cut" ] || continue
+        [ -n "$_q" ] || _q='?'
+        case " $_names " in
+            *" $_q "*) ;;
+            *) _names="$_names $_q"; _n=$((_n + 1)) ;;
+        esac
     done < /tmp/.nmuf.$$
     rm -f /tmp/.nmuf.$$
     [ "$_n" -ge 2 ] && now_dns=failing
