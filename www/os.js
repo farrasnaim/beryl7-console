@@ -759,7 +759,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '5a14aa65dc';
+var CONSOLE_VERSION = 'e2d788fb6d';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -887,6 +887,7 @@ function firewallAlert(onDone) {
 var STAGES = [
     { id: 'clients',  k: 'Overview',     href: '/dashboard/', icon: 'overview', static: 'Connected devices' },
     { id: 'routing',  k: 'VPN',          href: '/vpn/',       icon: 'routing',  static: 'Tunnels and routing' },
+    { id: 'wg',       k: 'WireGuard',    href: '/wireguard/', icon: 'routing',  static: 'Tunnel transport', branch: true },
     { id: 'source',   k: 'Uplink',       href: null,          icon: 'eth',      static: 'Active source' },
     { id: 'repeater', k: 'Wi-Fi uplink', href: '/repeater/',  icon: 'wifi',     static: 'Someone else’s Wi-Fi',  branch: true },
     { id: 'tether',   k: 'USB uplink',   href: '/tethering/', icon: 'usb',      static: 'Phone or modem on USB', branch: true }
@@ -894,6 +895,7 @@ var STAGES = [
 var MTABS = [
     { href: '/dashboard/',  icon: 'overview', label: 'Overview' },
     { href: '/vpn/',        icon: 'routing',  label: 'VPN' },
+    { href: '/wireguard/',  icon: 'routing',  label: 'WireGuard' },
     { href: '/repeater/',   icon: 'wifi',     label: 'Wi-Fi uplink' },
     { href: '/tethering/',  icon: 'usb',      label: 'USB uplink' }
 ];

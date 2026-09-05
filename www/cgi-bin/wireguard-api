@@ -1,0 +1,195 @@
+#!/bin/sh
+# /www/cgi-bin/wireguard-api  —  WireGuard transport: what every tunnel is
+# actually doing on the wire, and the few knobs that belong to the transport
+# rather than to routing policy.
+#
+# WHY THIS IS NOT PART OF /vpn. That page owns tunnel lifecycle and pbr policy:
+# which devices leave through which exit. This one owns the layer underneath -
+# handshakes, endpoints, keepalive, MTU - and it covers tunnels /vpn has no
+# concept of, such as the management tunnel the router dials to the VPS. Two
+# pages, two questions; neither writes what the other owns.
+#
+# PEERS COME IN TWO SHAPES and both are live on this router:
+#   named      network.wgpeer_<label>      of type wireguard_wg_<label>
+#   anonymous  network.@wireguard_<if>[0]  of type wireguard_<if>
+# vpn-api only ever looked for the first, which is why the management tunnel
+# shows up there with an empty endpoint and no key. The common factor is the
+# section TYPE - always `wireguard_<iface>` - so that is what this enumerates,
+# and both shapes are found.
+
+BERYL_LIB=/usr/share/beryl/cgi-lib.sh
+if [ -r "$BERYL_LIB" ]; then
+    . "$BERYL_LIB"
+else
+    printf 'Content-Type: application/json\r\n'
+    printf 'Cache-Control: no-store\r\n\r\n'
+    printf '{"ok":false,"error":"missing %s - reinstall the console"}' "$BERYL_LIB"
+    exit 0
+fi
+
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+read_body
+
+# Empty action is the read path, as on every other endpoint. Anything else is a
+# write and must be a same-origin POST.
+ACTION=$(qs_get action)
+case "$ACTION" in
+    "") ;;
+    *) [ "$REQUEST_METHOD" = "POST" ] || fail "POST required" ;;
+esac
+[ "$REQUEST_METHOD" = "POST" ] && guard_post
+
+NOW=$(date +%s)
+
+# ---------------------------------------------------------------- helpers ---
+# Every uci interface whose proto is wireguard.
+wg_ifaces() {
+    for _s in $(uci -q show network | sed -n "s/^network\.\([A-Za-z0-9_-]*\)=interface$/\1/p"); do
+        [ "$(uci -q get network.$_s.proto)" = "wireguard" ] && echo "$_s"
+    done
+}
+
+# Section ids of every peer belonging to $1, whatever shape they were written in.
+peer_sections() {
+    uci -q show network \
+        | sed -n "s/^network\.\([^=]*\)=wireguard_$1\$/\1/p"
+}
+
+# Which firewall zone carries this interface. The zone is what actually decides
+# whether the tunnel is an exit path or a management path, so the role is READ
+# from the firewall rather than guessed from the interface name.
+zone_of() {
+    for _z in $(uci -q show firewall | sed -n "s/^firewall\.\([^.]*\)=zone$/\1/p"); do
+        for _n in $(uci -q get firewall.$_z.network 2>/dev/null); do
+            [ "$_n" = "$1" ] && { uci -q get firewall.$_z.name; return; }
+        done
+    done
+}
+
+valid_iface() {
+    for _i in $(wg_ifaces); do [ "$_i" = "$1" ] && return 0; done
+    return 1
+}
+
+# =============================================================== WRITES ======
+if [ "$ACTION" = "setkeepalive" ] || [ "$ACTION" = "setmtu" ]; then
+    IF=$(qs_get_dec iface)
+    valid_iface "$IF" || fail "unknown tunnel"
+    VAL=$(qs_get_dec value)
+
+    if [ "$ACTION" = "setkeepalive" ]; then
+        # 0 disables it. Above 0 the useful range is small: the point is to keep
+        # a NAT mapping alive, and most NATs forget in 30-120 s. 25 is the
+        # WireGuard default for a reason and is what the management tunnel needs
+        # to survive Indosat CGNAT.
+        case "$VAL" in ''|*[!0-9]*) fail "keepalive must be a whole number of seconds" ;; esac
+        [ "$VAL" -le 65535 ] || fail "keepalive must be 65535 or less"
+        _n=0
+        for _p in $(peer_sections "$IF"); do
+            if [ "$VAL" = "0" ]; then
+                uci -q delete "network.$_p.persistent_keepalive"
+            else
+                uci set "network.$_p.persistent_keepalive=$VAL"
+            fi
+            _n=$((_n + 1))
+        done
+        [ "$_n" -gt 0 ] || fail "this tunnel has no peer section to change"
+        uci commit network
+        logger -t wireguard-api "keepalive $IF -> ${VAL}s via web UI ($_n peer)"
+    else
+        # Empty clears it back to the interface default. A WireGuard tunnel adds
+        # 60-80 bytes of overhead, so anything above the underlying link's MTU
+        # silently fragments or blackholes large packets - the classic "ssh works,
+        # web pages hang" symptom.
+        if [ -n "$VAL" ]; then
+            case "$VAL" in *[!0-9]*) fail "MTU must be a whole number" ;; esac
+            [ "$VAL" -ge 576 ] && [ "$VAL" -le 9000 ] || fail "MTU must be between 576 and 9000"
+            uci set "network.$IF.mtu=$VAL"
+        else
+            uci -q delete "network.$IF.mtu"
+        fi
+        uci commit network
+        logger -t wireguard-api "mtu $IF -> ${VAL:-auto} via web UI"
+    fi
+
+    # The change only reaches the kernel when the interface is rebuilt. Targeted
+    # ifup, never a whole-network reload: this box has had netifd restarts orphan
+    # odhcp6c and flap wan6.
+    ( sleep 1; ifup "$IF" ) >/dev/null 2>&1 &
+    printf '{"ok":true,"iface":"%s","applied":"%s"}' "$(esc "$IF")" "$(esc "${VAL:-auto}")"
+    exit 0
+fi
+
+if [ "$ACTION" = "redial" ]; then
+    # The standard fix for a tunnel whose handshake has gone stale: tear the
+    # interface down and let it dial again. For the management tunnel this is
+    # the ONLY repair available from this side, because the router is the end
+    # that must initiate.
+    IF=$(qs_get_dec iface)
+    valid_iface "$IF" || fail "unknown tunnel"
+    logger -t wireguard-api "redial $IF via web UI"
+    ( ifdown "$IF"; sleep 2; ifup "$IF" ) >/dev/null 2>&1 &
+    printf '{"ok":true,"iface":"%s"}' "$(esc "$IF")"
+    exit 0
+fi
+
+[ -n "$ACTION" ] && fail "unknown action"
+
+# ================================================================ READ =======
+TJ=""
+for IF in $(wg_ifaces); do
+    DIS=$(uci -q get network.$IF.disabled); [ "$DIS" = "1" ] || DIS=0
+    ADDR=$(uci -q get network.$IF.addresses | tr ' ' ',')
+    MTU=$(uci -q get network.$IF.mtu)
+    LBL=$(uci -q get network.$IF.label)
+    ZONE=$(zone_of "$IF")
+
+    UP=false
+    LPORT=0
+    ip link show "$IF" >/dev/null 2>&1 && UP=true
+    if [ "$UP" = true ]; then
+        LPORT=$(wg show "$IF" listen-port 2>/dev/null)
+        case "$LPORT" in ''|*[!0-9]*) LPORT=0 ;; esac
+        # live addresses can differ from config after a hand edit
+        LIVE_ADDR=$(ip -4 -o addr show dev "$IF" 2>/dev/null | awk '{printf "%s%s", (NR>1?",":""), $4}')
+    else
+        LIVE_ADDR=""
+    fi
+
+    # Peers. `wg show <if> dump` line 1 is the interface, the rest are peers,
+    # keyed by public key - which is how a config peer is matched to its live
+    # state without assuming they are in the same order.
+    PJ=""
+    for P in $(peer_sections "$IF"); do
+        PUB=$(uci -q get network.$P.public_key)
+        EH=$(uci -q get network.$P.endpoint_host)
+        EP=$(uci -q get network.$P.endpoint_port)
+        AIP=$(uci -q get network.$P.allowed_ips | tr ' ' ',')
+        KA=$(uci -q get network.$P.persistent_keepalive); case "$KA" in ''|*[!0-9]*) KA=0 ;; esac
+        RAI=$(uci -q get network.$P.route_allowed_ips)
+        DESC=$(uci -q get network.$P.description)
+
+        HS=0; RX=0; TX=0; ELIVE=""
+        if [ "$UP" = true ] && [ -n "$PUB" ]; then
+            L=$(wg show "$IF" dump 2>/dev/null | awk -v k="$PUB" '$1==k {print; exit}')
+            if [ -n "$L" ]; then
+                ELIVE=$(printf '%s' "$L" | awk '{print $3}')
+                HS=$(printf '%s' "$L" | awk '{print $5}')
+                RX=$(printf '%s' "$L" | awk '{print $6}')
+                TX=$(printf '%s' "$L" | awk '{print $7}')
+            fi
+        fi
+        case "$HS" in ''|*[!0-9]*) HS=0 ;; esac
+        case "$RX" in ''|*[!0-9]*) RX=0 ;; esac
+        case "$TX" in ''|*[!0-9]*) TX=0 ;; esac
+        [ "$ELIVE" = "(none)" ] && ELIVE=""
+
+        PJ="$PJ${PJ:+,}{\"section\":\"$(esc "$P")\",\"desc\":\"$(esc "$DESC")\",\"public_key\":\"$(esc "$PUB")\",\"endpoint\":\"$(esc "$EH")\",\"endpoint_port\":\"$(esc "$EP")\",\"endpoint_live\":\"$(esc "$ELIVE")\",\"allowed_ips\":\"$(esc "$AIP")\",\"keepalive\":$KA,\"route_allowed_ips\":$([ "$RAI" = "1" ] && echo true || echo false),\"handshake\":$HS,\"rx\":$RX,\"tx\":$TX}"
+    done
+
+    TJ="$TJ${TJ:+,}{\"iface\":\"$(esc "$IF")\",\"label\":\"$(esc "$LBL")\",\"zone\":\"$(esc "$ZONE")\",\"disabled\":$([ "$DIS" = "1" ] && echo true || echo false),\"up\":$UP,\"addresses\":\"$(esc "$ADDR")\",\"live_addresses\":\"$(esc "$LIVE_ADDR")\",\"mtu\":\"$(esc "$MTU")\",\"listen_port\":$LPORT,\"peers\":[$PJ]}"
+done
+
+printf '{"ok":true,"ts":%s,"tunnels":[%s]}' "$NOW" "$TJ"

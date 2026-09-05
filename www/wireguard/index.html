@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>WireGuard — Beryl 7</title>
+<link rel="stylesheet" href="/os.css?v=f8e50663">
+</head>
+<body>
+<div class="shell">
+  <aside class="spine"></aside>
+  <main class="main">
+    <div class="topline"></div>
+
+    <header class="head">
+      <div>
+        <h1 class="head__t">WireGuard</h1>
+        <p class="head__s" id="subtitle">Reading the tunnels…</p>
+      </div>
+    </header>
+
+    <div id="alerts"></div>
+
+    <div class="face">
+      <div class="grid g2" id="tunGrid">
+        <div class="sk" style="width:60%"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+<script src="/os.js?v=fbb9d090"></script>
+<script>
+(function () {
+'use strict';
+var $ = OS.$, el = OS.el, setTxt = OS.setTxt, clear = OS.clear;
+var API = '/cgi-bin/wireguard-api';
+
+OS.buildShell('/wireguard/');
+
+/* A handshake is the only honest liveness signal a WireGuard tunnel has.
+   There is no link state to read: the interface says "up" whether or not the
+   far end has ever answered, which is exactly how a dead tunnel looks healthy.
+   WireGuard rekeys about every two minutes while traffic flows, so:
+     under 3 min  - the far end answered recently
+     3 to 10 min  - quiet, which is normal on an idle tunnel with keepalive
+     over 10 min  - nothing has come back; treat it as down
+   Keepalive shortens the quiet case: with 25 s set, a handshake older than a
+   few minutes means the packets are not getting through. */
+function hsState(ageSec, up, keepalive) {
+    if (!up) return { k: 'off', t: 'interface down' };
+    if (!ageSec && ageSec !== 0) return { k: 'fault', t: 'never' };
+    if (ageSec < 180) return { k: 'ok', t: 'alive' };
+    if (ageSec < 600) return { k: keepalive ? 'warn' : 'ok', t: keepalive ? 'quiet' : 'idle' };
+    return { k: 'fault', t: 'stale' };
+}
+
+function ago(s) {
+    if (s == null) return '—';
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+    return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+}
+
+/* The zone is what actually decides what a tunnel is FOR, so it is what names
+   it here. Guessing from the interface name would be a lookalike descriptor -
+   right until someone renames a tunnel. */
+function roleOf(t) {
+    if (t.zone === 'mgmt') return { k: 'Management', d: 'Remote access to this router. It dials out; nothing dials in.' };
+    if (t.zone === 'wg') return { k: 'VPN exit', d: 'Carries client traffic out. Which clients is decided in VPN.' };
+    return { k: t.zone ? 'Zone ' + t.zone : 'No firewall zone', d: t.zone ? '' : 'Not in any zone — it can carry nothing until one is assigned.' };
+}
+
+/* <dl class="kv"> with dt/dd is the house pattern - os.css styles it as a
+   two-column grid that collapses to one column under 700px. An earlier draft
+   invented .kv__k / .kv__v, which exist in no stylesheet, so every row would
+   have rendered unstyled. Hints go outside the list because a <div> is not
+   valid between dt/dd pairs. */
+function kvList(box) {
+    var dl = el('dl', 'kv');
+    box.appendChild(dl);
+    return function (k, v, hint) {
+        if (v == null || v === '') return;
+        dl.appendChild(el('dt', null, k));
+        dl.appendChild(el('dd', null, String(v)));
+        if (hint) box.appendChild(el('div', 'hint', hint));
+    };
+}
+
+var panels = {};
+
+function render(d) {
+    if (!d || !d.ok) return;
+    var tuns = d.tunnels || [];
+    var upN = tuns.filter(function (t) { return t.up; }).length;
+    var mgmt = tuns.filter(function (t) { return t.zone === 'mgmt'; })[0];
+
+    var sub = upN + ' of ' + tuns.length + ' tunnels up';
+    if (mgmt) {
+        var mp = (mgmt.peers || [])[0];
+        var mAge = mp && mp.handshake ? d.ts - mp.handshake : null;
+        var ms = hsState(mAge, mgmt.up, mp && mp.keepalive);
+        sub += '  ·  remote access ' + (ms.k === 'ok' ? 'reachable' : ms.k === 'warn' ? 'quiet' : 'NOT reachable');
+    }
+    setTxt($('#subtitle'), sub);
+
+    var grid = $('#tunGrid');
+    if (!grid._built) { clear(grid); grid._built = true; }
+
+    tuns.forEach(function (t) {
+        var p = panels[t.iface];
+        if (!p) {
+            p = panels[t.iface] = { sec: el('section', 'panel') };
+            var h = el('div', 'panel__h');
+            p.title = el('span', 'panel__t', t.label || t.iface);
+            p.chip = el('span', '');
+            var aside = el('div', 'panel__aside');
+            aside.appendChild(p.chip);
+            h.appendChild(p.title); h.appendChild(aside);
+            p.sec.appendChild(h);
+            p.body = el('div', 'panel__b');
+            p.sec.appendChild(p.body);
+            grid.appendChild(p.sec);
+        }
+
+        var role = roleOf(t);
+        setTxt(p.title, role.k);
+        clear(p.chip);
+        var peer = (t.peers || [])[0] || {};
+        var age = peer.handshake ? d.ts - peer.handshake : null;
+        var st = hsState(age, t.up, peer.keepalive);
+        p.chip.appendChild(OS.chip(st.t, st.k === 'ok' ? 'on' : st.k === 'warn' ? 'warn' : st.k === 'off' ? 'flat' : 'bad'));
+
+        clear(p.body);
+        if (role.d) p.body.appendChild(OS.note(role.d, 'ok'));
+
+        var kv = kvList(p.body);
+        kv('Interface', t.iface + (t.disabled ? '  ·  disabled in config' : ''));
+        kv('Last handshake', age == null ? 'never' : ago(age) + ' ago');
+        if (st.k === 'fault' && t.up) {
+            p.body.appendChild(OS.note('Nothing has come back from the far end. For a tunnel that '
+                + 'dials out, Re-dial is the only repair possible from this side.', 'warn'));
+            kv = kvList(p.body);
+        }
+        kv('Peer endpoint', (peer.endpoint || '') + (peer.endpoint_port ? ':' + peer.endpoint_port : ''));
+        if (peer.endpoint_live && peer.endpoint && peer.endpoint_live.indexOf(peer.endpoint) !== 0) {
+            kv('Live endpoint', peer.endpoint_live + '  (peer roamed)');
+        }
+        kv('This side', t.live_addresses || t.addresses);
+        kv('Routes through it', (peer.allowed_ips || '').split(',').join('   '));
+        kv('Traffic', OS.bytes(peer.rx || 0) + ' in   ' + OS.bytes(peer.tx || 0) + ' out');
+        if (t.listen_port) kv('Local port', t.listen_port);
+        if (peer.public_key) kv('Peer key', peer.public_key.slice(0, 20) + '…');
+
+        if (peer.allowed_ips === '0.0.0.0/0,::/0') {
+            p.body.appendChild(OS.note('Routes everything — a full-tunnel exit.', 'ok'));
+        }
+
+        /* ---- the two knobs that belong to transport ---- */
+        var form = el('div', null);
+
+        var ka = el('input', 'input'); ka.type = 'number'; ka.min = 0; ka.max = 65535;
+        ka.value = peer.keepalive || 0;
+        var kaRow = el('div', 'field');
+        kaRow.appendChild(el('label', 'label', 'Keepalive (seconds)'));
+        kaRow.appendChild(ka);
+        kaRow.appendChild(el('div', 'hint',
+            t.zone === 'mgmt'
+                ? 'Load-bearing here. This router is behind CGNAT, and the keepalive is the only thing holding the mapping open so the far side can reach back. 0 disables it and this tunnel stops answering once the mapping expires.'
+                : '0 disables it. 25 is the usual value; it only matters when this side is behind NAT.'));
+        form.appendChild(kaRow);
+
+        var mtu = el('input', 'input'); mtu.type = 'number'; mtu.min = 576; mtu.max = 9000;
+        mtu.placeholder = 'auto';
+        mtu.value = t.mtu || '';
+        var mRow = el('div', 'field');
+        mRow.appendChild(el('label', 'label', 'MTU'));
+        mRow.appendChild(mtu);
+        mRow.appendChild(el('div', 'hint',
+            'Blank leaves it to the interface. WireGuard adds 60–80 bytes, so a value too high for the underlying link does not fail cleanly — small packets work and large ones vanish, which reads as "SSH is fine but pages hang".'));
+        form.appendChild(mRow);
+
+        var row = el('div', 'row');
+        var save = el('button', 'btn btn--primary btn--sm', 'Apply');
+        var redial = el('button', 'btn btn--ghost btn--sm', 'Re-dial');
+        redial.style.marginLeft = 'auto';
+        row.appendChild(save); row.appendChild(redial);
+        form.appendChild(row);
+        p.body.appendChild(form);
+
+        save.addEventListener('click', function () {
+            OS.askConfirm('Apply to ' + t.iface,
+                'The tunnel is rebuilt to pick this up, so it drops for a second or two. '
+                + (t.zone === 'mgmt' ? 'This is the remote-access path: if the new value is wrong, remote access is what breaks.' : ''),
+                'Apply').then(function (go) {
+                if (!go) return;
+                OS.act(save, API, { action: 'setkeepalive', iface: t.iface, value: ka.value },
+                       { ok: 'Keepalive applied.', failPrefix: 'Not applied' })
+                  .then(function (j) {
+                      if (!j || !j.ok) return;
+                      return OS.act(save, API, { action: 'setmtu', iface: t.iface, value: mtu.value },
+                                    { ok: 'Applied. The tunnel is rebuilding.', delay: 4000, failPrefix: 'MTU not applied' });
+                  });
+            });
+        });
+
+        redial.addEventListener('click', function () {
+            OS.askConfirm('Re-dial ' + t.iface,
+                'Takes the tunnel down and brings it straight back. '
+                + (t.zone === 'mgmt'
+                    ? 'This is how a stale management tunnel is repaired — and the only repair possible from this end, since the router is the side that dials.'
+                    : 'Clients using this exit lose it for a moment.'),
+                'Re-dial').then(function (go) {
+                if (!go) return;
+                OS.act(redial, API, { action: 'redial', iface: t.iface },
+                       { ok: 'Re-dialling.', delay: 5000, failPrefix: 'Could not re-dial' });
+            });
+        });
+    });
+}
+
+/* Handshake age is the whole point of this page and it moves every second, so
+   this polls faster than the config pages — but not so fast that `wg show` runs
+   constantly for a number that only changes meaningfully every two minutes. */
+OS.tp = new OS.Transport(API, render, { interval: 6000 });
+OS.tp.start();
+})();
+</script>
+</body>
+</html>
