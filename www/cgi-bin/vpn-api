@@ -657,6 +657,12 @@ fi
 TUNS=""
 for s in $(uci -q show network | sed -n "s/^network\.\([A-Za-z0-9_-]*\)=interface$/\1/p"); do
     [ "$(uci -q get network.$s.proto)" = "wireguard" ] || continue
+    # wgmgmt is the VPS management tunnel, not a VPN. It can never be a pbr
+    # target (the route action builds wg_$NAME, so "wgmgmt" resolves to a
+    # non-existent wg_wgmgmt), and the Connect/Disconnect control on its row
+    # would cut remote access to this router. It belongs on the WireGuard
+    # page, which shows every tunnel, and nowhere near device routing.
+    [ "$s" = "wgmgmt" ] && continue
     nm="${s#wg_}"
     lbl=$(uci -q get network.$s.label); [ -n "$lbl" ] || lbl="$nm"
     dis=$(uci -q get network.$s.disabled); [ -n "$dis" ] || dis=0
