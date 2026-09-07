@@ -83,10 +83,14 @@
          Everything below answers the opposite question: who is allowed IN. Two
          directions, named as directions — which is why they can share a page
          without becoming the shapeless "all tunnels" screen this replaced. -->
+    <!-- Everything above answers "what leaves this house, and through what".
+         This one section holds every WireGuard tunnel this router runs for
+         itself: the way in for your own devices, and the admin link that keeps
+         the router reachable. They were two panels; they are one subject. -->
     <div class="face">
-      <section class="panel" id="p-road" hidden>
+      <section class="panel" id="p-wg" hidden>
         <div class="panel__h">
-          <span class="panel__t">Coming in</span>
+          <span class="panel__t">WireGuard</span>
           <div class="panel__aside">
             <span class="row__cap" id="roadCount"></span>
             <button class="btn btn--primary btn--sm" id="addDev"></button>
@@ -99,20 +103,11 @@
       </section>
     </div>
 
-    <div class="face">
-      <section class="panel" id="p-admin" hidden>
-        <div class="panel__h"><span class="panel__t">Remote admin link</span>
-          <div class="panel__aside" id="adminState"></div></div>
-        <div class="panel__b" id="admin" style="padding-top:4px"></div>
-        <div id="adminAdv"></div>
-      </section>
-    </div>
-
   </main>
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=8b8d7b24"></script>
+<script src="/os.js?v=412b0b27"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
@@ -1539,13 +1534,32 @@ function addDeviceFlow(iface) {
     });
 }
 
+/* Chip text is the STATE, not the clock. A device that last spoke four days ago
+   is "inactive" — that is the fact worth acting on, and printing "4d ago" in an
+   accent colour makes an ordinary sleeping phone look like a fault. The exact
+   age is in the detail below, where it informs instead of alarms.
+
+   Nothing between three minutes and a day is coloured at all: a phone that is
+   not currently on the tunnel is the normal resting state of this feature, not
+   a degradation. */
+function devState(age) {
+    if (age == null) return { t: 'never connected', tone: 'flat' };
+    if (age >= 86400) return { t: 'inactive', tone: 'flat' };
+    if (age < 180) return { t: 'connected', tone: 'on' };
+    return { t: agoTxt(age), tone: 'flat' };
+}
+
+var devOpen = {};   /* public key -> row expanded; survives the poll */
+
 /* Built once per device and updated in place. Rebuilding the list on every poll
    detaches the buttons between mousedown and handler, and a click on Rename
    reproducibly did nothing. os.js exports `keyed` for exactly this. */
-function roadDeviceRow(iface, rp, d) {
+function roadDeviceRow(iface, rp) {
     var cur = rp;
     var row = el('div', 'row row--pick');
-    row.style.cursor = 'default';
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+
     var id = el('div', 'row__id');
     /* Generic device glyph. Half of what gets added here is a laptop or a
        tablet, and a phone icon beside "iPad" is simply wrong. */
@@ -1568,22 +1582,50 @@ function roadDeviceRow(iface, rp, d) {
         cur = p2;
         setTxt(nm, p2.name);
         var age = p2.handshake ? d2.ts - p2.handshake : null;
-        var st = hsState(age, true, 25);
+        var st = devState(age);
         clear(chipBox);
-        chipBox.appendChild(OS.chip(agoTxt(age),
-            st.k === 'ok' ? 'on' : st.k === 'warn' ? 'warn' : 'flat'));
+        chipBox.appendChild(OS.chip(st.t, st.tone));
         var sub = p2.address;
         if (p2.rx || p2.tx) sub += ' · ↑ ' + OS.bytes(p2.rx || 0) + ' · ↓ ' + OS.bytes(p2.tx || 0);
         setTxt(subEl, sub);
+        row.setAttribute('aria-expanded', devOpen[p2.public_key] ? 'true' : 'false');
     };
-    row._update(rp, d);
 
-    var acts = el('div', null);
-    acts.style.cssText = 'display:flex;gap:6px';
+    /* Rename and Remove live behind the row rather than beside it. They are
+       reached a handful of times in a device's life, and two buttons on every
+       row made a list of phones look like a control panel. Re-rendered at once
+       rather than waiting for the next poll, so the row opens when tapped. */
+    function toggle() {
+        devOpen[cur.public_key] = !devOpen[cur.public_key];
+        if (last) renderTransport(last);
+    }
+    row.addEventListener('click', toggle);
+    row.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+    return row;
+}
+
+function deviceDetail(box, iface, rp, d) {
+    clear(box);
+    var dl = el('dl', 'kv');
+    function kv(k, v) {
+        if (v == null || v === '') return;
+        dl.appendChild(el('dt', null, k)); dl.appendChild(el('dd', null, String(v)));
+    }
+    var age = rp.handshake ? d.ts - rp.handshake : null;
+    kv('Last connected', age == null ? 'never' : agoTxt(age));
+    kv('Address on the tunnel', rp.address);
+    kv('Sent from this device', OS.bytes(rp.rx || 0));
+    kv('Sent to this device', OS.bytes(rp.tx || 0));
+    if (rp.public_key) kv('Device key', rp.public_key.slice(0, 20) + '…');
+    box.appendChild(dl);
+
+    var strip = btnStrip();
     var rename = el('button', 'btn btn--ghost btn--sm', 'Rename');
     var revoke = el('button', 'btn btn--danger btn--sm', 'Remove');
-    acts.appendChild(rename); acts.appendChild(revoke);
-    row.appendChild(acts);
+    strip.appendChild(rename); strip.appendChild(revoke);
+    box.appendChild(strip);
 
     /* The name is kept on this router, keyed by public key. The relay has no
        rename endpoint, and a name held only on the VPS would die with it. */
@@ -1592,11 +1634,11 @@ function roadDeviceRow(iface, rp, d) {
         OS.dialog({
             title: 'Rename this device',
             body: 'Only the label changes. The device keeps working and does not need setting up again.',
-            field: { label: 'Name', value: cur.name, placeholder: 'e.g. iPad', emptyMsg: 'Give it a name.' },
+            field: { label: 'Name', value: rp.name, placeholder: 'e.g. iPad', emptyMsg: 'Give it a name.' },
             okText: 'Save',
             onSubmit: function (v) {
                 return OS.post(WGAPI, { action: 'setdevicename', iface: iface,
-                                        public_key: cur.public_key, name: v }).then(function (j) {
+                                        public_key: rp.public_key, name: v }).then(function (j) {
                     if (!j || !j.ok) return (j && j.error) || 'Could not rename it.';
                     return true;
                 });
@@ -1606,79 +1648,67 @@ function roadDeviceRow(iface, rp, d) {
 
     revoke.addEventListener('click', function (e) {
         e.stopPropagation();
-        OS.askConfirm('Remove ' + cur.name,
+        OS.askConfirm('Remove ' + rp.name,
             'It loses access immediately, and its setup cannot be handed back — '
             + 'reconnecting means adding it again and scanning a new code.',
             'Remove', true).then(function (go) {
             if (!go) return;
-            OS.act(revoke, WGAPI, { action: 'delpeer', iface: iface, public_key: cur.public_key },
+            OS.act(revoke, WGAPI, { action: 'delpeer', iface: iface, public_key: rp.public_key },
                    { ok: 'Removed.', failPrefix: 'Could not remove it' });
         });
     });
-    return row;
 }
 
-var roadAdvOpen = false, adminAdvOpen = false;
-
-function transportKnobs(box, t, apiIface, showRedial) {
-    var kvBox = el('div', null);
-    var dl = el('dl', 'kv');
-    kvBox.appendChild(dl);
-    function kv(k, v) {
-        if (v == null || v === '') return;
-        dl.appendChild(el('dt', null, k)); dl.appendChild(el('dd', null, String(v)));
-    }
-    var peer = t.peer || {};
-    kv('Interface', t.iface);
-    kv('Server address', (peer.endpoint || '') + (peer.endpoint_port ? ':' + peer.endpoint_port : ''));
-    kv('Keepalive', (peer.keepalive || 0) + ' s');
-    kv('MTU', t.mtu || 'automatic');
-    if (peer.public_key) kv('Server key', peer.public_key.slice(0, 20) + '…');
-    box.appendChild(kvBox);
-
-    if (!showRedial) return;
-    var strip = btnStrip();
-    var redial = el('button', 'btn btn--ghost btn--sm', 'Re-dial');
-    strip.appendChild(redial);
-    box.appendChild(strip);
-    redial.addEventListener('click', function () {
-        OS.askConfirm('Re-dial ' + (t.label || t.iface),
-            'Takes the tunnel down and brings it straight back. For a tunnel that dials '
-            + 'out this is the only repair possible from this side.',
-            'Re-dial').then(function (go) {
-            if (!go) return;
-            OS.act(redial, WGAPI, { action: 'redial', iface: apiIface },
-                   { ok: 'Re-dialling.', delay: 5000, failPrefix: 'Could not re-dial' });
-        });
-    });
+/* A label, a live chip and a sentence. Used for the admin link, which is a
+   reading rather than a control — it has no button, and giving it a whole
+   panel implied it needed attending to. */
+function statusRow(title, chip, hint) {
+    var r = el('div', 'row row--pick');
+    r.style.cursor = 'default';
+    var left = el('div', null);
+    var t = el('div', 'row__title');
+    t.appendChild(el('span', 'row__nm', title));
+    var cb = el('span', '');
+    cb.appendChild(chip);
+    t.appendChild(cb);
+    left.appendChild(t);
+    left.appendChild(el('div', 'hint', hint));
+    r.appendChild(left);
+    return r;
 }
+
+var wgAdvOpen = false;
 
 function renderTransport(d) {
     var tp = d.transport || {};
     var road = tp.road, admin = tp.admin;
+    var pWg = $('#p-wg');
+    if (!road && !admin) { pWg.hidden = true; return; }
+    pWg.hidden = false;
 
-    /* ---- coming in ---- */
-    var pRoad = $('#p-road');
-    if (!road) { pRoad.hidden = true; } else {
-        pRoad.hidden = false;
-        var peer = road.peer || {};
-        var rAge = peer.handshake ? d.ts - peer.handshake : null;
-        var off = !!road.disabled;
-        var st = off ? { k: 'off', t: 'switched off' } : hsState(rAge, road.up, peer.keepalive);
-        var devs = road.devices || [];
-        var down = road.relay === 'down';
+    var peer = (road && road.peer) || {};
+    var off = !!(road && road.disabled);
+    var down = road && road.relay === 'down';
+    var devs = (road && road.devices) || [];
 
-        clear($('#roadHead'));
-        $('#roadHead').appendChild(el('div', 'hint',
-            'Your phone or laptop reaches the home network from outside, as if it were '
-            + 'on the home Wi-Fi. It is relayed through the server because this line '
-            + 'cannot be dialled into directly.'));
+    /* Most recently seen first. A device that has never connected sorts last
+       rather than first, which is what a handshake of 0 would otherwise do. */
+    devs = devs.slice().sort(function (a, b) { return (b.handshake || 0) - (a.handshake || 0); });
 
-        setTxt($('#roadCount'), off ? 'off'
-            : down ? 'server unreachable'
-            : devs.length ? devs.length + (devs.length === 1 ? ' device' : ' devices') : 'no devices');
+    clear($('#roadHead'));
+    $('#roadHead').appendChild(el('div', 'hint',
+        'Your own devices reaching this network from outside, as if they were on the '
+        + 'home Wi-Fi. They are relayed through the server because this line cannot be '
+        + 'dialled into directly.'));
 
-        var addBtn = $('#addDev');
+    setTxt($('#roadCount'), !road ? ''
+        : off ? 'off'
+        : down ? 'server unreachable'
+        : devs.length ? devs.length + (devs.length === 1 ? ' device' : ' devices') : 'no devices');
+
+    var addBtn = $('#addDev');
+    addBtn.hidden = !road;
+    if (road) {
         clear(addBtn);
         addBtn.appendChild(OS.icon('plus'));
         addBtn.appendChild(document.createTextNode('Add device'));
@@ -1686,41 +1716,53 @@ function renderTransport(d) {
         addBtn.title = off ? 'Home access is switched off.'
                      : down ? 'The relay server is not answering.' : '';
         addBtn.onclick = function () { addDeviceFlow(road.iface); };
+    }
 
-        var host = $('#roadDevs');
-        if (!host._empty) { host._empty = el('div', null); host.appendChild(host._empty); }
-        if (!host._rows) { host._rows = el('div', null); host.insertBefore(host._rows, host._empty); }
-        clear(host._empty);
-        var rows = OS.keyed(host._rows);
-        if (off) {
-            /* Checked before the unreachable case: with the tunnel down the
-               server is SUPPOSED to be unreachable, and calling that a fault
-               sends you hunting for a problem you created on purpose. */
-            host._empty.appendChild(OS.emptyState('Home access is switched off',
-                'Nothing can reach the home network from outside. The devices you '
-                + 'already added are kept.', 'power'));
-        } else if (down) {
-            host._empty.appendChild(OS.emptyState('Cannot reach the relay server',
-                'Your devices are held on the server, and this page reaches it over the '
-                + 'remote admin link below. They may well still be connected — this page '
-                + 'just cannot see them.', 'alert'));
-        } else if (!devs.length) {
-            host._empty.appendChild(OS.emptyState('No devices yet',
-                'Add your phone or laptop to reach this network from anywhere.', 'dev'));
-        } else {
-            devs.forEach(function (rp) {
-                var w = rows.want(rp.public_key, function () { return roadDeviceRow(road.iface, rp, d); });
-                if (!w.fresh) w.node._update(rp, d);
-            });
-        }
-        rows.commit();
+    var host = $('#roadDevs');
+    if (!host._empty) { host._empty = el('div', null); host.appendChild(host._empty); }
+    if (!host._rows) { host._rows = el('div', null); host.insertBefore(host._rows, host._empty); }
+    clear(host._empty);
+    var rows = OS.keyed(host._rows);
+    if (!road) {
+        /* no home-access tunnel on this router at all */
+    } else if (off) {
+        /* Checked before the unreachable case: with the tunnel down the server
+           is SUPPOSED to be unreachable, and calling that a fault sends you
+           hunting for a problem you created on purpose. */
+        host._empty.appendChild(OS.emptyState('Home access is switched off',
+            'Nothing can reach the home network from outside. The devices you already '
+            + 'added are kept.', 'power'));
+    } else if (down) {
+        host._empty.appendChild(OS.emptyState('Cannot reach the relay server',
+            'Your devices are held on the server, and this page reaches it over the admin '
+            + 'link below. They may well still be connected — this page just cannot see them.',
+            'alert'));
+    } else if (!devs.length) {
+        host._empty.appendChild(OS.emptyState('No devices yet',
+            'Add your phone or laptop to reach this network from anywhere.', 'dev'));
+    } else {
+        devs.forEach(function (rp) {
+            var w = rows.want('r:' + rp.public_key, function () { return roadDeviceRow(road.iface, rp); });
+            w.node._update(rp, d);
+            /* The detail node EXISTS only while the row is open — commit()
+               removes whatever was not wanted this pass, so existence IS the
+               open state and there is no second flag to keep in step. */
+            if (devOpen[rp.public_key]) {
+                deviceDetail(rows.want('d:' + rp.public_key,
+                    function () { return el('div', 'det'); }).node, road.iface, rp, d);
+            }
+        });
+    }
+    rows.commit();
 
-        var set = $('#roadSet');
-        clear(set);
+    var set = $('#roadSet');
+    clear(set);
+
+    if (road) {
         set.appendChild(settingRow('Home access',
             off ? 'Currently off. Turning it on lets the devices above reach the home network again.'
                 : 'Currently on. Turning it off closes the way in for every device above. '
-                  + 'The remote admin link is separate and keeps working.',
+                  + 'The admin link below is separate and keeps working.',
             off ? 'Turn on' : 'Turn off', !off, function (btn) {
                 OS.askConfirm(off ? 'Turn home access on' : 'Turn home access off',
                     off ? 'Your devices will be able to reach the home network again.'
@@ -1733,18 +1775,18 @@ function renderTransport(d) {
                 });
             }));
 
-        var srvHost = (road.peer || {}).endpoint || '';
+        var srvHost = peer.endpoint || '';
         set.appendChild(settingRow('Relay server',
             'Currently ' + (srvHost || 'not set')
-            + '. Change this only when the server itself is renumbered — the remote admin '
-            + 'link uses the same machine and moves with it.',
+            + '. Change this only when the server itself is renumbered — the admin link '
+            + 'uses the same machine and moves with it.',
             'Change address', false, function () {
                 OS.dialog({
                     title: 'The relay server moved',
                     body: el('div', 'hint',
                         'Every tunnel pointing at ' + (srvHost || 'the old address')
-                        + ' moves together, the remote admin link included. Get this wrong '
-                        + 'while you are away and there is no way back in until you are home.'),
+                        + ' moves together, the admin link included. Get this wrong while you '
+                        + 'are away and there is no way back in until you are home.'),
                     field: { label: 'New address or hostname', value: srvHost,
                              placeholder: 'e.g. vps.example.com', emptyMsg: 'Enter the new address.' },
                     okText: 'Move it', danger: true,
@@ -1759,33 +1801,39 @@ function renderTransport(d) {
                     }
                 }).then(function (v) { if (v != null) OS.tp.refresh(4000); });
             }));
-
-        var advHost = $('#roadAdv');
-        clear(advHost);
-        transportKnobs(fold(advHost, 'Technical details',
-            function () { return roadAdvOpen; },
-            function (o) { roadAdvOpen = o; }), road, road.iface, true);
     }
 
-    /* ---- remote admin: one line, because it is infrastructure ---- */
-    var pAdmin = $('#p-admin');
-    if (!admin) { pAdmin.hidden = true; return; }
-    pAdmin.hidden = false;
-    var ap = admin.peer || {};
-    var aAge = ap.handshake ? d.ts - ap.handshake : null;
-    var ast = hsState(aAge, admin.up, ap.keepalive);
-    clear($('#adminState'));
-    $('#adminState').appendChild(OS.chip(ast.t,
-        ast.k === 'ok' ? 'on' : ast.k === 'warn' ? 'warn' : ast.k === 'off' ? 'flat' : 'bad'));
-    clear($('#admin'));
-    $('#admin').appendChild(el('div', 'hint',
-        'How this router is reached for maintenance while you are away, and how the '
-        + 'page above reaches the relay server. Last answered ' + agoTxt(aAge) + '.'));
-    var aAdv = $('#adminAdv');
-    clear(aAdv);
-    transportKnobs(fold(aAdv, 'Technical details',
-        function () { return adminAdvOpen; },
-        function (o) { adminAdvOpen = o; }), admin, admin.iface, true);
+    /* The admin link is a reading, and this chip is computed from the live
+       handshake on EVERY poll — under 3 min "working", under 10 "quiet", past
+       that "not working", and "switched off" when the interface is down. It is
+       never a fixed label. */
+    if (admin) {
+        var ap = admin.peer || {};
+        var aAge = ap.handshake ? d.ts - ap.handshake : null;
+        var ast = hsState(aAge, admin.up, ap.keepalive);
+        set.appendChild(statusRow('Admin link',
+            OS.chip(ast.t, ast.k === 'ok' ? 'on' : ast.k === 'warn' ? 'warn'
+                         : ast.k === 'off' ? 'flat' : 'bad'),
+            'How this router is reached for maintenance while you are away, and how the '
+            + 'devices above are managed. Last answered ' + agoTxt(aAge) + '.'));
+    }
+
+    /* One fold for the whole section. Two would have meant choosing which
+       tunnel a reader wanted before they had seen either. */
+    var advHost = $('#roadAdv');
+    clear(advHost);
+    var body = fold(advHost, 'Technical details',
+        function () { return wgAdvOpen; }, function (o) { wgAdvOpen = o; });
+    if (road) {
+        body.appendChild(el('div', 'row__nm', 'Home access'));
+        transportKnobs(body, road, road.iface, true);
+    }
+    if (admin) {
+        var h2 = el('div', 'row__nm', 'Admin link');
+        h2.style.marginTop = '18px';
+        body.appendChild(h2);
+        transportKnobs(body, admin, admin.iface, true);
+    }
 }
 
 loadDevices().then(function () { if (last) { renderDevices(last); renderMap(last); } });

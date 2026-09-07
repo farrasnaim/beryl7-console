@@ -317,6 +317,15 @@ if [ "$ACTION" = "logs" ]; then
     case "$N" in ''|*[!0-9]*) N=200 ;; esac
     [ "$N" -gt 300 ] && N=300
     case "$LVL" in err|warn) ;; *) LVL=all ;; esac
+    # Free-text filter. The level segment answers "is anything wrong"; this
+    # answers "what did <subsystem> do", which is the question you have when a
+    # tunnel misbehaves and the buffer holds nine hundred lines of everything
+    # else. Matched case-insensitively against the whole message, so a tag
+    # (wireguard-api), an interface (wgroad) and a word all work the same way.
+    LQ=$(qs_get_dec q)
+    # Anchors and classes would be a regex the caller controls; index() on a
+    # lowercased copy keeps it a plain substring test with nothing to escape.
+    LQ=$(printf %s "$LQ" | tr "A-Z" "a-z" | cut -c1-40)
     printf '{"ok":true,"level":"%s","lines":' "$LVL"
     # One `logread`, not two. This endpoint is polled every few seconds, and
     # dumping the whole ring buffer a second time just to count its lines was
@@ -341,7 +350,7 @@ if [ "$ACTION" = "logs" ]; then
     fi
     # Read a wide window and filter inside awk: a severity filter applied after
     # `tail` would return almost nothing, since warnings are sparse by design.
-    tail -n 900 "$LT" | awk -v want="$LVL" -v lim="$N" '
+    tail -n 900 "$LT" | awk -v want="$LVL" -v lim="$N" -v q="$LQ" '
         function jesc(s) {
             # Both of these use the "\\&" form — emit a literal backslash, then
             # re-emit the matched character — because it is the only spelling
@@ -376,6 +385,7 @@ if [ "$ACTION" = "logs" ]; then
             if (!keep && lvl ~ /^(emerg|alert|crit|err)/) keep = 1
             if (!keep && want == "warn" && lvl ~ /^warn/) keep = 1
             if (!keep) next
+            if (q != "" && index(tolower($0), q) == 0) next
             src = $7; sub(/:$/, "", src)
             msg = ""
             for (i = 8; i <= NF; i++) msg = msg (i > 8 ? " " : "") $i

@@ -106,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=8b8d7b24"></script>
+<script src="/os.js?v=412b0b27"></script>
 <script>
 (function () {
 'use strict';
@@ -1476,6 +1476,7 @@ function renderSoft(d) {
    not continuously, and re-reading it under the cursor would move the line you
    were in the middle of. */
 var logLevel = 'all';
+var logQuery = '';   /* free-text filter; see the input built in renderLog */
 /* Buffer depth, cached. -1 means "ask the router for it on the next fetch";
    computing it costs a full read of the ring, so it is not something to
    redo every four seconds. */
@@ -1504,6 +1505,31 @@ function renderLog() {
             seg.appendChild(b);
         });
         aside.appendChild(seg);
+
+        /* The level segment answers "is anything wrong". This answers "what did
+           that subsystem just do", which is the question you actually have when
+           a tunnel misbehaves and the buffer holds nine hundred lines of
+           everything else. Typing wireguard, wgroad or wgmgmt isolates them;
+           so does any other word, which is why this is a text box and not a
+           fourth button naming one subsystem. */
+        var q = el('input', 'input');
+        q.type = 'search';
+        q.placeholder = 'Filter, e.g. wireguard';
+        q.setAttribute('aria-label', 'Filter the log');
+        q.style.cssText = 'width:170px;min-height:28px;padding:4px 10px;font-size:12px';
+        var qt = null;
+        q.addEventListener('input', function () {
+            /* Debounced: every keystroke would otherwise cost the router a
+               900-line read, and the answer for a half-typed word is noise. */
+            clearTimeout(qt);
+            qt = setTimeout(function () {
+                if (logQuery === q.value.trim()) return;
+                logQuery = q.value.trim();
+                logTotal = -1;
+                loadLog();
+            }, 300);
+        });
+        aside.appendChild(q);
         loadLog();
     }
 }
@@ -1547,7 +1573,9 @@ function loadLog(quiet) {
        that rebuilds the panel. The four-second refreshes reuse it: how many
        lines exist in total does not change meaningfully between them, and it is
        not worth re-reading a megabyte to find out. */
-    fetch(API + '?action=logs&level=' + logLevel + '&n=150' + (logTotal < 0 ? '&total=1' : ''),
+    fetch(API + '?action=logs&level=' + logLevel + '&n=150'
+          + (logQuery ? '&q=' + encodeURIComponent(logQuery) : '')
+          + (logTotal < 0 ? '&total=1' : ''),
           { cache: 'no-store' })
         .then(function (r) { return r.json(); })
         .then(paintLog, function () { paintLog(null); });
@@ -1566,6 +1594,14 @@ function paintLog(j) {
         return;
     }
     if (!j.lines.length) {
+        /* A filter that matched nothing is not an empty log, and saying "the
+           log is empty" there would be false. */
+        if (logQuery) {
+            box.appendChild(OS.emptyState('Nothing matches “' + logQuery + '”',
+                'No line in the buffer contains that. Clear the filter to see everything.',
+                'search'));
+            return;
+        }
         box.appendChild(OS.emptyState(
             logLevel === 'all' ? 'The log is empty' : 'Nothing at this level',
             logLevel === 'all' ? 'Nothing has been written since the last boot.'
