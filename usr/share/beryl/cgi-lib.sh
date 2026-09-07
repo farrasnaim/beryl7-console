@@ -557,3 +557,103 @@ guard_post() {
     esac
     [ "$gp_ok" = 1 ] || fail "bad origin"
 }
+
+# ---------------------------------------------------------------------------
+# nlbw_today  -  per-MAC traffic for the LOCAL day, as {"columns":..,"data":..}
+#
+# Sets three globals: NLJ (the JSON), NLDAILY (whether it really is a day rather
+# than nlbwmon raw period) and NLPER (the current period).
+#
+# It lives here because TWO endpoints need the answer and there must be exactly
+# one of it. dashboard-api owned this; vpn-api grew a second, simpler version -
+# current total minus the midnight baseline - which is right only while
+# nlbwmon period has not rolled. nlbwmon anchors periods to UTC and the day
+# marker is local, so they roll apart once a day, and after that the simple
+# version subtracts a baseline from a counter that has already restarted and
+# clamps the negative result to zero. It read correctly for the WireGuard peer
+# purely because that peer baseline was 672 bytes; for a device with a real
+# baseline the same arithmetic gave 0 against a true 2.39 GB.
+#
+# Moved verbatim rather than retyped: the closed-period arithmetic below is the
+# subtlest code in this project and had already been got wrong twice.
+# ---------------------------------------------------------------------------
+nlbw_today() {
+    NLLIST=$(nlbw -c list 2>/dev/null); NLOK=$?
+    NLPER=$(printf '%s\n' "$NLLIST" | head -1)
+    NLPREV=$(printf '%s\n' "$NLLIST" | sed -n '2p')
+    case "$NLPER" in
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+        *) NLPER="" ;;
+    esac
+
+    DAILYF=/etc/dashboard/nlbw-daily
+    NLDAILY=false
+    SNAPDAY=$(sed -n 's/^day=//p' "$DAILYF" 2>/dev/null | head -1)
+    SNAPPER=$(sed -n 's/^period=//p' "$DAILYF" 2>/dev/null | head -1)
+    CLOSED=""
+
+    if [ -n "$NLPER" ] && [ -n "$SNAPPER" ] && [ "$SNAPDAY" = "$(date +%Y-%m-%d)" ]; then
+        if [ "$NLPER" = "$SNAPPER" ]; then
+            NLDAILY=true                       # no rollover yet today
+        elif [ "$NLPREV" = "$SNAPPER" ]; then
+            # Rolled over once since local midnight, which is the normal case for a
+            # daily period: the baseline's own period is now closed, so the part of
+            # it that belongs to today is its final total minus the baseline.
+            CLOSED=$(nlbw -c csv -g mac -t "$SNAPPER" 2>/dev/null | awk -F'\t' 'NR>1{
+                gsub(/"/,"",$1); gsub(/"/,"",$3); gsub(/"/,"",$5)
+                if ($1 != "") print $1, $3, $5 }')
+            [ -n "$CLOSED" ] && NLDAILY=true
+        fi
+        # More than one rollover since midnight means the period is shorter than a
+        # day and this arithmetic no longer holds — fall through to raw totals.
+    fi
+
+    if [ "$NLDAILY" = "true" ]; then
+        NLJ=$( {
+            awk '!/=/ && NF>=3 {print "B", $1, $2, $3}' "$DAILYF" 2>/dev/null
+            [ -n "$CLOSED" ] && printf '%s\n' "$CLOSED" | awk '{print "C", $1, $2, $3}'
+            nlbw -c csv -g mac 2>/dev/null | awk -F'\t' 'NR>1{
+                for (i=1; i<=6; i++) gsub(/"/,"",$i)
+                if ($1 != "") print "X", $1, $2, $3, $4, $5, $6 }'
+          } | awk '
+            $1=="B" { brx[$2]=$3+0; btx[$2]=$4+0; next }
+            $1=="C" { crx[$2]=$3+0; ctx[$2]=$4+0; seenC[$2]=1; next }
+            $1=="X" {
+                m=$2; conns[m]=$3+0; rxp[m]=$5+0; txp[m]=$7+0
+                rx[m]=$4+0; tx[m]=$6+0; seenX[m]=1
+                next
+            }
+            function today(v, closed, base,   d) {
+                # closed remainder (0 when no rollover) plus the current period
+                d = (closed - base) + v
+                return (d > 0) ? d : 0
+            }
+            END {
+                printf "{\"columns\":[\"mac\",\"conns\",\"rx_bytes\",\"rx_pkts\",\"tx_bytes\",\"tx_pkts\"],\"data\":["
+                n = 0
+                for (m in seenX) {
+                    r = today(rx[m], crx[m], brx[m]); t = today(tx[m], ctx[m], btx[m])
+                    if (r == 0 && t == 0) continue
+                    # %.0f, never %d: busybox awk truncates %d at 2147483647, so every counter
+                    # past 2 GB pinned to exactly 2.0 GB - wrong, and wrong in the
+                    # believable direction. awk holds doubles and is exact to 2^53.
+                    printf "%s[\"%s\",%.0f,%.0f,%.0f,%.0f,%.0f]", (n++ ? "," : ""), m, conns[m], r, rxp[m], t, txp[m]
+                }
+                # A device that was busy before the rollover and silent since has no
+                # row in the current period at all; without this it would vanish
+                # from the day rather than show what it actually used.
+                for (m in seenC) {
+                    if (m in seenX) continue
+                    r = crx[m] - brx[m]; t = ctx[m] - btx[m]
+                    if (r < 0) r = 0; if (t < 0) t = 0
+                    if (r == 0 && t == 0) continue
+                    printf "%s[\"%s\",0,%.0f,0,%.0f,0]", (n++ ? "," : ""), m, r, t
+                }
+                printf "]}"
+            }')
+        [ -n "$NLJ" ] || { NLJ=$(nlbw -c json -g mac 2>/dev/null); NLDAILY=false; }
+    else
+        NLJ=$(nlbw -c json -g mac 2>/dev/null)
+    fi
+    case "$NLJ" in '{'*'}') ;; *) NLJ='null' ;; esac
+}

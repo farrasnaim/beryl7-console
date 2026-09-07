@@ -52,6 +52,14 @@ def strip_noise(body):
     body = re.sub(r"//[^\n]*", " ", body)
     body = re.sub(r"'(?:[^'\\\n]|\\.)*'", "''", body)
     body = re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', body)
+    # Regex literals too, or /^M([\d.]+)/ reads as a call to M(). Heuristic on
+    # purpose: a literal is only recognised where an operand may begin -- after
+    # ( = , : [ ! & | or return -- because `a / b / c` is division and telling
+    # the two apart properly needs a real parser, which this deliberately is not.
+    body = re.sub(r"(?<=[(=,:\[!&|])\s*/(?![/*])(?:[^/\\\n\[]|\\.|\[[^\]\n]*\])+/[gimsuy]*",
+                  " RE ", body)
+    body = re.sub(r"\breturn\s+/(?![/*])(?:[^/\\\n\[]|\\.|\[[^\]\n]*\])+/[gimsuy]*",
+                  "return RE ", body)
     return body
 
 

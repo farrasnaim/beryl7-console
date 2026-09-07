@@ -106,7 +106,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=cdd46c5e"></script>
+<script src="/os.js?v=34e8ef80"></script>
 <script>
 (function () {
 'use strict';
@@ -891,7 +891,10 @@ if (MQF.addEventListener) MQF.addEventListener('change', loadFailover);
    MQF is assigned further down this file, so an earlier listener would read it
    as undefined at parse time. */
 if (MQF.addEventListener) MQF.addEventListener('change', equaliseNoteSlots);
-addEventListener('resize', equaliseNoteSlots);
+/* window., not bare: it resolved through the scope chain and worked, but it
+   was the last thing keeping check-calls.py from reading clean, and a check
+   that never reaches zero is one nobody looks at. */
+window.addEventListener('resize', equaliseNoteSlots);
 
 /* -------------------------------------------------------------------- lan -- */
 function ipOk(ip) {

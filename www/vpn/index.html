@@ -107,7 +107,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=cdd46c5e"></script>
+<script src="/os.js?v=34e8ef80"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
@@ -1128,8 +1128,8 @@ function renderAdguard(d) {
         return c;
     }
     var pct = a.queries > 0 ? Math.round(a.blocked * 1000 / a.queries) / 10 : 0;
-    grid.appendChild(stat(OS.fmtNum ? OS.fmtNum(a.queries) : String(a.queries), 'DNS queries · 24h'));
-    grid.appendChild(stat(OS.fmtNum ? OS.fmtNum(a.blocked) : String(a.blocked), 'blocked'));
+    grid.appendChild(stat(Number(a.queries || 0).toLocaleString(), 'DNS queries · 24h'));
+    grid.appendChild(stat(Number(a.blocked || 0).toLocaleString(), 'blocked'));
     grid.appendChild(stat(pct + '%', 'of all queries'));
     box.appendChild(grid);
 
