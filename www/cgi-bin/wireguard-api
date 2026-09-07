@@ -141,6 +141,15 @@ fi
 # never be pointed at wgmgmt or a VPN-client tunnel by a crafted iface value.
 ROAD_API="http://10.99.99.1:8787"
 
+# Display names for those devices live HERE, not on the relay: it has no
+# rename endpoint (404 to rename, renamepeer and setname), and a name held
+# only on the VPS would die with the VPS. Keyed by public key, the one
+# identifier a peer cannot have changed out from under it. Defined ABOVE the
+# addpeer/delpeer block because delpeer prunes this file too - it was first
+# written below it, where the variable was still empty and the prune silently
+# did nothing.
+ROAD_NAMES=/etc/dashboard/road-names
+
 if [ "$ACTION" = "addpeer" ] || [ "$ACTION" = "delpeer" ]; then
     IF=$(qs_get_dec iface)
     valid_iface "$IF" || fail "unknown tunnel"
@@ -218,19 +227,21 @@ PersistentKeepalive = 25"
         [ -n "$RESP" ] || fail "could not reach the VPS relay"
         [ "$(echo "$RESP" | jsonfilter -e '@.ok' 2>/dev/null)" = "true" ] \
             || fail "$(echo "$RESP" | jsonfilter -e '@.error' 2>/dev/null)"
+        # Drop the stored display name too. Without this every revoked device
+        # leaves a line behind for a key that no longer exists, and the file
+        # grows forever with names nothing will ever look up again. Done after
+        # the relay confirms, so a failed revoke does not lose the name of a
+        # device that is still connected.
+        if [ -f "$ROAD_NAMES" ]; then
+            TMPF=/tmp/road-names.$$
+            awk -F'\t' -v k="$PUBKEY" '$1 != k' "$ROAD_NAMES" > "$TMPF"
+            mv "$TMPF" "$ROAD_NAMES"
+        fi
         logger -t wireguard-api "delpeer on $IF via web UI"
         printf '{"ok":true}'
         exit 0
     fi
 fi
-
-# Display names for the devices behind a road relay live HERE, not on the VPS.
-# The relay has no rename endpoint (it answers 404 to rename/renamepeer/setname),
-# and even if it grew one the name would then be hostage to a box that can be
-# rebuilt. Keyed by public key because that is the only stable identifier a peer
-# has - its address can be reassigned and its name is what we are editing.
-# /etc/dashboard is already in the preserve list, so this survives an upgrade.
-ROAD_NAMES=/etc/dashboard/road-names
 
 if [ "$ACTION" = "setdevicename" ]; then
     IF=$(qs_get_dec iface)
