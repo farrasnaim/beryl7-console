@@ -34,7 +34,7 @@
   </main>
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
-<script src="/os.js?v=45e644f0"></script>
+<script src="/os.js?v=4fcdcf4e"></script>
 <script src="/wireguard/qr-vendor.js?v=1"></script>
 <script>
 (function () {
@@ -68,14 +68,29 @@ function ago(s) {
     return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
 }
 
-/* The zone is what actually decides what a tunnel is FOR, so it is what names
-   it here. Guessing from the interface name would be a lookalike descriptor -
-   right until someone renames a tunnel. */
+/* The zone still decides which description applies — it is the only thing that
+   cannot lie about what a tunnel is for — but the WORDS are the owner's, not
+   WireGuard's. "Road warrior", "management" and "VPN exit" are terms of art
+   from the protocol's world; nobody looking at this page is asking which of
+   those they have. They are asking what each one does for them.
+
+   The heading is the tunnel's own name where it has a meaningful one: two VPN
+   providers both titled "VPN exit" were indistinguishable, which is precisely
+   the complaint. */
 function roleOf(t) {
-    if (t.zone === 'mgmt') return { k: 'Management', d: 'Remote access to this router. It dials out; nothing dials in.' };
-    if (t.zone === 'wg') return { k: 'VPN exit', d: 'Carries device traffic out. Which devices is decided in VPN.' };
-    if (t.zone === 'road') return { k: 'Road warrior', d: 'Relayed through the VPS (this router is behind CGNAT and cannot be dialled into directly). Devices added below get LAN-equivalent access, same as being on the home Wi-Fi.' };
-    return { k: t.zone ? 'Zone ' + t.zone : 'No firewall zone', d: t.zone ? '' : 'Not in any zone — it can carry nothing until one is assigned.' };
+    if (t.zone === 'road') return {
+        k: 'Home access from anywhere',
+        d: 'Your phone or laptop joins the home network from outside, as if it were sitting on the home Wi-Fi.'
+    };
+    if (t.zone === 'mgmt') return {
+        k: 'Remote admin link',
+        d: 'How this router can be reached for maintenance while you are away.'
+    };
+    if (t.zone === 'wg') return {
+        k: t.label || 'VPN provider',
+        d: 'A paid VPN service. Which devices go out through it is set on the VPN page.'
+    };
+    return { k: t.label || t.iface, d: t.zone ? '' : 'Not in a firewall zone, so it can carry nothing yet.' };
 }
 
 /* <dl class="kv"> with dt/dd is the house pattern - os.css styles it as a
@@ -102,14 +117,26 @@ function render(d) {
     var upN = tuns.filter(function (t) { return t.up; }).length;
     var mgmt = tuns.filter(function (t) { return t.zone === 'mgmt'; })[0];
 
-    var sub = upN + ' of ' + tuns.length + ' tunnels up';
-    if (mgmt) {
-        var mp = (mgmt.peers || [])[0];
-        var mAge = mp && mp.handshake ? d.ts - mp.handshake : null;
-        var ms = hsState(mAge, mgmt.up, mp && mp.keepalive);
-        sub += '  ·  remote access ' + (ms.k === 'ok' ? 'reachable' : ms.k === 'warn' ? 'quiet' : 'NOT reachable');
+    /* "4 of 4 tunnels up" is a count of a thing nobody counts. The two
+       questions this page exists to answer are whether you can get home and
+       whether the router can still be reached for repairs — so the subtitle
+       answers those, in those words, and says nothing else. */
+    function word(t) {
+        if (!t) return null;
+        if (t.disabled) return 'off';
+        var pr = (t.peers || [])[0] || {};
+        var a = pr.handshake ? d.ts - pr.handshake : null;
+        var s = hsState(a, t.up, pr.keepalive);
+        return s.k === 'ok' ? 'working' : s.k === 'warn' ? 'quiet' : 'not working';
     }
-    setTxt($('#subtitle'), sub);
+    var road = tuns.filter(function (t) { return t.zone === 'road'; })[0];
+    var bits = [];
+    if (road) bits.push('Home access: ' + word(road));
+    if (mgmt) bits.push('remote admin: ' + word(mgmt));
+    var vpnUp = tuns.filter(function (t) { return t.zone === 'wg' && t.up; }).length;
+    var vpnN = tuns.filter(function (t) { return t.zone === 'wg'; }).length;
+    if (vpnN) bits.push(vpnUp + ' of ' + vpnN + ' VPN providers connected');
+    setTxt($('#subtitle'), bits.length ? bits.join('  ·  ') : upN + ' of ' + tuns.length + ' connected');
 
     var grid = $('#tunGrid');
     if (!grid._built) { clear(grid); grid._built = true; }
@@ -154,28 +181,19 @@ function render(d) {
         p.chip.appendChild(OS.chip(st.t, st.k === 'ok' ? 'on' : st.k === 'warn' ? 'warn' : st.k === 'off' ? 'flat' : 'bad'));
 
         clear(p.body);
-        if (role.d) p.body.appendChild(OS.note(role.d, 'ok'));
+        /* One muted line, not a bordered note. Four coloured note boxes on one
+           screen stop being read — they become the wallpaper the eye skips.
+           This sentence only has to answer "what is this for". */
+        if (role.d) p.body.appendChild(el('div', 'hint', role.d));
 
         var kv = kvList(p.body);
-        kv('Interface', t.iface + (t.disabled ? '  ·  disabled in config' : ''));
-        kv('Last handshake', age == null ? 'never' : ago(age) + ' ago');
+        kv('Last seen', age == null ? 'never' : ago(age) + ' ago');
+        if (t.disabled) kv('Switched', 'off in configuration');
+
+        /* Kept in the open because it is the one that asks for an action. */
         if (st.k === 'fault' && t.up) {
             p.body.appendChild(OS.note('Nothing has come back from the far end. For a tunnel that '
                 + 'dials out, Re-dial is the only repair possible from this side.', 'warn'));
-            kv = kvList(p.body);
-        }
-        kv('Peer endpoint', (peer.endpoint || '') + (peer.endpoint_port ? ':' + peer.endpoint_port : ''));
-        if (peer.endpoint_live && peer.endpoint && peer.endpoint_live.indexOf(peer.endpoint) !== 0) {
-            kv('Live endpoint', peer.endpoint_live + '  (peer roamed)');
-        }
-        kv('This side', t.live_addresses || t.addresses);
-        kv('Routes through it', (peer.allowed_ips || '').split(',').join('   '));
-        kv('Traffic', OS.bytes(peer.rx || 0) + ' in   ' + OS.bytes(peer.tx || 0) + ' out');
-        if (t.listen_port) kv('Local port', t.listen_port);
-        if (peer.public_key) kv('Peer key', peer.public_key.slice(0, 20) + '…');
-
-        if (peer.allowed_ips === '0.0.0.0/0,::/0') {
-            p.body.appendChild(OS.note('Routes everything — a full-tunnel exit.', 'ok'));
         }
 
         /* ---- Re-dial stays in the open ----
@@ -201,15 +219,36 @@ function render(d) {
            dashboard already uses for its driver counters. */
         var det = document.createElement('details');
         det.className = 'adv';
-        det.style.cssText = 'border-top:1px solid var(--line);margin-top:10px';
+        /* NO border-top here. .adv>summary already draws one, and setting a
+           second on the <details> put two rules a pixel apart — which is
+           exactly what it looked like. */
+        det.style.marginTop = '10px';
         det.open = !!p.advOpen;
         det.addEventListener('toggle', function () { p.advOpen = det.open; });
         var sum = document.createElement('summary');
-        sum.textContent = 'Transport settings';
+        sum.textContent = 'Technical details';
         sum.style.padding = '9px 0';
         det.appendChild(sum);
 
         var form = el('div', null);
+
+        /* The readings that used to sit on the face of every panel. They are
+           real and occasionally needed, but none of them answers a question the
+           owner has on a normal day, and eight rows of them per panel is what
+           made four tunnels unreadable. */
+        var dkv = kvList(form);
+        dkv('Interface', t.iface);
+        dkv('Server address', (peer.endpoint || '') + (peer.endpoint_port ? ':' + peer.endpoint_port : ''));
+        if (peer.endpoint_live && peer.endpoint && peer.endpoint_live.indexOf(peer.endpoint) !== 0) {
+            dkv('Currently answering from', peer.endpoint_live);
+        }
+        dkv('This router’s address on it', t.live_addresses || t.addresses);
+        dkv('Carries', peer.allowed_ips === '0.0.0.0/0,::/0'
+            ? 'everything (full tunnel)'
+            : (peer.allowed_ips || '').split(',').join('   '));
+        dkv('Traffic carried', OS.bytes(peer.rx || 0) + ' in   ' + OS.bytes(peer.tx || 0) + ' out');
+        if (t.listen_port) dkv('Local port', t.listen_port);
+        if (peer.public_key) dkv('Server key', peer.public_key.slice(0, 20) + '…');
 
         var ka = el('input', 'input'); ka.type = 'number'; ka.min = 0; ka.max = 65535;
         ka.value = peer.keepalive || 0;
@@ -281,43 +320,96 @@ function render(d) {
    panel's plain form. ---- */
 var roadUI = null;
 
+/* Built ONCE per device and updated in place on every poll thereafter.
+   The first version cleared the list and rebuilt every row each time data
+   arrived, which is not merely wasteful: a button that is destroyed and
+   recreated every few seconds can swallow the click that lands on it, because
+   the element under the cursor is detached before the event resolves. It was
+   reproducible — a click on Rename did nothing at all. os.js already exports
+   `keyed` for exactly this, and the caller now uses it with the public key as
+   the identity. `cur` holds the latest peer so the handlers below always act on
+   current data rather than on whatever was true when the row was created. */
 function deviceRow(t, rp, d) {
+    var cur = rp;
     var row = el('div', 'row row--pick');
     row.style.cursor = 'default';
-    var age = rp.handshake ? d.ts - rp.handshake : null;
-    var st = hsState(age, true, 25);
 
     var id = el('div', 'row__id');
-    var ic = el('div', 'row__ico'); ic.appendChild(OS.icon('phone'));
+    /* A generic device glyph, not a phone. Half of what gets added here is a
+       laptop or a tablet, and a phone icon beside "iPad" is just wrong. */
+    var ic = el('div', 'row__ico'); ic.appendChild(OS.icon('dev'));
     id.appendChild(ic);
     var title = el('div', 'row__title');
-    title.appendChild(el('span', 'row__nm', rp.name));
-    title.appendChild(OS.chip(age == null ? 'never connected' : ago(age) + ' ago',
-                               st.k === 'ok' ? 'on' : st.k === 'warn' ? 'warn' : 'flat'));
-    /* Transfer comes from the relay's wg dump, where a peer's rx is what the
-       hub RECEIVED from that device - so rx is the device's upload. Shown
-       because a road-warrior tunnel is the one place a number like this
-       answers a real question: whether the thing is actually being used, and
-       which device is spending the home upload. */
-    var sub = rp.address;
-    if (rp.rx || rp.tx) {
-        sub += ' · ↑ ' + OS.bytes(rp.rx || 0) + ' · ↓ ' + OS.bytes(rp.tx || 0);
-    }
+    var nm = el('span', 'row__nm', '');
+    var chipBox = el('span', '');
+    title.appendChild(nm);
+    title.appendChild(chipBox);
+    var subEl = el('div', 'row__sub', '');
     var idText = el('div', null);
     idText.appendChild(title);
-    idText.appendChild(el('div', 'row__sub', sub));
+    idText.appendChild(subEl);
     id.appendChild(idText);
     row.appendChild(id);
 
+    /* Transfer comes from the relay's wg dump, where a peer's rx is what the
+       hub RECEIVED from that device — so rx is the device's upload. Confirmed
+       against nlbwmon, which independently accounts 10.99.104.3 with the same
+       lopsided shape. Shown because this is the one place the number answers a
+       real question: which device is spending the home connection. */
+    row._update = function (p2, d2) {
+        cur = p2;
+        setTxt(nm, p2.name);
+        var age = p2.handshake ? d2.ts - p2.handshake : null;
+        var st = hsState(age, true, 25);
+        clear(chipBox);
+        chipBox.appendChild(OS.chip(age == null ? 'never connected' : ago(age) + ' ago',
+                                    st.k === 'ok' ? 'on' : st.k === 'warn' ? 'warn' : 'flat'));
+        var sub = p2.address;
+        if (p2.rx || p2.tx) {
+            sub += ' · ↑ ' + OS.bytes(p2.rx || 0) + ' · ↓ ' + OS.bytes(p2.tx || 0);
+        }
+        setTxt(subEl, sub);
+    };
+    row._update(rp, d);
+
+    var acts = el('div', null);
+    acts.style.cssText = 'display:flex;gap:6px';
+    var rename = el('button', 'btn btn--ghost btn--sm', 'Rename');
     var revoke = el('button', 'btn btn--danger btn--sm', 'Revoke');
-    row.appendChild(revoke);
+    acts.appendChild(rename);
+    acts.appendChild(revoke);
+    row.appendChild(acts);
+
+    /* The name is stored on THIS router, keyed by the device's public key, and
+       the relay is never told. It has no rename endpoint — it answers 404 to
+       every spelling of one — and a name held only on the VPS would be lost
+       with the VPS. Renaming therefore changes a label and nothing else: the
+       device keeps its key, its address and its connection. */
+    rename.addEventListener('click', function (e) {
+        e.stopPropagation();
+        OS.dialog({
+            title: 'Rename this device',
+            body: 'Only the label here changes. The device keeps working and does not need setting up again.',
+            field: { label: 'Name', value: cur.name, placeholder: 'e.g. iPad', emptyMsg: 'Give it a name.' },
+            okText: 'Save',
+            onSubmit: function (v) {
+                return OS.post(API, { action: 'setdevicename', iface: t.iface,
+                                      public_key: cur.public_key, name: v }).then(function (j) {
+                    if (!j || !j.ok) return (j && j.error) || 'Could not rename it.';
+                    return true;
+                });
+            }
+        }).then(function (v) { if (v != null) OS.tp.refresh(300); });
+    });
+
     revoke.addEventListener('click', function (e) {
         e.stopPropagation();
-        OS.askConfirm('Revoke ' + rp.name,
-            'This device loses access immediately — it will need to be added again to reconnect.',
+        OS.askConfirm('Revoke ' + cur.name,
+            'This device loses access immediately, and its config cannot be handed back — '
+            + 'reconnecting means adding it again and scanning a new code.',
             'Revoke', true).then(function (go) {
             if (!go) return;
-            OS.act(revoke, API, { action: 'delpeer', iface: t.iface, public_key: rp.public_key },
+            OS.act(revoke, API, { action: 'delpeer', iface: t.iface, public_key: cur.public_key },
                    { ok: 'Revoked.', failPrefix: 'Could not revoke' });
         });
     });
@@ -432,14 +524,78 @@ function renderRoadDevices(d) {
         headAside.hidden = false;
 
         var sect = el('div', 'sect');
-        sect.appendChild(el('div', 'sect__t', 'Devices'));
+        sect.appendChild(el('div', 'sect__t', 'Your devices'));
         roadUI.count = el('div', 'sect__m');
         sect.appendChild(roadUI.count);
         host.appendChild(sect);
+        /* Rows and empty states live in separate boxes so the keyed row list is
+           never cleared out from under itself when an empty state is drawn. */
         roadUI.face = el('div', 'face');
+        roadUI.rows = el('div', null);
+        roadUI.empty = el('div', null);
+        roadUI.face.appendChild(roadUI.rows);
+        roadUI.face.appendChild(roadUI.empty);
         host.appendChild(roadUI.face);
+
+        /* Two controls the feature shipped without. Neither is exotic: one
+           turns it off, and one is what you need on the day the VPS is
+           renumbered — which is the day nothing works and nothing explains
+           why. */
+        roadUI.ctl = el('div', 'row');
+        roadUI.ctl.style.marginTop = '10px';
+        roadUI.power = el('button', 'btn btn--sm');
+        roadUI.moveBtn = el('button', 'btn btn--ghost btn--sm', 'Server moved…');
+        roadUI.moveBtn.style.marginLeft = 'auto';
+        roadUI.ctl.appendChild(roadUI.power);
+        roadUI.ctl.appendChild(roadUI.moveBtn);
+        host.appendChild(roadUI.ctl);
     }
     roadUI.addBtn.onclick = function () { addDeviceFlow(t); };
+
+    var off = !!t.disabled;
+    var srvHost = ((t.peers || [])[0] || {}).endpoint || '';
+
+    setTxt(roadUI.power, off ? 'Turn home access on' : 'Turn home access off');
+    roadUI.power.className = 'btn btn--sm' + (off ? ' btn--primary' : '');
+    roadUI.power.onclick = function () {
+        OS.askConfirm(off ? 'Turn home access on' : 'Turn home access off',
+            off ? 'Your devices will be able to reach the home network again.'
+                : 'Every device below loses its way in until this is turned back on. '
+                  + 'Remote admin is a separate tunnel and is not affected.',
+            off ? 'Turn on' : 'Turn off', !off).then(function (go) {
+            if (!go) return;
+            OS.act(roadUI.power, API, { action: 'settunnel', iface: t.iface, state: off ? 'on' : 'off' },
+                   { ok: off ? 'Home access on.' : 'Home access off.', delay: 3000,
+                     failPrefix: 'Could not change it' });
+        });
+    };
+
+    /* Modelled as "the server moved", not "edit this field", because that is
+       the event — and because editing one tunnel's endpoint is the shape that
+       locks you out. The admin tunnel points at the SAME host; change only the
+       home one and the way back in is the thing left broken. The API moves
+       every peer aimed at the old address together, so the two cannot drift. */
+    roadUI.moveBtn.onclick = function () {
+        OS.dialog({
+            title: 'The relay server moved',
+            body: el('div', 'hint',
+                'Enter its new address. Every tunnel pointing at ' + (srvHost || 'the old address')
+                + ' moves with it — including the remote admin link, which uses the same server. '
+                + 'Get this wrong while you are away and there is no way back in until you are home.'),
+            field: { label: 'New address or hostname', value: srvHost,
+                     placeholder: 'e.g. vps.example.com', emptyMsg: 'Enter the new address.' },
+            okText: 'Move it',
+            danger: true,
+            onSubmit: function (v) {
+                if (v === srvHost) return 'That is the address it already uses.';
+                return OS.post(API, { action: 'setvpshost', host: v, old: srvHost }).then(function (j) {
+                    if (!j || !j.ok) return (j && j.error) || 'Could not change it.';
+                    OS.toast(j.changed + ' tunnel(s) moved. Give them a moment to reconnect.');
+                    return true;
+                });
+            }
+        }).then(function (v) { if (v != null) OS.tp.refresh(4000); });
+    };
 
     var peers = t.road_peers || [];
     var down = t.road_relay === 'down';
@@ -449,25 +605,44 @@ function renderRoadDevices(d) {
        for both was the page's worst bug: it stated something false, and it
        offered an Add button that could only fail - at exactly the moment the
        owner is away from home and needs to know which of the two it is. */
-    roadUI.addBtn.disabled = down;
-    roadUI.addBtn.title = down ? 'The relay on the VPS is not answering.' : '';
+    roadUI.addBtn.disabled = down || off;
+    roadUI.addBtn.title = off ? 'Home access is switched off.'
+                        : down ? 'The relay server is not answering.' : '';
 
-    setTxt(roadUI.count, down ? 'relay unreachable'
+    setTxt(roadUI.count, off ? 'switched off'
+        : down ? 'cannot reach the server'
         : peers.length ? peers.length + (peers.length === 1 ? ' device' : ' devices') : '');
 
-    clear(roadUI.face);
-    if (down) {
-        roadUI.face.appendChild(OS.emptyState('Cannot reach the relay',
-            'The devices are managed on the VPS, over the management tunnel. They may '
-            + 'still be connected — this page just cannot see them. Check the '
-            + 'Management tunnel’s handshake above; if that is healthy, the '
-            + 'road-peer service on the VPS is the next thing to look at.', 'routing'));
+    clear(roadUI.empty);
+    var rows = OS.keyed(roadUI.rows);
+    if (off) {
+        /* Checked before the unreachable case: with the tunnel down the server
+           is SUPPOSED to be unreachable, and reporting that as a fault would
+           send the owner hunting for a problem they created on purpose. */
+        roadUI.empty.appendChild(OS.emptyState('Home access is switched off',
+            'No device can reach the home network from outside right now. '
+            + 'Turn it back on below — the devices you already added are kept.', 'power'));
+    } else if (down) {
+        roadUI.empty.appendChild(OS.emptyState('Cannot reach the relay server',
+            'Your devices are held on the server, and this page reaches it over the '
+            + 'remote admin link. They may well still be connected — this page just '
+            + 'cannot see them. Check that the remote admin link above says it was '
+            + 'seen recently; if it did, the fault is on the server itself.', 'alert'));
     } else if (!peers.length) {
-        roadUI.face.appendChild(OS.emptyState('No devices yet',
-            'Add your phone or laptop to reach this network from anywhere.', 'phone'));
+        roadUI.empty.appendChild(OS.emptyState('No devices yet',
+            'Add your phone or laptop to reach this network from anywhere.', 'dev'));
     } else {
-        peers.forEach(function (rp) { roadUI.face.appendChild(deviceRow(t, rp, d)); });
+        /* want() builds a row the first time it sees a key and hands back the
+           existing node afterwards, so the buttons keep their identity across
+           polls and a click can actually land. commit() removes rows for peers
+           that are gone — which is also what clears the list when an empty
+           state is showing, since nothing was wanted this pass. */
+        peers.forEach(function (rp) {
+            var w = rows.want(rp.public_key, function () { return deviceRow(t, rp, d); });
+            if (!w.fresh) w.node._update(rp, d);
+        });
     }
+    rows.commit();
 }
 
 /* Handshake age is the whole point of this page and it moves every second, so

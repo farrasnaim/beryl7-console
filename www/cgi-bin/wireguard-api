@@ -224,6 +224,91 @@ PersistentKeepalive = 25"
     fi
 fi
 
+# Display names for the devices behind a road relay live HERE, not on the VPS.
+# The relay has no rename endpoint (it answers 404 to rename/renamepeer/setname),
+# and even if it grew one the name would then be hostage to a box that can be
+# rebuilt. Keyed by public key because that is the only stable identifier a peer
+# has - its address can be reassigned and its name is what we are editing.
+# /etc/dashboard is already in the preserve list, so this survives an upgrade.
+ROAD_NAMES=/etc/dashboard/road-names
+
+if [ "$ACTION" = "setdevicename" ]; then
+    IF=$(qs_get_dec iface)
+    valid_iface "$IF" || fail "unknown tunnel"
+    [ "$(zone_of "$IF")" = "road" ] || fail "not a home-access tunnel"
+    PUBKEY=$(qs_get_dec public_key)
+    NAME=$(qs_get_dec name)
+    case "$PUBKEY" in
+        ''|*[!A-Za-z0-9+/=]*) fail "that is not a public key" ;;
+    esac
+    # One record per line, tab-separated, so a name may contain anything except
+    # the separator itself. Trimmed to a length that fits the row it renders in.
+    NAME=$(printf '%s' "$NAME" | tr -d '\t\n\r' | cut -c1-40)
+    [ -n "$NAME" ] || fail "give the device a name"
+
+    mkdir -p /etc/dashboard
+    TMPF=/tmp/road-names.$$
+    # awk rather than `grep -v "^$PUBKEY"`: a base64 key contains + and /, and +
+    # is a repetition operator in ERE. A literal field compare cannot misfire.
+    awk -F'\t' -v k="$PUBKEY" '$1 != k' "$ROAD_NAMES" 2>/dev/null > "$TMPF"
+    printf '%s\t%s\n' "$PUBKEY" "$NAME" >> "$TMPF"
+    mv "$TMPF" "$ROAD_NAMES"
+    logger -t wireguard-api "renamed a road device via web UI"
+    printf '{"ok":true,"name":"%s"}' "$(esc "$NAME")"
+    exit 0
+fi
+
+if [ "$ACTION" = "settunnel" ]; then
+    IF=$(qs_get_dec iface)
+    valid_iface "$IF" || fail "unknown tunnel"
+    # Only the home-access tunnel may be switched off from here. The management
+    # tunnel is the path this request may well have arrived over; an off switch
+    # on it is a button whose only effect is to make itself unreachable.
+    [ "$(zone_of "$IF")" = "road" ] || fail "only home access can be switched here"
+    STATE=$(qs_get_dec state)
+    case "$STATE" in
+        on)  uci -q set network."$IF".disabled='0' ;;
+        off) uci -q set network."$IF".disabled='1' ;;
+        *)   fail "state must be on or off" ;;
+    esac
+    uci commit network
+    if [ "$STATE" = "on" ]; then ifup "$IF" >/dev/null 2>&1; else ifdown "$IF" >/dev/null 2>&1; fi
+    logger -t wireguard-api "home access turned $STATE via web UI"
+    printf '{"ok":true,"state":"%s"}' "$(esc "$STATE")"
+    exit 0
+fi
+
+# "The VPS moved" is one event, so it is one action. Editing a single tunnel's
+# endpoint would be the mechanical shape of this, and it is the dangerous one:
+# wgmgmt and wgroad both point at the same host, and updating only the home
+# tunnel leaves the ADMIN tunnel pointing at an address that no longer answers -
+# the exact path needed to fix the mistake. So every peer currently aimed at the
+# old host moves together, and the ports are left alone because they differ per
+# tunnel and do not change when a machine is renumbered.
+if [ "$ACTION" = "setvpshost" ]; then
+    NEWHOST=$(qs_get_dec host)
+    case "$NEWHOST" in
+        ''|*[!A-Za-z0-9.:_-]*) fail "that is not a hostname or address" ;;
+    esac
+    OLDHOST=$(qs_get_dec old)
+    [ -n "$OLDHOST" ] || fail "missing the address being replaced"
+
+    CHANGED=0
+    for _if in $(wg_ifaces); do
+        for _p in $(peer_sections "$_if"); do
+            [ "$(uci -q get network.$_p.endpoint_host)" = "$OLDHOST" ] || continue
+            uci -q set network."$_p".endpoint_host="$NEWHOST"
+            CHANGED=$((CHANGED + 1))
+        done
+    done
+    [ "$CHANGED" -gt 0 ] || fail "nothing was pointing at $OLDHOST"
+    uci commit network
+    /etc/init.d/network reload >/dev/null 2>&1
+    logger -t wireguard-api "VPS host moved to $NEWHOST on $CHANGED peer(s) via web UI"
+    printf '{"ok":true,"changed":%s}' "$CHANGED"
+    exit 0
+fi
+
 [ -n "$ACTION" ] && fail "unknown action"
 
 # ================================================================ READ =======
@@ -296,8 +381,26 @@ for IF in $(wg_ifaces); do
         RP=$(wget -q -T 5 -O - "$ROAD_API/listpeers" 2>/dev/null)
         if [ "$(echo "$RP" | jsonfilter -e '@.ok' 2>/dev/null)" = "true" ]; then
             RELAY='"ok"'
-            RPJ=$(echo "$RP" | jsonfilter -e '@.peers' 2>/dev/null)
-            if [ -n "$RPJ" ]; then ROADP="$RPJ"; fi
+            # Rebuilt field by field rather than passed straight through, so a
+            # name stored on THIS router can replace the one the relay knows.
+            # The relay cannot be told about a rename - it has no endpoint for
+            # one - so the override has to happen on the way out.
+            _n=0
+            RPJ=""
+            while :; do
+                _pk=$(echo "$RP" | jsonfilter -e "@.peers[$_n].public_key" 2>/dev/null)
+                [ -n "$_pk" ] || break
+                _nm=$(echo "$RP" | jsonfilter -e "@.peers[$_n].name" 2>/dev/null)
+                _lc=$(awk -F'\t' -v k="$_pk" '$1 == k { print $2; exit }' "$ROAD_NAMES" 2>/dev/null)
+                if [ -n "$_lc" ]; then _nm="$_lc"; fi
+                _ad=$(echo "$RP" | jsonfilter -e "@.peers[$_n].address" 2>/dev/null)
+                _hs=$(echo "$RP" | jsonfilter -e "@.peers[$_n].handshake" 2>/dev/null)
+                _rx=$(echo "$RP" | jsonfilter -e "@.peers[$_n].rx" 2>/dev/null)
+                _tx=$(echo "$RP" | jsonfilter -e "@.peers[$_n].tx" 2>/dev/null)
+                RPJ="$RPJ${RPJ:+,}{\"name\":\"$(esc "$_nm")\",\"address\":\"$(esc "$_ad")\",\"public_key\":\"$(esc "$_pk")\",\"handshake\":${_hs:-0},\"rx\":${_rx:-0},\"tx\":${_tx:-0}}"
+                _n=$((_n + 1))
+            done
+            ROADP="[$RPJ]"
         fi
     fi
 
