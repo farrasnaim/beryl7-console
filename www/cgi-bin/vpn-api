@@ -1111,6 +1111,11 @@ if [ -n "$TP_ROAD_IF" ]; then
     #
     # Cached: that computation costs an nlbw read, and this endpoint is polled
     # every ten seconds while a day total moves far more slowly than that.
+    # Closed by the uplink handler rather than by the owner. The page has to be
+    # able to say which, or an off switch that moved on its own reads as a fault.
+    AUTOOFF=false
+    [ -f /etc/dashboard/wgroad-autooff ] && AUTOOFF=true
+
     WGC=/tmp/wg-today.cache
     _age=999
     [ -f "$WGC" ] && _age=$(( $(date +%s) - $(date -r "$WGC" +%s 2>/dev/null || echo 0) ))
@@ -1136,7 +1141,7 @@ if [ -n "$TP_ROAD_IF" ]; then
     case "$WGRX" in ''|*[!0-9]*) WGRX=0 ;; esac
     case "$WGTX" in ''|*[!0-9]*) WGTX=0 ;; esac
 
-    TP_ROAD=$(tp_tunnel_json "$TP_ROAD_IF")",\"relay\":$RELAY,\"devices\":[$DEVS],\"today_rx\":$WGRX,\"today_tx\":$WGTX}"
+    TP_ROAD=$(tp_tunnel_json "$TP_ROAD_IF")",\"auto_off\":$AUTOOFF,\"relay\":$RELAY,\"devices\":[$DEVS],\"today_rx\":$WGRX,\"today_tx\":$WGTX}"
 fi
 
 printf '"transport":{"road":%s,"admin":%s},' "$TP_ROAD" "$TP_ADMIN"

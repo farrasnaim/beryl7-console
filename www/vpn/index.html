@@ -107,7 +107,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=a8cabc10"></script>
+<script src="/os.js?v=a185fd77"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
@@ -1786,9 +1786,14 @@ function renderTransport(d) {
         /* Checked before the unreachable case: with the tunnel down the server
            is SUPPOSED to be unreachable, and calling that a fault sends you
            hunting for a problem you created on purpose. */
-        host._empty.appendChild(OS.emptyState('Home access is switched off',
-            'Nothing can reach the home network from outside. The devices you already '
-            + 'added are kept.', 'power'));
+        host._empty.appendChild(road.auto_off
+            ? OS.emptyState('Home access paused while off the wired line',
+                'The router is running on a phone or a borrowed Wi-Fi uplink, so the way '
+                + 'in is closed to protect that connection. It reopens by itself when the '
+                + 'wired line returns. Your devices are kept.', 'usb')
+            : OS.emptyState('Home access is switched off',
+                'Nothing can reach the home network from outside. The devices you already '
+                + 'added are kept.', 'power'));
     } else if (down) {
         host._empty.appendChild(OS.emptyState('Cannot reach the relay server',
             'Your devices are held on the server, and this page reaches it over the admin '
@@ -1816,8 +1821,18 @@ function renderTransport(d) {
     clear(set);
 
     if (road) {
+        /* An off switch that moved on its own reads as a fault unless the page
+           says who moved it. Turning it back on by hand is honoured and sticks:
+           the API clears the marker, so the wired line returning will not
+           reopen a decision the owner has already made himself. */
         set.appendChild(settingRow('Home access',
-            off ? 'Currently off. Turning it on lets the devices above reach the home network again.'
+            (off && road.auto_off)
+                ? 'Closed automatically because the router is running on a phone or a '
+                  + 'borrowed Wi-Fi uplink, where every byte a remote device pulls from '
+                  + 'home crosses that connection twice. It reopens on its own when the '
+                  + 'wired line is back. Turning it on here overrides that until you '
+                  + 'switch it off again.'
+            : off ? 'Currently off. Turning it on lets the devices above reach the home network again.'
                 : 'Currently on. Turning it off closes the way in for every device above. '
                   + 'The admin link below is separate and keeps working.',
             off ? 'Turn on' : 'Turn off', !off, function (btn) {

@@ -60,3 +60,4 @@
 /etc/hotplug.d/net/42-txpower
 /www/cgi-bin/wireguard-api
 /www/qr-vendor.js
+/etc/hotplug.d/iface/36-wgroad-metered

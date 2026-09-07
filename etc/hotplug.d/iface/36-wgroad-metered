@@ -1,0 +1,111 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/36-wgroad-metered
+#
+# Close home access while the router is living off a phone, and open it again
+# when the wired line comes back.
+#
+# WHY. The road-warrior tunnel relays through the VPS, so every byte a remote
+# device pulls from home crosses the uplink TWICE — in over the tunnel and out
+# again to wherever it was going. On the wired line that is unremarkable. On a
+# USB tether or a borrowed Wi-Fi uplink it is somebody's phone plan, and a
+# full-tunnel client left connected will quietly spend it at line rate. The
+# owner is also, by definition, the person least able to notice: this uplink is
+# what he is on when he is away from the house.
+#
+# WHAT IT DOES NOT TOUCH: wgmgmt. That is the admin path, it carries almost
+# nothing, and it is needed MOST on a tethered uplink — it is the way back in
+# when something is wrong and the owner is not home. Closing it to save data
+# would be closing the door and posting the key inside.
+#
+# THE TUNNEL IS FOUND BY FIREWALL ZONE, never by name. Every other part of this
+# console does the same: a name test only ever matches the tunnel somebody
+# remembered, and this one must not fire on a VPN exit or on wgmgmt if the
+# interfaces are ever renamed.
+#
+# INTENT BEATS AUTOMATION. The marker file records that WE closed it. If the
+# owner had already switched home access off by hand, nothing is marked and
+# nothing is restored later — his "off" is not ours to undo. Equally, if he
+# switches it on by hand while tethered, wireguard-api clears the marker, so the
+# wired line returning does not "restore" something that is already on.
+
+case "$ACTION" in ifup|ifdown) ;; *) exit 0 ;; esac
+case "$INTERFACE" in wan|wwan|tethering) ;; *) exit 0 ;; esac
+
+MARK=/etc/dashboard/wgroad-autooff
+LOG="logger -t wgroad-metered"
+
+. /lib/functions/network.sh
+
+# The road tunnel, by zone. Absent on a router that has no such tunnel, which is
+# the normal case for anyone else running this console.
+road_iface() {
+    local _z _n
+    for _z in $(uci -q show firewall | sed -n 's/^firewall\.\([^.]*\)=zone$/\1/p'); do
+        [ "$(uci -q get firewall.$_z.name)" = "road" ] || continue
+        for _n in $(uci -q get firewall.$_z.network 2>/dev/null); do
+            [ "$(uci -q get network.$_n.proto)" = "wireguard" ] && { echo "$_n"; return; }
+        done
+    done
+}
+
+IF=$(road_iface)
+[ -n "$IF" ] || exit 0
+
+# Up AND with a gateway that resolves. "Up" alone is what 32-pbr-uplink learned
+# not to trust: netifd marks an interface up and installs its route at around
+# the same moment, and the ordering is not ours to rely on.
+live() {
+    network_is_up "$1" || return 1
+    local gw=""
+    network_get_gateway gw "$1" true
+    [ -n "$gw" ] && [ "$gw" != "0.0.0.0" ]
+}
+
+set_road() {   # $1 = 0 (on) | 1 (off)
+    [ "$(uci -q get network.$IF.disabled)" = "$1" ] && return 1
+    uci -q set network.$IF.disabled="$1"
+    uci commit network
+    if [ "$1" = "1" ]; then ifdown "$IF"; else ifup "$IF"; fi
+    return 0
+}
+
+# Detached: a handler that waits must never block netifd, which runs these in
+# sequence. The wait is the point — see the retry.
+(
+trap - EXIT INT TERM
+
+# Same reasoning as 32-pbr-uplink: one sample taken at the instant of the event
+# can land before the route exists and is then indistinguishable from "no uplink
+# at all". At boot no further event may follow, so keep looking briefly.
+i=0
+while [ "$i" -lt 12 ]; do              # ~60s ceiling
+    WIRED=no; ANY=no
+    if live wan; then WIRED=yes; ANY=yes
+    elif live wwan || live tethering; then ANY=yes
+    fi
+    [ "$ANY" = yes ] && break
+    sleep 5
+    i=$((i + 1))
+done
+
+# No usable uplink at all: decide nothing. An uplink that has not arrived is not
+# the same fact as a metered one, and acting on the confusion would close home
+# access every time the line blinks.
+[ "$ANY" = yes ] || exit 0
+
+if [ "$WIRED" = no ]; then
+    # Already off by the owner's own hand: leave it, and leave it unmarked, so
+    # the wired line returning does not switch on something he switched off.
+    [ "$(uci -q get network.$IF.disabled)" = "1" ] && exit 0
+    if set_road 1; then
+        : > "$MARK"
+        $LOG "uplink is metered ($INTERFACE) - home access closed"
+    fi
+else
+    [ -f "$MARK" ] || exit 0           # we did not close it; not ours to open
+    if set_road 0; then
+        $LOG "wired uplink back - home access reopened"
+    fi
+    rm -f "$MARK"
+fi
+) >/dev/null 2>&1 &

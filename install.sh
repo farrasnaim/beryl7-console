@@ -316,6 +316,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /etc/hotplug.d/iface/33-uplink-width \
          /etc/hotplug.d/iface/34-vpn-resume \
          /etc/hotplug.d/iface/35-nlbw-v6prefix \
+         /etc/hotplug.d/iface/36-wgroad-metered \
          /etc/hotplug.d/iface/99-repeater-iot /etc/hotplug.d/net/30-tethering \
          /etc/hotplug.d/net/40-rrm-neighbors \
          /etc/hotplug.d/net/41-packet-steering \

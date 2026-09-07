@@ -283,6 +283,12 @@ if [ "$ACTION" = "settunnel" ]; then
         *)   fail "state must be on or off" ;;
     esac
     uci commit network
+    # The owner acting by hand replaces whatever the uplink handler decided.
+    # Without this, switching home access on while tethered would be undone the
+    # next time the wired line returned - the handler would see its own marker
+    # and "restore" a tunnel that was already on, and a control that argues back
+    # is worse than no automation at all.
+    rm -f /etc/dashboard/wgroad-autooff
     if [ "$STATE" = "on" ]; then ifup "$IF" >/dev/null 2>&1; else ifdown "$IF" >/dev/null 2>&1; fi
     logger -t wireguard-api "home access turned $STATE via web UI"
     printf '{"ok":true,"state":"%s"}' "$(esc "$STATE")"
