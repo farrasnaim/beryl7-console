@@ -654,15 +654,32 @@ fi
 
 # ============================ LIST (read) ============================
 # Public metadata only — private keys are deliberately never emitted.
+
+# THIS PAGE OWNS ONE KIND OF TUNNEL: a paid VPN a device can be routed out
+# through. That is exactly the set this file puts in firewall zone `wg` when it
+# creates one, so membership of that zone is the test — not the interface name.
+#
+# It was a name test, `[ "$s" = "wgmgmt" ]`, and a name test only excludes the
+# one tunnel somebody remembered. A road-warrior tunnel was added later and duly
+# appeared here, with a Connect/Disconnect control and a pbr target that cannot
+# work: the route action builds wg_$NAME, so `wgroad` resolves to a
+# non-existent wg_wgroad. Worse, both of the tunnels a name test misses are the
+# ones whose Disconnect button cuts the way back into this router from outside.
+#
+# Reading the zone cannot go stale that way: anything that is not a VPN exit is
+# absent from this page by construction, whatever it ends up being called.
+zone_of() {
+    for _z in $(uci -q show firewall | sed -n "s/^firewall\.\([^.]*\)=zone$/\1/p"); do
+        for _n in $(uci -q get firewall.$_z.network 2>/dev/null); do
+            [ "$_n" = "$1" ] && { uci -q get firewall.$_z.name; return; }
+        done
+    done
+}
+
 TUNS=""
 for s in $(uci -q show network | sed -n "s/^network\.\([A-Za-z0-9_-]*\)=interface$/\1/p"); do
     [ "$(uci -q get network.$s.proto)" = "wireguard" ] || continue
-    # wgmgmt is the VPS management tunnel, not a VPN. It can never be a pbr
-    # target (the route action builds wg_$NAME, so "wgmgmt" resolves to a
-    # non-existent wg_wgmgmt), and the Connect/Disconnect control on its row
-    # would cut remote access to this router. It belongs on the WireGuard
-    # page, which shows every tunnel, and nowhere near device routing.
-    [ "$s" = "wgmgmt" ] && continue
+    [ "$(zone_of "$s")" = "wg" ] || continue
     nm="${s#wg_}"
     lbl=$(uci -q get network.$s.label); [ -n "$lbl" ] || lbl="$nm"
     dis=$(uci -q get network.$s.disabled); [ -n "$dis" ] || dis=0
