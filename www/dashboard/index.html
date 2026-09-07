@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=34e8ef80"></script>
+<script src="/os.js?v=a8cabc10"></script>
 <script>
 (function () {
 'use strict';
@@ -218,6 +218,32 @@ function model(d) {
         dv.portSpeed = +w.speed || 0;
         dv.portDuplex = w.duplex || '';
     });
+
+    /* WIREGUARD HAS NO MAC. nlbwmon files every flow from a tunnel peer under
+       00:00:00:00:00:00, and the traffic join below is by MAC, so the row was
+       matched to nothing and dropped - gigabytes of ordinary broadband use
+       counted by the router and shown on no screen at all.
+
+       One synthetic entry carries it, and it is deliberately left with no links
+       and no wired port. That files it under 'idle', and 'idle' is the one
+       group renderClients counts but never draws - so this appears in Traffic
+       today, where the question is who spent the connection, and nowhere in the
+       device list, where the question is what is on the network. A tunnel total
+       is an answer to the first and not the second.
+
+       An earlier attempt forced medium to 'wg' and gave it a heading of its
+       own, which is exactly what put it in the list. Doing nothing is the fix. */
+    var WGMAC = '00:00:00:00:00:00';
+    if (d.nlbw && d.nlbw.columns && d.nlbw.data) {
+        var wgi = d.nlbw.columns.indexOf('mac');
+        if (d.nlbw.data.some(function (r) {
+                return String(r[wgi] || '').toUpperCase() === WGMAC;
+            })) {
+            var wgv = ensure(WGMAC);
+            wgv.name = 'WireGuard';
+            wgv.named = true;
+        }
+    }
 
     var out = [];
     Object.keys(byMac).forEach(function (m) {
