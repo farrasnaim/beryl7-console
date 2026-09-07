@@ -79,11 +79,41 @@
       </section>
     </div>
 
+    <!-- Everything above answers "what leaves this house, and through what".
+         Everything below answers the opposite question: who is allowed IN. Two
+         directions, named as directions — which is why they can share a page
+         without becoming the shapeless "all tunnels" screen this replaced. -->
+    <div class="face">
+      <section class="panel" id="p-road" hidden>
+        <div class="panel__h">
+          <span class="panel__t">Coming in</span>
+          <div class="panel__aside">
+            <span class="row__cap" id="roadCount"></span>
+            <button class="btn btn--primary btn--sm" id="addDev"></button>
+          </div>
+        </div>
+        <div class="panel__b" id="roadHead" style="padding-top:4px"></div>
+        <div class="panel__b panel__b--flush" id="roadDevs"></div>
+        <div class="panel__b panel__b--flush" id="roadSet"></div>
+        <div id="roadAdv"></div>
+      </section>
+    </div>
+
+    <div class="face">
+      <section class="panel" id="p-admin" hidden>
+        <div class="panel__h"><span class="panel__t">Remote admin link</span>
+          <div class="panel__aside" id="adminState"></div></div>
+        <div class="panel__b" id="admin" style="padding-top:4px"></div>
+        <div id="adminAdv"></div>
+      </section>
+    </div>
+
   </main>
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=4fcdcf4e"></script>
+<script src="/os.js?v=8b8d7b24"></script>
+<script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
 'use strict';
@@ -1363,6 +1393,399 @@ function render(d) {
     renderDevices(d);
     renderFailmode(d);
     renderAdguard(d);
+    renderTransport(d);
+}
+
+/* ======================= COMING IN — home access ==========================
+   Moved here when the separate WireGuard page was deleted. That page was
+   organised around a protocol, which is a category and not a question, so it
+   came out as four equal cards of forms with no subject. Here the subject is
+   the direction: everything above is traffic leaving, this is traffic arriving.
+   ========================================================================= */
+
+var WGAPI = '/cgi-bin/wireguard-api';   /* writes still live in their own file */
+
+/* A handshake is the only honest liveness signal a WireGuard tunnel has. There
+   is no link state to read: the interface reports "up" whether or not the far
+   end has ever answered, which is exactly how a dead tunnel looks healthy.
+   WireGuard rekeys about every two minutes while traffic flows. */
+function hsState(ageSec, up, keepalive) {
+    if (!up) return { k: 'off', t: 'switched off' };
+    if (ageSec == null) return { k: 'fault', t: 'never connected' };
+    if (ageSec < 180) return { k: 'ok', t: 'working' };
+    if (ageSec < 600) return { k: keepalive ? 'warn' : 'ok', t: keepalive ? 'quiet' : 'idle' };
+    return { k: 'fault', t: 'not working' };
+}
+
+function agoTxt(s) {
+    if (s == null) return 'never';
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    return Math.floor(s / 3600) + 'h ago';
+}
+
+/* One setting, one row, each with its own label and its own sentence. The two
+   controls this replaced were bare buttons sharing a row, which read as a pair
+   of related actions when one switches the feature off and the other is for the
+   day the server is renumbered. */
+function settingRow(title, hint, btnText, danger, onClick) {
+    var r = el('div', 'row row--pick');
+    r.style.cursor = 'default';
+    var left = el('div', null);
+    left.appendChild(el('div', 'row__nm', title));
+    left.appendChild(el('div', 'hint', hint));
+    r.appendChild(left);
+    var b = el('button', 'btn btn--sm' + (danger ? ' btn--danger' : ''), btnText);
+    b.addEventListener('click', function () { onClick(b); });
+    r.appendChild(b);
+    return r;
+}
+
+/* NEVER `.row` for a strip that only holds buttons: .row carries a
+   border-bottom, and with a <details> underneath its summary's border-top
+   lands one pixel below it — two rules where the design has one. That is the
+   double line that survived two attempts to remove it. */
+function btnStrip() {
+    var s = el('div', null);
+    s.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;padding:10px 0 2px';
+    return s;
+}
+
+function fold(host, title, openFlag, onOpen) {
+    var det = document.createElement('details');
+    det.className = 'adv';
+    det.open = !!openFlag();
+    det.addEventListener('toggle', function () { onOpen(det.open); });
+    var sum = document.createElement('summary');
+    sum.textContent = title;
+    det.appendChild(sum);
+    var body = el('div', 'panel__b');
+    det.appendChild(body);
+    host.appendChild(det);
+    return body;
+}
+
+var ROUTE_HINT = {
+    lan: 'Only traffic for the home network goes through the tunnel. The device keeps '
+       + 'its own connection for everything else, so the battery cost is close to nothing.',
+    all: 'Every packet goes through the house, DNS included — so AdGuard filters this '
+       + 'device too, and sites see your home address. Worth switching to on Wi-Fi you '
+       + 'do not trust. Slower, and it spends the home upload.'
+};
+
+function addDeviceFlow(iface) {
+    var newCfg = null, route = 'lan';
+    var body = el('div', 'stack');
+    body.appendChild(el('div', null,
+        'It gets the same reach as a device sitting on the home Wi-Fi.'));
+    var lab = el('div', null);
+    lab.appendChild(el('div', 'row__nm', 'What goes through the tunnel'));
+    var hint = el('div', 'hint', ROUTE_HINT[route]);
+    hint.style.marginTop = '4px';
+    var seg = el('div', 'seg');
+    seg.style.marginTop = '8px';
+    var segBtns = [];
+    [['lan', 'Home network only'], ['all', 'Everything through home']].forEach(function (o) {
+        var b = el('button', 'btn btn--sm', o[1]);
+        /* type=button: this sits inside the dialog's form and a default submit
+           would add the device the moment a mode is picked. */
+        b.type = 'button';
+        b.setAttribute('aria-pressed', o[0] === route ? 'true' : 'false');
+        b.addEventListener('click', function () {
+            route = o[0];
+            segBtns.forEach(function (x) {
+                x.b.setAttribute('aria-pressed', x.k === route ? 'true' : 'false');
+            });
+            setTxt(hint, ROUTE_HINT[route]);
+        });
+        segBtns.push({ k: o[0], b: b });
+        seg.appendChild(b);
+    });
+    lab.appendChild(seg); lab.appendChild(hint);
+    body.appendChild(lab);
+
+    OS.dialog({
+        title: 'Add a device',
+        body: body,
+        field: { label: 'Device name', placeholder: 'e.g. iPad', emptyMsg: 'Name this device.' },
+        okText: 'Add device',
+        onSubmit: function (name) {
+            return OS.post(WGAPI, { action: 'addpeer', iface: iface, name: name, route: route })
+                .then(function (j) {
+                    if (!j || !j.ok) return (j && j.error) || 'Could not add the device.';
+                    newCfg = j;
+                    return true;
+                });
+        }
+    }).then(function (v) {
+        if (v == null || !newCfg) return;
+        OS.tp.refresh(300);
+        var b2 = el('div', 'stack');
+        if (window.UQR) {
+            var qr = el('div', null);
+            qr.style.cssText = 'max-width:220px;margin:0 auto';
+            qr.innerHTML = window.UQR.renderSVG(newCfg.config, { pixelSize: 4 });
+            b2.appendChild(qr);
+        }
+        var ta = el('textarea', 'ta n');
+        ta.readOnly = true; ta.value = newCfg.config;
+        ta.addEventListener('click', function () { ta.select(); });
+        b2.appendChild(ta);
+        b2.appendChild(el('div', 'hint',
+            (route === 'all' ? 'Everything through home. ' : 'Home network only. ')
+            + 'Shown once and stored nowhere — scan it in the WireGuard app, or copy the '
+            + 'text, before closing this.'));
+        OS.dialog({ title: newCfg.name, body: b2, okText: 'Done', cancelText: 'Close' });
+    });
+}
+
+/* Built once per device and updated in place. Rebuilding the list on every poll
+   detaches the buttons between mousedown and handler, and a click on Rename
+   reproducibly did nothing. os.js exports `keyed` for exactly this. */
+function roadDeviceRow(iface, rp, d) {
+    var cur = rp;
+    var row = el('div', 'row row--pick');
+    row.style.cursor = 'default';
+    var id = el('div', 'row__id');
+    /* Generic device glyph. Half of what gets added here is a laptop or a
+       tablet, and a phone icon beside "iPad" is simply wrong. */
+    var ic = el('div', 'row__ico'); ic.appendChild(OS.icon('dev'));
+    id.appendChild(ic);
+    var title = el('div', 'row__title');
+    var nm = el('span', 'row__nm', '');
+    var chipBox = el('span', '');
+    title.appendChild(nm); title.appendChild(chipBox);
+    var subEl = el('div', 'row__sub', '');
+    var idText = el('div', null);
+    idText.appendChild(title); idText.appendChild(subEl);
+    id.appendChild(idText);
+    row.appendChild(id);
+
+    /* rx is what the relay RECEIVED from the device, so rx is its upload.
+       Confirmed against nlbwmon, which accounts the same address with the same
+       lopsided shape rather than the reverse. */
+    row._update = function (p2, d2) {
+        cur = p2;
+        setTxt(nm, p2.name);
+        var age = p2.handshake ? d2.ts - p2.handshake : null;
+        var st = hsState(age, true, 25);
+        clear(chipBox);
+        chipBox.appendChild(OS.chip(agoTxt(age),
+            st.k === 'ok' ? 'on' : st.k === 'warn' ? 'warn' : 'flat'));
+        var sub = p2.address;
+        if (p2.rx || p2.tx) sub += ' · ↑ ' + OS.bytes(p2.rx || 0) + ' · ↓ ' + OS.bytes(p2.tx || 0);
+        setTxt(subEl, sub);
+    };
+    row._update(rp, d);
+
+    var acts = el('div', null);
+    acts.style.cssText = 'display:flex;gap:6px';
+    var rename = el('button', 'btn btn--ghost btn--sm', 'Rename');
+    var revoke = el('button', 'btn btn--danger btn--sm', 'Remove');
+    acts.appendChild(rename); acts.appendChild(revoke);
+    row.appendChild(acts);
+
+    /* The name is kept on this router, keyed by public key. The relay has no
+       rename endpoint, and a name held only on the VPS would die with it. */
+    rename.addEventListener('click', function (e) {
+        e.stopPropagation();
+        OS.dialog({
+            title: 'Rename this device',
+            body: 'Only the label changes. The device keeps working and does not need setting up again.',
+            field: { label: 'Name', value: cur.name, placeholder: 'e.g. iPad', emptyMsg: 'Give it a name.' },
+            okText: 'Save',
+            onSubmit: function (v) {
+                return OS.post(WGAPI, { action: 'setdevicename', iface: iface,
+                                        public_key: cur.public_key, name: v }).then(function (j) {
+                    if (!j || !j.ok) return (j && j.error) || 'Could not rename it.';
+                    return true;
+                });
+            }
+        }).then(function (v) { if (v != null) OS.tp.refresh(300); });
+    });
+
+    revoke.addEventListener('click', function (e) {
+        e.stopPropagation();
+        OS.askConfirm('Remove ' + cur.name,
+            'It loses access immediately, and its setup cannot be handed back — '
+            + 'reconnecting means adding it again and scanning a new code.',
+            'Remove', true).then(function (go) {
+            if (!go) return;
+            OS.act(revoke, WGAPI, { action: 'delpeer', iface: iface, public_key: cur.public_key },
+                   { ok: 'Removed.', failPrefix: 'Could not remove it' });
+        });
+    });
+    return row;
+}
+
+var roadAdvOpen = false, adminAdvOpen = false;
+
+function transportKnobs(box, t, apiIface, showRedial) {
+    var kvBox = el('div', null);
+    var dl = el('dl', 'kv');
+    kvBox.appendChild(dl);
+    function kv(k, v) {
+        if (v == null || v === '') return;
+        dl.appendChild(el('dt', null, k)); dl.appendChild(el('dd', null, String(v)));
+    }
+    var peer = t.peer || {};
+    kv('Interface', t.iface);
+    kv('Server address', (peer.endpoint || '') + (peer.endpoint_port ? ':' + peer.endpoint_port : ''));
+    kv('Keepalive', (peer.keepalive || 0) + ' s');
+    kv('MTU', t.mtu || 'automatic');
+    if (peer.public_key) kv('Server key', peer.public_key.slice(0, 20) + '…');
+    box.appendChild(kvBox);
+
+    if (!showRedial) return;
+    var strip = btnStrip();
+    var redial = el('button', 'btn btn--ghost btn--sm', 'Re-dial');
+    strip.appendChild(redial);
+    box.appendChild(strip);
+    redial.addEventListener('click', function () {
+        OS.askConfirm('Re-dial ' + (t.label || t.iface),
+            'Takes the tunnel down and brings it straight back. For a tunnel that dials '
+            + 'out this is the only repair possible from this side.',
+            'Re-dial').then(function (go) {
+            if (!go) return;
+            OS.act(redial, WGAPI, { action: 'redial', iface: apiIface },
+                   { ok: 'Re-dialling.', delay: 5000, failPrefix: 'Could not re-dial' });
+        });
+    });
+}
+
+function renderTransport(d) {
+    var tp = d.transport || {};
+    var road = tp.road, admin = tp.admin;
+
+    /* ---- coming in ---- */
+    var pRoad = $('#p-road');
+    if (!road) { pRoad.hidden = true; } else {
+        pRoad.hidden = false;
+        var peer = road.peer || {};
+        var rAge = peer.handshake ? d.ts - peer.handshake : null;
+        var off = !!road.disabled;
+        var st = off ? { k: 'off', t: 'switched off' } : hsState(rAge, road.up, peer.keepalive);
+        var devs = road.devices || [];
+        var down = road.relay === 'down';
+
+        clear($('#roadHead'));
+        $('#roadHead').appendChild(el('div', 'hint',
+            'Your phone or laptop reaches the home network from outside, as if it were '
+            + 'on the home Wi-Fi. It is relayed through the server because this line '
+            + 'cannot be dialled into directly.'));
+
+        setTxt($('#roadCount'), off ? 'off'
+            : down ? 'server unreachable'
+            : devs.length ? devs.length + (devs.length === 1 ? ' device' : ' devices') : 'no devices');
+
+        var addBtn = $('#addDev');
+        clear(addBtn);
+        addBtn.appendChild(OS.icon('plus'));
+        addBtn.appendChild(document.createTextNode('Add device'));
+        addBtn.disabled = off || down;
+        addBtn.title = off ? 'Home access is switched off.'
+                     : down ? 'The relay server is not answering.' : '';
+        addBtn.onclick = function () { addDeviceFlow(road.iface); };
+
+        var host = $('#roadDevs');
+        if (!host._empty) { host._empty = el('div', null); host.appendChild(host._empty); }
+        if (!host._rows) { host._rows = el('div', null); host.insertBefore(host._rows, host._empty); }
+        clear(host._empty);
+        var rows = OS.keyed(host._rows);
+        if (off) {
+            /* Checked before the unreachable case: with the tunnel down the
+               server is SUPPOSED to be unreachable, and calling that a fault
+               sends you hunting for a problem you created on purpose. */
+            host._empty.appendChild(OS.emptyState('Home access is switched off',
+                'Nothing can reach the home network from outside. The devices you '
+                + 'already added are kept.', 'power'));
+        } else if (down) {
+            host._empty.appendChild(OS.emptyState('Cannot reach the relay server',
+                'Your devices are held on the server, and this page reaches it over the '
+                + 'remote admin link below. They may well still be connected — this page '
+                + 'just cannot see them.', 'alert'));
+        } else if (!devs.length) {
+            host._empty.appendChild(OS.emptyState('No devices yet',
+                'Add your phone or laptop to reach this network from anywhere.', 'dev'));
+        } else {
+            devs.forEach(function (rp) {
+                var w = rows.want(rp.public_key, function () { return roadDeviceRow(road.iface, rp, d); });
+                if (!w.fresh) w.node._update(rp, d);
+            });
+        }
+        rows.commit();
+
+        var set = $('#roadSet');
+        clear(set);
+        set.appendChild(settingRow('Home access',
+            off ? 'Currently off. Turning it on lets the devices above reach the home network again.'
+                : 'Currently on. Turning it off closes the way in for every device above. '
+                  + 'The remote admin link is separate and keeps working.',
+            off ? 'Turn on' : 'Turn off', !off, function (btn) {
+                OS.askConfirm(off ? 'Turn home access on' : 'Turn home access off',
+                    off ? 'Your devices will be able to reach the home network again.'
+                        : 'Every device above loses its way in until this is switched back on.',
+                    off ? 'Turn on' : 'Turn off', !off).then(function (go) {
+                    if (!go) return;
+                    OS.act(btn, WGAPI, { action: 'settunnel', iface: road.iface, state: off ? 'on' : 'off' },
+                           { ok: off ? 'Home access on.' : 'Home access off.', delay: 3000,
+                             failPrefix: 'Could not change it' });
+                });
+            }));
+
+        var srvHost = (road.peer || {}).endpoint || '';
+        set.appendChild(settingRow('Relay server',
+            'Currently ' + (srvHost || 'not set')
+            + '. Change this only when the server itself is renumbered — the remote admin '
+            + 'link uses the same machine and moves with it.',
+            'Change address', false, function () {
+                OS.dialog({
+                    title: 'The relay server moved',
+                    body: el('div', 'hint',
+                        'Every tunnel pointing at ' + (srvHost || 'the old address')
+                        + ' moves together, the remote admin link included. Get this wrong '
+                        + 'while you are away and there is no way back in until you are home.'),
+                    field: { label: 'New address or hostname', value: srvHost,
+                             placeholder: 'e.g. vps.example.com', emptyMsg: 'Enter the new address.' },
+                    okText: 'Move it', danger: true,
+                    onSubmit: function (v) {
+                        if (v === srvHost) return 'That is the address it already uses.';
+                        return OS.post(WGAPI, { action: 'setvpshost', host: v, old: srvHost })
+                            .then(function (j) {
+                                if (!j || !j.ok) return (j && j.error) || 'Could not change it.';
+                                OS.toast(j.changed + ' tunnel(s) moved. Give them a moment.');
+                                return true;
+                            });
+                    }
+                }).then(function (v) { if (v != null) OS.tp.refresh(4000); });
+            }));
+
+        var advHost = $('#roadAdv');
+        clear(advHost);
+        transportKnobs(fold(advHost, 'Technical details',
+            function () { return roadAdvOpen; },
+            function (o) { roadAdvOpen = o; }), road, road.iface, true);
+    }
+
+    /* ---- remote admin: one line, because it is infrastructure ---- */
+    var pAdmin = $('#p-admin');
+    if (!admin) { pAdmin.hidden = true; return; }
+    pAdmin.hidden = false;
+    var ap = admin.peer || {};
+    var aAge = ap.handshake ? d.ts - ap.handshake : null;
+    var ast = hsState(aAge, admin.up, ap.keepalive);
+    clear($('#adminState'));
+    $('#adminState').appendChild(OS.chip(ast.t,
+        ast.k === 'ok' ? 'on' : ast.k === 'warn' ? 'warn' : ast.k === 'off' ? 'flat' : 'bad'));
+    clear($('#admin'));
+    $('#admin').appendChild(el('div', 'hint',
+        'How this router is reached for maintenance while you are away, and how the '
+        + 'page above reaches the relay server. Last answered ' + agoTxt(aAge) + '.'));
+    var aAdv = $('#adminAdv');
+    clear(aAdv);
+    transportKnobs(fold(aAdv, 'Technical details',
+        function () { return adminAdvOpen; },
+        function (o) { adminAdvOpen = o; }), admin, admin.iface, true);
 }
 
 loadDevices().then(function () { if (last) { renderDevices(last); renderMap(last); } });

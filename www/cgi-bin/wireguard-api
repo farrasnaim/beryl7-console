@@ -323,99 +323,13 @@ fi
 [ -n "$ACTION" ] && fail "unknown action"
 
 # ================================================================ READ =======
-TJ=""
-for IF in $(wg_ifaces); do
-    DIS=$(uci -q get network.$IF.disabled); [ "$DIS" = "1" ] || DIS=0
-    ADDR=$(uci -q get network.$IF.addresses | tr ' ' ',')
-    MTU=$(uci -q get network.$IF.mtu)
-    LBL=$(uci -q get network.$IF.label)
-    ZONE=$(zone_of "$IF")
-
-    UP=false
-    LPORT=0
-    ip link show "$IF" >/dev/null 2>&1 && UP=true
-    if [ "$UP" = true ]; then
-        LPORT=$(wg show "$IF" listen-port 2>/dev/null)
-        case "$LPORT" in ''|*[!0-9]*) LPORT=0 ;; esac
-        # live addresses can differ from config after a hand edit
-        LIVE_ADDR=$(ip -4 -o addr show dev "$IF" 2>/dev/null | awk '{printf "%s%s", (NR>1?",":""), $4}')
-    else
-        LIVE_ADDR=""
-    fi
-
-    # Peers. `wg show <if> dump` line 1 is the interface, the rest are peers,
-    # keyed by public key - which is how a config peer is matched to its live
-    # state without assuming they are in the same order.
-    PJ=""
-    for P in $(peer_sections "$IF"); do
-        PUB=$(uci -q get network.$P.public_key)
-        EH=$(uci -q get network.$P.endpoint_host)
-        EP=$(uci -q get network.$P.endpoint_port)
-        AIP=$(uci -q get network.$P.allowed_ips | tr ' ' ',')
-        KA=$(uci -q get network.$P.persistent_keepalive); case "$KA" in ''|*[!0-9]*) KA=0 ;; esac
-        RAI=$(uci -q get network.$P.route_allowed_ips)
-        DESC=$(uci -q get network.$P.description)
-
-        HS=0; RX=0; TX=0; ELIVE=""
-        if [ "$UP" = true ] && [ -n "$PUB" ]; then
-            L=$(wg show "$IF" dump 2>/dev/null | awk -v k="$PUB" '$1==k {print; exit}')
-            if [ -n "$L" ]; then
-                ELIVE=$(printf '%s' "$L" | awk '{print $3}')
-                HS=$(printf '%s' "$L" | awk '{print $5}')
-                RX=$(printf '%s' "$L" | awk '{print $6}')
-                TX=$(printf '%s' "$L" | awk '{print $7}')
-            fi
-        fi
-        case "$HS" in ''|*[!0-9]*) HS=0 ;; esac
-        case "$RX" in ''|*[!0-9]*) RX=0 ;; esac
-        case "$TX" in ''|*[!0-9]*) TX=0 ;; esac
-        [ "$ELIVE" = "(none)" ] && ELIVE=""
-
-        PJ="$PJ${PJ:+,}{\"section\":\"$(esc "$P")\",\"desc\":\"$(esc "$DESC")\",\"public_key\":\"$(esc "$PUB")\",\"endpoint\":\"$(esc "$EH")\",\"endpoint_port\":\"$(esc "$EP")\",\"endpoint_live\":\"$(esc "$ELIVE")\",\"allowed_ips\":\"$(esc "$AIP")\",\"keepalive\":$KA,\"route_allowed_ips\":$([ "$RAI" = "1" ] && echo true || echo false),\"handshake\":$HS,\"rx\":$RX,\"tx\":$TX}"
-    done
-
-    # The individual phones behind a road-warrior relay are not uci peers of
-    # THIS interface at all - the router's own peer here is just the VPS. Their
-    # real state lives on the VPS's wg1, so it is fetched the same way the
-    # console asks the VPS for anything else: over the wgmgmt tunnel. A slow or
-    # unreachable VPS degrades this to an empty list rather than failing the
-    # whole page - the other tunnels' cards must still render.
-    ROADP="[]"
-    RELAY=null
-    if [ "$ZONE" = "road" ]; then
-        # An unreachable relay MUST NOT look like "no devices". Those are
-        # opposite facts and the page draws a different thing for each: the
-        # empty state states something false and offers an action that would
-        # fail, at exactly the moment the owner is away from home and needs the
-        # truth. So reachability is reported, not inferred from an empty list.
-        RELAY='"down"'
-        RP=$(wget -q -T 5 -O - "$ROAD_API/listpeers" 2>/dev/null)
-        if [ "$(echo "$RP" | jsonfilter -e '@.ok' 2>/dev/null)" = "true" ]; then
-            RELAY='"ok"'
-            # Rebuilt field by field rather than passed straight through, so a
-            # name stored on THIS router can replace the one the relay knows.
-            # The relay cannot be told about a rename - it has no endpoint for
-            # one - so the override has to happen on the way out.
-            _n=0
-            RPJ=""
-            while :; do
-                _pk=$(echo "$RP" | jsonfilter -e "@.peers[$_n].public_key" 2>/dev/null)
-                [ -n "$_pk" ] || break
-                _nm=$(echo "$RP" | jsonfilter -e "@.peers[$_n].name" 2>/dev/null)
-                _lc=$(awk -F'\t' -v k="$_pk" '$1 == k { print $2; exit }' "$ROAD_NAMES" 2>/dev/null)
-                if [ -n "$_lc" ]; then _nm="$_lc"; fi
-                _ad=$(echo "$RP" | jsonfilter -e "@.peers[$_n].address" 2>/dev/null)
-                _hs=$(echo "$RP" | jsonfilter -e "@.peers[$_n].handshake" 2>/dev/null)
-                _rx=$(echo "$RP" | jsonfilter -e "@.peers[$_n].rx" 2>/dev/null)
-                _tx=$(echo "$RP" | jsonfilter -e "@.peers[$_n].tx" 2>/dev/null)
-                RPJ="$RPJ${RPJ:+,}{\"name\":\"$(esc "$_nm")\",\"address\":\"$(esc "$_ad")\",\"public_key\":\"$(esc "$_pk")\",\"handshake\":${_hs:-0},\"rx\":${_rx:-0},\"tx\":${_tx:-0}}"
-                _n=$((_n + 1))
-            done
-            ROADP="[$RPJ]"
-        fi
-    fi
-
-    TJ="$TJ${TJ:+,}{\"iface\":\"$(esc "$IF")\",\"label\":\"$(esc "$LBL")\",\"zone\":\"$(esc "$ZONE")\",\"disabled\":$([ "$DIS" = "1" ] && echo true || echo false),\"up\":$UP,\"addresses\":\"$(esc "$ADDR")\",\"live_addresses\":\"$(esc "$LIVE_ADDR")\",\"mtu\":\"$(esc "$MTU")\",\"listen_port\":$LPORT,\"peers\":[$PJ],\"road_peers\":$ROADP,\"road_relay\":$RELAY}"
-done
-
-printf '{"ok":true,"ts":%s,"tunnels":[%s]}' "$NOW" "$TJ"
+# There is no read path here any more. The console has one page for tunnels
+# (/vpn) and a page polls exactly one endpoint — Transport() takes a single URL,
+# and its setState writes to every .tp node, so two poll loops would fight over
+# the same connection indicator. The tunnel state this file used to serve was
+# MOVED into vpn-api, not copied: one reader, so the two cannot disagree.
+#
+# This file remains the WRITE endpoint for tunnel transport: keepalive, MTU,
+# re-dial, and the road-warrior device actions. A stray GET gets told so rather
+# than an empty body, which would read as a broken endpoint.
+printf '{"ok":false,"error":"this endpoint only accepts actions; tunnel state is served by vpn-api"}'

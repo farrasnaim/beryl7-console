@@ -58,5 +58,5 @@
 /usr/sbin/notifymon
 /etc/hotplug.d/net/41-packet-steering
 /etc/hotplug.d/net/42-txpower
-/www/wireguard
 /www/cgi-bin/wireguard-api
+/www/qr-vendor.js

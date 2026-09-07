@@ -203,9 +203,9 @@ function genOf(st) {
 var I = {
     overview: '<svg viewBox="0 0 20 20"><path d="M3 10.5 10 4l7 6.5"/><path d="M5 9.4V16h10V9.4"/></svg>',
     routing:  '<svg viewBox="0 0 20 20"><path d="M10 3l5.5 2.3v4.2c0 3.4-2.3 6.2-5.5 7.5-3.2-1.3-5.5-4.1-5.5-7.5V5.3z"/><path d="m7.7 9.7 1.7 1.7 3-3.2"/></svg>',
-    /* WireGuard shared the VPN shield, so the two nav entries were one glyph
-       twice — the tab bar's whole job is telling them apart at a glance. A
-       tunnel mouth, because that is what the page is: transport, not policy. */
+    /* Kept although nothing in the nav uses it any more: the WireGuard page it
+       was drawn for was folded into /vpn, but the glyph is still the right one
+       for a tunnel and the VPN page's own sections reach for it. */
     tunnel:   '<svg viewBox="0 0 20 20"><path d="M3 16.5v-6a7 7 0 0 1 14 0v6"/><path d="M7.5 16.5v-6a2.5 2.5 0 0 1 5 0v6"/></svg>',
     wifi:     '<svg viewBox="0 0 20 20"><path d="M3.6 8.4a9 9 0 0 1 12.8 0"/><path d="M6.2 11a5.4 5.4 0 0 1 7.6 0"/><circle cx="10" cy="14.6" r="1.2" fill="currentColor" stroke="none"/></svg>',
     usb:      '<svg viewBox="0 0 20 20"><path d="M12.5 6H14a4 4 0 0 1 0 8h-1.5"/><path d="M7.5 6H6a4 4 0 0 0 0 8h1.5"/><path d="M7 10h6"/></svg>',
@@ -763,7 +763,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = 'cae4340c92';
+var CONSOLE_VERSION = 'b3190acd42';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -891,22 +891,23 @@ function firewallAlert(onDone) {
 var STAGES = [
     { id: 'clients',  k: 'Overview',     href: '/dashboard/', icon: 'overview', static: 'Connected devices' },
     { id: 'routing',  k: 'VPN',          href: '/vpn/',       icon: 'routing',  static: 'Tunnels and routing' },
-    { id: 'wg',       k: 'WireGuard',    href: '/wireguard/', icon: 'tunnel',   static: 'Tunnel transport', branch: true },
     { id: 'source',   k: 'Uplink',       href: null,          icon: 'eth',      static: 'Active source' },
     { id: 'repeater', k: 'Wi-Fi uplink', href: '/repeater/',  icon: 'wifi',     static: 'Someone else’s Wi-Fi',  branch: true },
     { id: 'tether',   k: 'USB uplink',   href: '/tethering/', icon: 'usb',      static: 'Phone or modem on USB', branch: true }
 ];
 /* The tab bar does NOT follow the packet path the spine follows. On a phone the
-   order that matters is how often a thing is opened, and WireGuard is the one
-   page here that is plumbing rather than a daily control - it goes last, after
-   the two uplinks. The spine keeps topology order; these two lists are allowed
-   to disagree, and this comment is why. */
+   order that matters is how often a thing is opened; the spine keeps topology
+   order. These two lists are allowed to disagree, and this comment is why.
+
+   Both used to carry a sixth entry, WireGuard. That page was organised around a
+   protocol rather than a question and read as a wall of identical forms, so it
+   was folded into /vpn as a section named for its direction: what leaves the
+   house is one half, what is allowed in is the other. */
 var MTABS = [
     { href: '/dashboard/',  icon: 'overview', label: 'Overview' },
     { href: '/vpn/',        icon: 'routing',  label: 'VPN' },
     { href: '/repeater/',   icon: 'wifi',     label: 'Wi-Fi uplink' },
-    { href: '/tethering/',  icon: 'usb',      label: 'USB uplink' },
-    { href: '/wireguard/',  icon: 'tunnel',   label: 'WireGuard' }
+    { href: '/tethering/',  icon: 'usb',      label: 'USB uplink' }
 ];
 
 var spineNodes = {};

@@ -1012,4 +1012,97 @@ if [ -n "$TDCONF" ]; then
     fi
 fi
 printf '"traveldns":{"state":"%s","servers":[%s]},' "$TDSTATE" "$TDSRV"
+# ---- transport: the two tunnels that are NOT paid VPN exits -----------------
+#
+# They live here because the console now has one page for tunnels, and a page
+# polls exactly one endpoint: Transport() takes a single URL, and its setState
+# writes to EVERY .tp node on the page, so two poll loops would fight over the
+# same connection indicator. This block was moved out of wireguard-api rather
+# than copied — that page is gone and its read path with it, so there is one
+# reader of this data, not two that can disagree.
+#
+# `road` is the way in from outside; `admin` is the maintenance path the console
+# itself is reached over. Selected by firewall zone, never by interface name.
+tp_peer_json() {   # $1 iface, $2 up
+    _pj=""
+    for _p in $(uci -q show network | sed -n "s/^network\.\([^=]*\)=wireguard_$1\$/\1/p"); do
+        _pub=$(uci -q get network.$_p.public_key)
+        _eh=$(uci -q get network.$_p.endpoint_host)
+        _ep=$(uci -q get network.$_p.endpoint_port)
+        _ka=$(uci -q get network.$_p.persistent_keepalive); case "$_ka" in ''|*[!0-9]*) _ka=0 ;; esac
+        _hs=0
+        if [ "$2" = true ] && [ -n "$_pub" ]; then
+            _l=$(wg show "$1" dump 2>/dev/null | awk -v k="$_pub" '$1==k {print; exit}')
+            [ -n "$_l" ] && _hs=$(printf '%s' "$_l" | awk '{print $5}')
+        fi
+        case "$_hs" in ''|*[!0-9]*) _hs=0 ;; esac
+        _pj="{\"public_key\":\"$(esc "$_pub")\",\"endpoint\":\"$(esc "$_eh")\",\"endpoint_port\":\"$(esc "$_ep")\",\"keepalive\":$_ka,\"handshake\":$_hs}"
+        break
+    done
+    [ -n "$_pj" ] || _pj=null
+    printf '%s' "$_pj"
+}
+
+tp_tunnel_json() { # $1 iface
+    _up=false; ip link show "$1" >/dev/null 2>&1 && _up=true
+    _dis=$(uci -q get network.$1.disabled)
+    printf '{"iface":"%s","label":"%s","disabled":%s,"up":%s,"mtu":"%s","peer":%s' \
+        "$(esc "$1")" "$(esc "$(uci -q get network.$1.label)")" \
+        "$( [ "$_dis" = "1" ] && echo true || echo false )" "$_up" \
+        "$(esc "$(uci -q get network.$1.mtu)")" "$(tp_peer_json "$1" "$_up")"
+}
+
+TP_ROAD=null
+TP_ADMIN=null
+for _i in $(uci -q show network | sed -n "s/^network\.\([A-Za-z0-9_-]*\)=interface$/\1/p"); do
+    [ "$(uci -q get network.$_i.proto)" = "wireguard" ] || continue
+    case "$(zone_of "$_i")" in
+        road)  TP_ROAD_IF="$_i" ;;
+        mgmt)  TP_ADMIN=$(tp_tunnel_json "$_i")"}" ;;
+    esac
+done
+
+if [ -n "$TP_ROAD_IF" ]; then
+    # The devices behind the relay are not uci peers of this router at all —
+    # this router's only peer here is the VPS. Their state is fetched over the
+    # admin tunnel, and CACHED, because this endpoint is polled continuously
+    # now: without the cache an unreachable relay would stall the whole VPN
+    # page for the timeout on every single tick. Ten seconds is short enough
+    # that a device appearing still shows up promptly.
+    ROAD_API="http://10.99.99.1:8787"
+    ROAD_NAMES=/etc/dashboard/road-names
+    CACHE=/tmp/road-peers.json
+    _cage=999
+    [ -f "$CACHE" ] && _cage=$(( $(date +%s) - $(date -r "$CACHE" +%s 2>/dev/null || echo 0) ))
+    if [ "$_cage" -ge 10 ]; then
+        # On failure the file is truncated rather than left stale: an empty body
+        # means "down", which is a fact, where a stale list would be a lie.
+        wget -q -T 4 -O "$CACHE" "$ROAD_API/listpeers" 2>/dev/null || : > "$CACHE"
+    fi
+    RP=$(cat "$CACHE" 2>/dev/null)
+
+    RELAY='"down"'; DEVS=""
+    if [ "$(echo "$RP" | jsonfilter -e '@.ok' 2>/dev/null)" = "true" ]; then
+        RELAY='"ok"'
+        _n=0
+        while :; do
+            _pk=$(echo "$RP" | jsonfilter -e "@.peers[$_n].public_key" 2>/dev/null)
+            [ -n "$_pk" ] || break
+            _nm=$(echo "$RP" | jsonfilter -e "@.peers[$_n].name" 2>/dev/null)
+            # A name stored on THIS router wins: the relay has no rename
+            # endpoint, and a name held only on the VPS dies with the VPS.
+            _lc=$(awk -F'\t' -v k="$_pk" '$1 == k { print $2; exit }' "$ROAD_NAMES" 2>/dev/null)
+            [ -n "$_lc" ] && _nm="$_lc"
+            _ad=$(echo "$RP" | jsonfilter -e "@.peers[$_n].address" 2>/dev/null)
+            _hs=$(echo "$RP" | jsonfilter -e "@.peers[$_n].handshake" 2>/dev/null)
+            _rx=$(echo "$RP" | jsonfilter -e "@.peers[$_n].rx" 2>/dev/null)
+            _tx=$(echo "$RP" | jsonfilter -e "@.peers[$_n].tx" 2>/dev/null)
+            DEVS="$DEVS${DEVS:+,}{\"name\":\"$(esc "$_nm")\",\"address\":\"$(esc "$_ad")\",\"public_key\":\"$(esc "$_pk")\",\"handshake\":${_hs:-0},\"rx\":${_rx:-0},\"tx\":${_tx:-0}}"
+            _n=$((_n + 1))
+        done
+    fi
+    TP_ROAD=$(tp_tunnel_json "$TP_ROAD_IF")",\"relay\":$RELAY,\"devices\":[$DEVS]}"
+fi
+
+printf '"transport":{"road":%s,"admin":%s},' "$TP_ROAD" "$TP_ADMIN"
 printf '"vpnwatch":%s}' "$(jnum "$VW")"
