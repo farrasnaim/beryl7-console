@@ -79,7 +79,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=fbb9d090"></script>
+<script src="/os.js?v=45e644f0"></script>
 <script>
 (function () {
 'use strict';
@@ -108,8 +108,8 @@ function renderUplink(d) {
     if (!u.configured) {
         chip.appendChild(OS.stateWord('NOT JOINED', 'idle'));
         box.appendChild(OS.emptyState('Not joined to a network',
-            'Use Scan above to find networks, then pick one. The router keeps using its Ethernet ' +
-            'WAN until the Wi-Fi uplink actually connects, so nothing breaks while you set it up.',
+            'Use Scan above to find networks, then pick one. The router keeps using Ethernet ' +
+            'until the Wi-Fi uplink actually connects, so nothing breaks while you set it up.',
             'wifi'));
         OS.stage('repeater', 'Not joined', '');
         setTxt($('#subtitle'), 'Use someone else’s Wi-Fi as this router’s internet connection.');
@@ -200,7 +200,7 @@ function renderUplink(d) {
         OS.dialog({
             title: 'Forget “' + (u.ssid || 'this network') + '”',
             body: 'The saved network and its password are removed. The router goes back to using its ' +
-                  'Ethernet WAN. You can add it again at any time by scanning.',
+                  'Ethernet uplink. You can add it again at any time by scanning.',
             okText: 'Forget', danger: true
         }).then(function (go) {
             if (!go) return;

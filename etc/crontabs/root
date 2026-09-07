@@ -2,3 +2,4 @@
 * * * * * /usr/sbin/apwatch
 * * * * * /usr/sbin/vpnwatch
 * * * * * /usr/sbin/notifymon
+*/5 * * * * /usr/sbin/linkquality-sample

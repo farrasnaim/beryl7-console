@@ -135,6 +135,95 @@ if [ "$ACTION" = "redial" ]; then
     exit 0
 fi
 
+# The road-warrior relay's peers do not live in this router's own uci at all -
+# they live on the VPS's wg1, reached only through the wgmgmt tunnel (10.99.99.1
+# is not routable from anywhere but here). Locked to zone "road" so this can
+# never be pointed at wgmgmt or a VPN-client tunnel by a crafted iface value.
+ROAD_API="http://10.99.99.1:8787"
+
+if [ "$ACTION" = "addpeer" ] || [ "$ACTION" = "delpeer" ]; then
+    IF=$(qs_get_dec iface)
+    valid_iface "$IF" || fail "unknown tunnel"
+    [ "$(zone_of "$IF")" = "road" ] || fail "not a road-warrior tunnel"
+
+    if [ "$ACTION" = "addpeer" ]; then
+        NAME=$(qs_get_dec name)
+        ROUTE=$(qs_get_dec route)
+        PRIV=$(wg genkey)
+        PUB=$(echo "$PRIV" | wg pubkey)
+        REQ="{\"name\":\"$(esc "$NAME")\",\"public_key\":\"$PUB\"}"
+        RESP=$(wget -q -T 8 -O - --post-data="$REQ" --header='Content-Type: application/json' "$ROAD_API/addpeer" 2>/dev/null)
+        [ -n "$RESP" ] || fail "could not reach the VPS relay"
+        [ "$(echo "$RESP" | jsonfilter -e '@.ok' 2>/dev/null)" = "true" ] \
+            || fail "$(echo "$RESP" | jsonfilter -e '@.error' 2>/dev/null)"
+        RADDR=$(echo "$RESP" | jsonfilter -e '@.address' 2>/dev/null)
+        RNAME=$(echo "$RESP" | jsonfilter -e '@.name' 2>/dev/null)
+
+        # The client config's server half comes from THIS interface's own peer
+        # section - it already holds the VPS's public key and endpoint, so there
+        # is no need to ask the VPS what it is.
+        SPEER=$(peer_sections "$IF" | head -1)
+        SPUB=$(uci -q get network.$SPEER.public_key)
+        SHOST=$(uci -q get network.$SPEER.endpoint_host)
+        SPORT=$(uci -q get network.$SPEER.endpoint_port)
+
+        # The LAN prefix and the router's own address are READ, not hardcoded.
+        # A console that only works on one address is a console that has to be
+        # edited before it can be reused, and the previous form of this block
+        # baked 192.168.8.x into a file that ships in a public repo.
+        LANCIDR=$(ip -4 route show dev br-lan proto kernel scope link 2>/dev/null \
+                  | awk 'NR==1{print $1}')
+        [ -n "$LANCIDR" ] || LANCIDR=$(uci -q get network.lan.ipaddr)/24
+        LANIP=$(uci -q get network.lan.ipaddr)
+
+        # Split tunnel is the default: only home traffic is carried, so the
+        # phone keeps its own connection for everything else and the battery
+        # cost is near zero. "all" is the one worth reaching for on a network
+        # you do not trust - it puts every packet through the house, which also
+        # means AdGuard filters them. The firewall already permits it: the
+        # forward_road chain carries accept_to_wan, and the wan zone
+        # masquerades, so no rule change is needed to make this work.
+        case "$ROUTE" in
+            all) AIPS="0.0.0.0/0, ::/0" ;;
+            *)   AIPS="$LANCIDR" ;;
+        esac
+
+        CFG="[Interface]
+PrivateKey = $PRIV
+Address = $RADDR/32
+DNS = $LANIP
+
+[Peer]
+PublicKey = $SPUB
+Endpoint = $SHOST:$SPORT
+AllowedIPs = $AIPS
+PersistentKeepalive = 25"
+
+        # CFG is built entirely from generated keys and fixed literal text - no
+        # quotes or backslashes ever enter it - so the only JSON-escaping it
+        # needs is its newlines. esc() cannot be used here: it strips control
+        # bytes outright (correct for a device NAME that must never break JSON),
+        # which for a multi-line config means the client's .conf would come
+        # back as a single unreadable line instead of paragraph breaks.
+        CFG_JSON=$(printf '%s' "$CFG" | sed ':a;N;$!ba;s/\n/\\n/g')
+
+        logger -t wireguard-api "addpeer '$RNAME' on $IF via web UI"
+        printf '{"ok":true,"name":"%s","address":"%s","public_key":"%s","config":"%s"}' \
+            "$(esc "$RNAME")" "$(esc "$RADDR")" "$(esc "$PUB")" "$CFG_JSON"
+        exit 0
+    else
+        PUBKEY=$(qs_get_dec public_key)
+        REQ="{\"public_key\":\"$(esc "$PUBKEY")\"}"
+        RESP=$(wget -q -T 8 -O - --post-data="$REQ" --header='Content-Type: application/json' "$ROAD_API/delpeer" 2>/dev/null)
+        [ -n "$RESP" ] || fail "could not reach the VPS relay"
+        [ "$(echo "$RESP" | jsonfilter -e '@.ok' 2>/dev/null)" = "true" ] \
+            || fail "$(echo "$RESP" | jsonfilter -e '@.error' 2>/dev/null)"
+        logger -t wireguard-api "delpeer on $IF via web UI"
+        printf '{"ok":true}'
+        exit 0
+    fi
+fi
+
 [ -n "$ACTION" ] && fail "unknown action"
 
 # ================================================================ READ =======
@@ -189,7 +278,30 @@ for IF in $(wg_ifaces); do
         PJ="$PJ${PJ:+,}{\"section\":\"$(esc "$P")\",\"desc\":\"$(esc "$DESC")\",\"public_key\":\"$(esc "$PUB")\",\"endpoint\":\"$(esc "$EH")\",\"endpoint_port\":\"$(esc "$EP")\",\"endpoint_live\":\"$(esc "$ELIVE")\",\"allowed_ips\":\"$(esc "$AIP")\",\"keepalive\":$KA,\"route_allowed_ips\":$([ "$RAI" = "1" ] && echo true || echo false),\"handshake\":$HS,\"rx\":$RX,\"tx\":$TX}"
     done
 
-    TJ="$TJ${TJ:+,}{\"iface\":\"$(esc "$IF")\",\"label\":\"$(esc "$LBL")\",\"zone\":\"$(esc "$ZONE")\",\"disabled\":$([ "$DIS" = "1" ] && echo true || echo false),\"up\":$UP,\"addresses\":\"$(esc "$ADDR")\",\"live_addresses\":\"$(esc "$LIVE_ADDR")\",\"mtu\":\"$(esc "$MTU")\",\"listen_port\":$LPORT,\"peers\":[$PJ]}"
+    # The individual phones behind a road-warrior relay are not uci peers of
+    # THIS interface at all - the router's own peer here is just the VPS. Their
+    # real state lives on the VPS's wg1, so it is fetched the same way the
+    # console asks the VPS for anything else: over the wgmgmt tunnel. A slow or
+    # unreachable VPS degrades this to an empty list rather than failing the
+    # whole page - the other tunnels' cards must still render.
+    ROADP="[]"
+    RELAY=null
+    if [ "$ZONE" = "road" ]; then
+        # An unreachable relay MUST NOT look like "no devices". Those are
+        # opposite facts and the page draws a different thing for each: the
+        # empty state states something false and offers an action that would
+        # fail, at exactly the moment the owner is away from home and needs the
+        # truth. So reachability is reported, not inferred from an empty list.
+        RELAY='"down"'
+        RP=$(wget -q -T 5 -O - "$ROAD_API/listpeers" 2>/dev/null)
+        if [ "$(echo "$RP" | jsonfilter -e '@.ok' 2>/dev/null)" = "true" ]; then
+            RELAY='"ok"'
+            RPJ=$(echo "$RP" | jsonfilter -e '@.peers' 2>/dev/null)
+            if [ -n "$RPJ" ]; then ROADP="$RPJ"; fi
+        fi
+    fi
+
+    TJ="$TJ${TJ:+,}{\"iface\":\"$(esc "$IF")\",\"label\":\"$(esc "$LBL")\",\"zone\":\"$(esc "$ZONE")\",\"disabled\":$([ "$DIS" = "1" ] && echo true || echo false),\"up\":$UP,\"addresses\":\"$(esc "$ADDR")\",\"live_addresses\":\"$(esc "$LIVE_ADDR")\",\"mtu\":\"$(esc "$MTU")\",\"listen_port\":$LPORT,\"peers\":[$PJ],\"road_peers\":$ROADP,\"road_relay\":$RELAY}"
 done
 
 printf '{"ok":true,"ts":%s,"tunnels":[%s]}' "$NOW" "$TJ"

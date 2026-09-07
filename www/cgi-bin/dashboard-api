@@ -1215,6 +1215,11 @@ printf '"classmap":%s,' "$CMJ"
 TUN_TOTAL=0; TUN_UP=0; _tnow=$(date +%s)
 for _ti in $(uci -q show network 2>/dev/null | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
     [ "$(uci -q get network.$_ti.proto 2>/dev/null)" = "wireguard" ] || continue
+    # Same exclusion the VPN page makes: wgmgmt is the VPS management
+    # tunnel, not one of the owner's VPNs. Counting it here made the
+    # navigation say "3 tunnels" next to a VPN page listing two, which is
+    # the exact disagreement the shared routingLabel() exists to prevent.
+    [ "$_ti" = "wgmgmt" ] && continue
     TUN_TOTAL=$((TUN_TOTAL + 1))
     _ths=$(wg show "$_ti" latest-handshakes 2>/dev/null | awk 'NR==1{print $2+0}')
     case "$_ths" in ''|*[!0-9]*) _ths=0 ;; esac

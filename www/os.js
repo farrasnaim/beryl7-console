@@ -203,6 +203,10 @@ function genOf(st) {
 var I = {
     overview: '<svg viewBox="0 0 20 20"><path d="M3 10.5 10 4l7 6.5"/><path d="M5 9.4V16h10V9.4"/></svg>',
     routing:  '<svg viewBox="0 0 20 20"><path d="M10 3l5.5 2.3v4.2c0 3.4-2.3 6.2-5.5 7.5-3.2-1.3-5.5-4.1-5.5-7.5V5.3z"/><path d="m7.7 9.7 1.7 1.7 3-3.2"/></svg>',
+    /* WireGuard shared the VPN shield, so the two nav entries were one glyph
+       twice — the tab bar's whole job is telling them apart at a glance. A
+       tunnel mouth, because that is what the page is: transport, not policy. */
+    tunnel:   '<svg viewBox="0 0 20 20"><path d="M3 16.5v-6a7 7 0 0 1 14 0v6"/><path d="M7.5 16.5v-6a2.5 2.5 0 0 1 5 0v6"/></svg>',
     wifi:     '<svg viewBox="0 0 20 20"><path d="M3.6 8.4a9 9 0 0 1 12.8 0"/><path d="M6.2 11a5.4 5.4 0 0 1 7.6 0"/><circle cx="10" cy="14.6" r="1.2" fill="currentColor" stroke="none"/></svg>',
     usb:      '<svg viewBox="0 0 20 20"><path d="M12.5 6H14a4 4 0 0 1 0 8h-1.5"/><path d="M7.5 6H6a4 4 0 0 0 0 8h1.5"/><path d="M7 10h6"/></svg>',
     globe:    '<svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3a11 11 0 0 1 0 14a11 11 0 0 1 0-14"/></svg>',
@@ -759,7 +763,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = 'e2d788fb6d';
+var CONSOLE_VERSION = '54e8318615';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -873,9 +877,9 @@ function firewallAlert(onDone) {
 /* Stage order is the path a packet takes. The nav is the topology.            */
 /* Internet and Router are omitted deliberately: the Overview topology already
    draws both, and repeating them here made the rail a second, worse copy of the
-   drawing. What remains is navigation in the SAME order as the mobile tab bar,
-   with Wi-Fi in / USB in as branch stubs under Uplink — they are alternative
-   feeds into it, not peers of it. */
+   drawing. What remains is the packet path itself, with Wi-Fi in / USB in as
+   branch stubs under Uplink — they are alternative feeds into it, not peers of
+   it. The mobile tab bar is ordered by use, not by topology; see MTABS. */
 /* `static` is what the row says when the current page cannot measure that
    stage. It shares a column with live values, so it uses the SAME sentence
    casing — mixing lowercase descriptors with sentence-case values made one
@@ -887,17 +891,22 @@ function firewallAlert(onDone) {
 var STAGES = [
     { id: 'clients',  k: 'Overview',     href: '/dashboard/', icon: 'overview', static: 'Connected devices' },
     { id: 'routing',  k: 'VPN',          href: '/vpn/',       icon: 'routing',  static: 'Tunnels and routing' },
-    { id: 'wg',       k: 'WireGuard',    href: '/wireguard/', icon: 'routing',  static: 'Tunnel transport', branch: true },
+    { id: 'wg',       k: 'WireGuard',    href: '/wireguard/', icon: 'tunnel',   static: 'Tunnel transport', branch: true },
     { id: 'source',   k: 'Uplink',       href: null,          icon: 'eth',      static: 'Active source' },
     { id: 'repeater', k: 'Wi-Fi uplink', href: '/repeater/',  icon: 'wifi',     static: 'Someone else’s Wi-Fi',  branch: true },
     { id: 'tether',   k: 'USB uplink',   href: '/tethering/', icon: 'usb',      static: 'Phone or modem on USB', branch: true }
 ];
+/* The tab bar does NOT follow the packet path the spine follows. On a phone the
+   order that matters is how often a thing is opened, and WireGuard is the one
+   page here that is plumbing rather than a daily control - it goes last, after
+   the two uplinks. The spine keeps topology order; these two lists are allowed
+   to disagree, and this comment is why. */
 var MTABS = [
     { href: '/dashboard/',  icon: 'overview', label: 'Overview' },
     { href: '/vpn/',        icon: 'routing',  label: 'VPN' },
-    { href: '/wireguard/',  icon: 'routing',  label: 'WireGuard' },
     { href: '/repeater/',   icon: 'wifi',     label: 'Wi-Fi uplink' },
-    { href: '/tethering/',  icon: 'usb',      label: 'USB uplink' }
+    { href: '/tethering/',  icon: 'usb',      label: 'USB uplink' },
+    { href: '/wireguard/',  icon: 'tunnel',   label: 'WireGuard' }
 ];
 
 var spineNodes = {};
@@ -1403,7 +1412,7 @@ function topologyV(m) {
                 d: 'M' + cx + ' ' + ly + ' H' + (cx + 16) }));
             s.appendChild(svtext(cx + 24, ly + 4, L.name, 't1'));
             s.appendChild(svtext(W - 14, ly + 4,
-                L.clients + (L.clients === 1 ? ' client' : ' clients'), 't2', 'end'));
+                L.clients + (L.clients === 1 ? ' device' : ' devices'), 't2', 'end'));
         });
         s.appendChild(sv('path', { 'class': 'link on',
             d: 'M' + cx + ' ' + c.bot + ' V' + lastLy }));
@@ -1520,7 +1529,7 @@ function topology(m, compact) {
         link(col[3] + 122, y, cx, y, L.clients ? 'on' : 'off', false);
         s.appendChild(svtext(cx + 6, y + 5, String(L.clients), 'tn'));
         s.appendChild(svtext(cx + 6 + (String(L.clients).length * 9) + 6, y + 5,
-            L.clients === 1 ? 'client' : 'clients', 't2'));
+            L.clients === 1 ? 'device' : 'devices', 't2'));
     });
 
     if (m.vpn) {

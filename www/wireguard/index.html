@@ -18,6 +18,7 @@
         <h1 class="head__t">WireGuard</h1>
         <p class="head__s" id="subtitle">Reading the tunnels…</p>
       </div>
+      <div class="head__aside" id="headAside" hidden></div>
     </header>
 
     <div id="alerts"></div>
@@ -28,10 +29,13 @@
       </div>
     </div>
 
+    <div id="roadDevices"></div>
+
   </main>
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
-<script src="/os.js?v=fbb9d090"></script>
+<script src="/os.js?v=45e644f0"></script>
+<script src="/wireguard/qr-vendor.js?v=1"></script>
 <script>
 (function () {
 'use strict';
@@ -69,7 +73,8 @@ function ago(s) {
    right until someone renames a tunnel. */
 function roleOf(t) {
     if (t.zone === 'mgmt') return { k: 'Management', d: 'Remote access to this router. It dials out; nothing dials in.' };
-    if (t.zone === 'wg') return { k: 'VPN exit', d: 'Carries client traffic out. Which clients is decided in VPN.' };
+    if (t.zone === 'wg') return { k: 'VPN exit', d: 'Carries device traffic out. Which devices is decided in VPN.' };
+    if (t.zone === 'road') return { k: 'Road warrior', d: 'Relayed through the VPS (this router is behind CGNAT and cannot be dialled into directly). Devices added below get LAN-equivalent access, same as being on the home Wi-Fi.' };
     return { k: t.zone ? 'Zone ' + t.zone : 'No firewall zone', d: t.zone ? '' : 'Not in any zone — it can carry nothing until one is assigned.' };
 }
 
@@ -109,7 +114,22 @@ function render(d) {
     var grid = $('#tunGrid');
     if (!grid._built) { clear(grid); grid._built = true; }
 
-    tuns.forEach(function (t) {
+    /* Ordered by how often a tunnel is actually reached for, not by whatever
+       order uci happens to enumerate them in. The road-warrior relay and the
+       management path are the two that matter when the owner is away from home
+       and cannot fix anything by hand; the commercial VPN exits are set once
+       and then left alone, and they were sitting above both. Sorted here rather
+       than in the API so panel order and JSON order cannot drift apart. */
+    var ZRANK = { road: 0, mgmt: 1, wg: 2 };
+    var ordered = tuns.slice().sort(function (a, b) {
+        var ra = ZRANK[a.zone], rb = ZRANK[b.zone];
+        if (ra === undefined) ra = 9;
+        if (rb === undefined) rb = 9;
+        if (ra !== rb) return ra - rb;
+        return String(a.label || a.iface).localeCompare(String(b.label || b.iface));
+    });
+
+    ordered.forEach(function (t) {
         var p = panels[t.iface];
         if (!p) {
             p = panels[t.iface] = { sec: el('section', 'panel') };
@@ -158,7 +178,37 @@ function render(d) {
             p.body.appendChild(OS.note('Routes everything — a full-tunnel exit.', 'ok'));
         }
 
-        /* ---- the two knobs that belong to transport ---- */
+        /* ---- Re-dial stays in the open ----
+           For a stale tunnel this IS the repair, and on the management tunnel
+           it is the only one possible from this side. A repair you have to go
+           looking for behind a disclosure is a repair you reach late. */
+        var actRow = el('div', 'row');
+        var redial = el('button', 'btn btn--ghost btn--sm', 'Re-dial');
+        redial.style.marginLeft = 'auto';
+        actRow.appendChild(redial);
+        p.body.appendChild(actRow);
+
+        /* ---- the two knobs that belong to transport, folded away ----
+           They are set once and then left alone for months, while the state
+           above them is read constantly. Open, they took roughly two thirds of
+           every panel's height and printed the same two hint paragraphs once
+           per tunnel — four times over on this router. That repetition is what
+           made the page read as a wall of identical forms.
+
+           The open state is kept on the panel object because render() rebuilds
+           the body on every poll: a <details> that snapped shut every few
+           seconds would be worse than one that never opened. Same approach the
+           dashboard already uses for its driver counters. */
+        var det = document.createElement('details');
+        det.className = 'adv';
+        det.style.cssText = 'border-top:1px solid var(--line);margin-top:10px';
+        det.open = !!p.advOpen;
+        det.addEventListener('toggle', function () { p.advOpen = det.open; });
+        var sum = document.createElement('summary');
+        sum.textContent = 'Transport settings';
+        sum.style.padding = '9px 0';
+        det.appendChild(sum);
+
         var form = el('div', null);
 
         var ka = el('input', 'input'); ka.type = 'number'; ka.min = 0; ka.max = 65535;
@@ -184,11 +234,10 @@ function render(d) {
 
         var row = el('div', 'row');
         var save = el('button', 'btn btn--primary btn--sm', 'Apply');
-        var redial = el('button', 'btn btn--ghost btn--sm', 'Re-dial');
-        redial.style.marginLeft = 'auto';
-        row.appendChild(save); row.appendChild(redial);
+        row.appendChild(save);
         form.appendChild(row);
-        p.body.appendChild(form);
+        det.appendChild(form);
+        p.body.appendChild(det);
 
         save.addEventListener('click', function () {
             OS.askConfirm('Apply to ' + t.iface,
@@ -211,7 +260,7 @@ function render(d) {
                 'Takes the tunnel down and brings it straight back. '
                 + (t.zone === 'mgmt'
                     ? 'This is how a stale management tunnel is repaired — and the only repair possible from this end, since the router is the side that dials.'
-                    : 'Clients using this exit lose it for a moment.'),
+                    : 'Devices using this exit lose it for a moment.'),
                 'Re-dial').then(function (go) {
                 if (!go) return;
                 OS.act(redial, API, { action: 'redial', iface: t.iface },
@@ -219,6 +268,206 @@ function render(d) {
             });
         });
     });
+
+    renderRoadDevices(d);
+}
+
+/* ---- road-warrior devices: their own section, not a knob on the tunnel
+   panel. Their state is not even a uci peer of wgroad (the router's only
+   peer there is the VPS) - it lives on the VPS's wg1 and arrives as
+   t.road_peers. A row-list this is the one thing the house pattern already
+   has a bordered .face for ("dense row-lists that genuinely need
+   containment"), so it gets one instead of squeezing into the transport
+   panel's plain form. ---- */
+var roadUI = null;
+
+function deviceRow(t, rp, d) {
+    var row = el('div', 'row row--pick');
+    row.style.cursor = 'default';
+    var age = rp.handshake ? d.ts - rp.handshake : null;
+    var st = hsState(age, true, 25);
+
+    var id = el('div', 'row__id');
+    var ic = el('div', 'row__ico'); ic.appendChild(OS.icon('phone'));
+    id.appendChild(ic);
+    var title = el('div', 'row__title');
+    title.appendChild(el('span', 'row__nm', rp.name));
+    title.appendChild(OS.chip(age == null ? 'never connected' : ago(age) + ' ago',
+                               st.k === 'ok' ? 'on' : st.k === 'warn' ? 'warn' : 'flat'));
+    /* Transfer comes from the relay's wg dump, where a peer's rx is what the
+       hub RECEIVED from that device - so rx is the device's upload. Shown
+       because a road-warrior tunnel is the one place a number like this
+       answers a real question: whether the thing is actually being used, and
+       which device is spending the home upload. */
+    var sub = rp.address;
+    if (rp.rx || rp.tx) {
+        sub += ' · ↑ ' + OS.bytes(rp.rx || 0) + ' · ↓ ' + OS.bytes(rp.tx || 0);
+    }
+    var idText = el('div', null);
+    idText.appendChild(title);
+    idText.appendChild(el('div', 'row__sub', sub));
+    id.appendChild(idText);
+    row.appendChild(id);
+
+    var revoke = el('button', 'btn btn--danger btn--sm', 'Revoke');
+    row.appendChild(revoke);
+    revoke.addEventListener('click', function (e) {
+        e.stopPropagation();
+        OS.askConfirm('Revoke ' + rp.name,
+            'This device loses access immediately — it will need to be added again to reconnect.',
+            'Revoke', true).then(function (go) {
+            if (!go) return;
+            OS.act(revoke, API, { action: 'delpeer', iface: t.iface, public_key: rp.public_key },
+                   { ok: 'Revoked.', failPrefix: 'Could not revoke' });
+        });
+    });
+    return row;
+}
+
+/* Two dialogs in sequence, not one crowded form: naming a device is a
+   different task from scanning its QR, and finishing the first cleanly
+   before the second appears is what makes each one feel like one job. */
+/* What the two routing modes mean, in the terms the decision is actually made
+   in — battery and trust — rather than in AllowedIPs values nobody weighs up
+   while standing in an airport. */
+var ROUTE_HINT = {
+    lan: 'Only traffic for the home network goes through the tunnel. The device '
+       + 'keeps its own connection for everything else, so the battery cost is '
+       + 'close to nothing. This is the right default.',
+    all: 'Every packet goes through the house, DNS included — so AdGuard filters '
+       + 'this device too, and sites see your home address. Worth switching to on '
+       + 'Wi-Fi you do not trust. It is slower, and it spends the home upload.'
+};
+
+function addDeviceFlow(t) {
+    var newConfig = null;
+    var route = 'lan';
+
+    var body = el('div', 'stack');
+    body.appendChild(el('div', null,
+        'It gets LAN-equivalent access — the same reach as being on the home Wi-Fi.'));
+
+    var lab = el('div', null);
+    lab.appendChild(el('div', 'row__nm', 'What goes through the tunnel'));
+    var hint = el('div', 'hint', ROUTE_HINT[route]);
+    hint.style.marginTop = '4px';
+
+    var seg = el('div', 'seg');
+    seg.style.marginTop = '8px';
+    var segBtns = [];
+    [['lan', 'Home network only'], ['all', 'Everything through home']].forEach(function (o) {
+        var b = el('button', 'btn btn--sm', o[1]);
+        /* Explicitly type=button: this sits inside the dialog's form, and a
+           default submit would add the device the moment a mode is picked. */
+        b.type = 'button';
+        b.setAttribute('aria-pressed', o[0] === route ? 'true' : 'false');
+        b.addEventListener('click', function () {
+            route = o[0];
+            segBtns.forEach(function (x) {
+                x.b.setAttribute('aria-pressed', x.k === route ? 'true' : 'false');
+            });
+            setTxt(hint, ROUTE_HINT[route]);
+        });
+        segBtns.push({ k: o[0], b: b });
+        seg.appendChild(b);
+    });
+    lab.appendChild(seg);
+    lab.appendChild(hint);
+    body.appendChild(lab);
+
+    OS.dialog({
+        title: 'Add device',
+        body: body,
+        field: { label: 'Device name', placeholder: 'e.g. iPhone', emptyMsg: 'Name this device.' },
+        okText: 'Add device',
+        onSubmit: function (name) {
+            return OS.post(API, { action: 'addpeer', iface: t.iface, name: name, route: route }).then(function (j) {
+                if (!j || !j.ok) return (j && j.error) || 'Could not add the device.';
+                newConfig = j;
+                return true;
+            });
+        }
+    }).then(function (v) {
+        if (v == null || !newConfig) return;
+        OS.tp.refresh(300);
+        var body = el('div', 'stack');
+        if (window.UQR) {
+            var qr = el('div', null);
+            qr.style.cssText = 'max-width:220px;margin:0 auto';
+            qr.innerHTML = window.UQR.renderSVG(newConfig.config, { pixelSize: 4 });
+            body.appendChild(qr);
+        }
+        var ta = el('textarea', 'ta n');
+        ta.readOnly = true;
+        ta.value = newConfig.config;
+        ta.addEventListener('click', function () { ta.select(); });
+        body.appendChild(ta);
+        /* Which mode this config carries is stated here because it is baked
+           into the file and cannot be read back off the device later - the
+           router never learns what a client did with its AllowedIPs. */
+        body.appendChild(el('div', 'hint',
+            (route === 'all' ? 'Everything through home. ' : 'Home network only. ')
+            + 'Shown once and not stored anywhere — scan it in the WireGuard app, '
+            + 'or copy the text, before closing this.'));
+        OS.dialog({ title: newConfig.name, body: body, okText: 'Done', cancelText: 'Close' });
+    });
+}
+
+function renderRoadDevices(d) {
+    var host = $('#roadDevices');
+    var headAside = $('#headAside');
+    var t = (d.tunnels || []).filter(function (t) { return t.zone === 'road'; })[0];
+    if (!t) { clear(host); headAside.hidden = true; roadUI = null; return; }
+
+    if (!roadUI) {
+        roadUI = {};
+        /* The primary action lives in the page header, not a section aside
+           further down — the same slot VPN's "Add tunnel" docks into, so a
+           road-warrior device is never more than one reach away, and the
+           header is never left with nothing in its action slot on a phone. */
+        roadUI.addBtn = el('button', 'btn btn--primary');
+        roadUI.addBtn.appendChild(OS.icon('plus'));
+        roadUI.addBtn.appendChild(document.createTextNode('Add device'));
+        headAside.appendChild(roadUI.addBtn);
+        headAside.hidden = false;
+
+        var sect = el('div', 'sect');
+        sect.appendChild(el('div', 'sect__t', 'Devices'));
+        roadUI.count = el('div', 'sect__m');
+        sect.appendChild(roadUI.count);
+        host.appendChild(sect);
+        roadUI.face = el('div', 'face');
+        host.appendChild(roadUI.face);
+    }
+    roadUI.addBtn.onclick = function () { addDeviceFlow(t); };
+
+    var peers = t.road_peers || [];
+    var down = t.road_relay === 'down';
+
+    /* "Cannot see the devices" and "there are no devices" are opposite facts,
+       and an empty list alone cannot tell them apart. Drawing the empty state
+       for both was the page's worst bug: it stated something false, and it
+       offered an Add button that could only fail - at exactly the moment the
+       owner is away from home and needs to know which of the two it is. */
+    roadUI.addBtn.disabled = down;
+    roadUI.addBtn.title = down ? 'The relay on the VPS is not answering.' : '';
+
+    setTxt(roadUI.count, down ? 'relay unreachable'
+        : peers.length ? peers.length + (peers.length === 1 ? ' device' : ' devices') : '');
+
+    clear(roadUI.face);
+    if (down) {
+        roadUI.face.appendChild(OS.emptyState('Cannot reach the relay',
+            'The devices are managed on the VPS, over the management tunnel. They may '
+            + 'still be connected — this page just cannot see them. Check the '
+            + 'Management tunnel’s handshake above; if that is healthy, the '
+            + 'road-peer service on the VPS is the next thing to look at.', 'routing'));
+    } else if (!peers.length) {
+        roadUI.face.appendChild(OS.emptyState('No devices yet',
+            'Add your phone or laptop to reach this network from anywhere.', 'phone'));
+    } else {
+        peers.forEach(function (rp) { roadUI.face.appendChild(deviceRow(t, rp, d)); });
+    }
 }
 
 /* Handshake age is the whole point of this page and it moves every second, so

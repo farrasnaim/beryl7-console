@@ -382,7 +382,7 @@ fi
 # Stale is UNKNOWN, never ok. Unknown advances neither counter below, so an
 # outstanding bad run cannot be cleared by silence and a new one cannot be
 # started by it either.
-now_link=unknown; now_probe=stopped; q_rtt=0; q_loss=0
+now_link=unknown; now_probe=stopped; q_rtt=0; q_loss=0; q_name=""
 if [ -r /tmp/.pingring ]; then
     read -r _pu _pw _pstate < /tmp/.pingring 2>/dev/null
     _upnow=$(cut -d. -f1 /proc/uptime 2>/dev/null)
@@ -399,6 +399,16 @@ if [ "$now_probe" = ok ]; then
     case "$q_loss" in ''|*[!0-9]*) q_loss=0 ;; esac
     q_rtt=${q_rtt%%.*}
     case "$q_rtt" in ''|-*|*[!0-9]*) q_rtt=0 ;; esac
+    # WHICH target these numbers describe. "connection is struggling" reads
+    # as "the internet is bad", but the probe target is a dropdown: pointed
+    # at one host, the same words claim something far wider than what was
+    # measured. Naming it is the difference between an alert the owner can
+    # act on and one that sends him looking at the wrong thing.
+    # "Custom" is a menu label, not information, so a custom target reports
+    # its address instead. An empty name falls back to the bare wording.
+    _l2=$(sed -n '2p' /tmp/.pingring 2>/dev/null)
+    q_name=$(printf '%s' "$_l2" | jsonfilter -e '@.name' 2>/dev/null)
+    [ "$q_name" = "Custom" ] && q_name=$(printf '%s' "$_l2" | jsonfilter -e '@.target' 2>/dev/null)
     # pingmon is alive but reports the target unreachable or silent: that is
     # the WAN alert's business, so quality stays unjudged rather than "ok".
     [ "$_pstate" = "ok" ] || now_link=unknown
@@ -538,10 +548,10 @@ else
     esac
     if [ "$was_link" = "ok" ] && [ "$bad_run" -ge "$NEED" ]; then
         was_link=bad
-        notify "$M_LINK_BAD_T" "$(cap_fmt "$M_LINK_BAD_B" "$q_rtt" "$q_loss")" high warning
+        notify "${q_name:+$q_name }$M_LINK_BAD_T" "$(cap_fmt "$M_LINK_BAD_B" "$q_rtt" "$q_loss")" high warning
     elif [ "$was_link" = "bad" ] && [ "$good_run" -ge "$NEED" ]; then
         was_link=ok
-        notify "$M_LINK_OK_T" "$(cap_fmt "$M_LINK_OK_B" "$q_rtt" "$q_loss")" default white_check_mark
+        notify "${q_name:+$q_name }$M_LINK_OK_T" "$(cap_fmt "$M_LINK_OK_B" "$q_rtt" "$q_loss")" default white_check_mark
     fi
 
     # VPN tunnels, per tunnel, edge-triggered like everything else
