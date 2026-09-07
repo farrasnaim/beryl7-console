@@ -107,7 +107,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=412b0b27"></script>
+<script src="/os.js?v=cdd46c5e"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
@@ -1677,6 +1677,46 @@ function statusRow(title, chip, hint) {
     return r;
 }
 
+/* The readings for one tunnel, plus its Re-dial. Folded away because none of it
+   answers a question anyone has on a normal day, and Re-dial is pressed about
+   once a year — but it has to LIVE somewhere, and this is the somewhere.
+
+   This function was accidentally deleted in the previous commit: the block that
+   replaced the device row began at a comment that sat above it, so it went too.
+   The call then threw and renderTransport died immediately after writing the
+   "Home access" heading, which is exactly what an empty fold looked like. A
+   brace-balance check cannot catch a function that is simply not there. */
+function transportKnobs(box, t, apiIface, showRedial) {
+    var dl = el('dl', 'kv');
+    function kv(k, v) {
+        if (v == null || v === '') return;
+        dl.appendChild(el('dt', null, k)); dl.appendChild(el('dd', null, String(v)));
+    }
+    var peer = t.peer || {};
+    kv('Interface', t.iface);
+    kv('Server address', (peer.endpoint || '') + (peer.endpoint_port ? ':' + peer.endpoint_port : ''));
+    kv('Keepalive', (peer.keepalive || 0) + ' s');
+    kv('MTU', t.mtu || 'automatic');
+    if (peer.public_key) kv('Server key', peer.public_key.slice(0, 20) + '…');
+    box.appendChild(dl);
+
+    if (!showRedial) return;
+    var strip = btnStrip();
+    var redial = el('button', 'btn btn--ghost btn--sm', 'Re-dial');
+    strip.appendChild(redial);
+    box.appendChild(strip);
+    redial.addEventListener('click', function () {
+        OS.askConfirm('Re-dial ' + (t.label || t.iface),
+            'Takes the tunnel down and brings it straight back. For a tunnel that dials '
+            + 'out this is the only repair possible from this side.',
+            'Re-dial').then(function (go) {
+            if (!go) return;
+            OS.act(redial, WGAPI, { action: 'redial', iface: apiIface },
+                   { ok: 'Re-dialling.', delay: 5000, failPrefix: 'Could not re-dial' });
+        });
+    });
+}
+
 var wgAdvOpen = false;
 
 function renderTransport(d) {
@@ -1695,11 +1735,28 @@ function renderTransport(d) {
        rather than first, which is what a handshake of 0 would otherwise do. */
     devs = devs.slice().sort(function (a, b) { return (b.handshake || 0) - (a.handshake || 0); });
 
-    clear($('#roadHead'));
-    $('#roadHead').appendChild(el('div', 'hint',
+    var head = $('#roadHead');
+    clear(head);
+    head.appendChild(el('div', 'hint',
         'Your own devices reaching this network from outside, as if they were on the '
         + 'home Wi-Fi. They are relayed through the server because this line cannot be '
         + 'dialled into directly.'));
+
+    /* Today's share of the home connection. nlbwmon has no MAC for a WireGuard
+       peer, so all of this lands in its 00:00:00:00:00:00 bucket and the
+       dashboard's device list drops it — the traffic was being counted and
+       attributed to nobody. Stated here, where the devices spending it are. */
+    if (road && (road.today_rx || road.today_tx)) {
+        var t = el('div', 'hint');
+        t.style.marginTop = '6px';
+        t.appendChild(document.createTextNode('Today: '));
+        var b = el('strong', null, OS.bytes(road.today_tx || 0) + ' up');
+        t.appendChild(b);
+        t.appendChild(document.createTextNode(' · ' + OS.bytes(road.today_rx || 0)
+            + ' down. This is ordinary home broadband use — it counts against the '
+            + 'same connection as everything else.'));
+        head.appendChild(t);
+    }
 
     setTxt($('#roadCount'), !road ? ''
         : off ? 'off'

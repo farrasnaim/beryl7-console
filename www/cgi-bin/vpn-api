@@ -1101,7 +1101,32 @@ if [ -n "$TP_ROAD_IF" ]; then
             _n=$((_n + 1))
         done
     fi
-    TP_ROAD=$(tp_tunnel_json "$TP_ROAD_IF")",\"relay\":$RELAY,\"devices\":[$DEVS]}"
+    # TODAY'S TRAFFIC. nlbwmon has no MAC for a WireGuard peer, so every road
+    # flow lands in the 00:00:00:00:00:00 bucket. The dashboard drops that row
+    # because no device matches it — which is why 5.8 GB of real traffic was
+    # counted by the router and attributed to nobody on screen.
+    #
+    # The daily baseline is READ from the file dashboard-api maintains rather
+    # than recomputed here. That file already solves the two hard parts
+    # (nlbwmon anchors its period to UTC, and its counters are period totals not
+    # daily ones), and a second implementation of that would be a second thing
+    # to get wrong. The cost is a dependency: if dashboard-api has not run since
+    # the day rolled, this falls back to the period total, which is wider than a
+    # day rather than false.
+    WGRX=0; WGTX=0
+    _cur=$(nlbw -c csv -g mac 2>/dev/null | awk -F'	' '$1 == "\"00:00:00:00:00:00\"" {gsub(/"/,""); print $3, $5; exit}')
+    if [ -n "$_cur" ]; then
+        _brx=$(awk '$1 == "00:00:00:00:00:00" {print $2; exit}' /etc/dashboard/nlbw-daily 2>/dev/null)
+        _btx=$(awk '$1 == "00:00:00:00:00:00" {print $3; exit}' /etc/dashboard/nlbw-daily 2>/dev/null)
+        case "$_brx" in ''|*[!0-9]*) _brx=0 ;; esac
+        case "$_btx" in ''|*[!0-9]*) _btx=0 ;; esac
+        WGRX=$(( $(echo "$_cur" | awk '{print $1}') - _brx ))
+        WGTX=$(( $(echo "$_cur" | awk '{print $2}') - _btx ))
+        [ "$WGRX" -lt 0 ] && WGRX=0
+        [ "$WGTX" -lt 0 ] && WGTX=0
+    fi
+
+    TP_ROAD=$(tp_tunnel_json "$TP_ROAD_IF")",\"relay\":$RELAY,\"devices\":[$DEVS],\"today_rx\":$WGRX,\"today_tx\":$WGTX}"
 fi
 
 printf '"transport":{"road":%s,"admin":%s},' "$TP_ROAD" "$TP_ADMIN"
