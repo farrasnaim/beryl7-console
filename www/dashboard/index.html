@@ -138,7 +138,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=a491e63f"></script>
+<script src="/os.js?v=cdd46c5e"></script>
 <script>
 (function () {
 'use strict';
@@ -219,30 +219,6 @@ function model(d) {
         dv.portDuplex = w.duplex || '';
     });
 
-    /* WIREGUARD HAS NO MAC. nlbwmon files every flow from a tunnel peer under
-       00:00:00:00:00:00, and the traffic join below is by MAC, so the row was
-       matched to nothing and dropped — 5.4 GB of ordinary broadband use counted
-       by the router and shown to nobody.
-
-       One synthetic entry carries it. It gets its OWN group rather than being
-       dressed up as a Wi-Fi or wired client, because it is neither: it is the
-       sum of whatever is reaching this network through the tunnel. Per-device
-       figures for those peers are on the VPN page, where the peers are. */
-    var WGMAC = '00:00:00:00:00:00';
-    var wgRow = null;
-    if (d.nlbw && d.nlbw.columns && d.nlbw.data) {
-        var wi = d.nlbw.columns.indexOf('mac');
-        wgRow = d.nlbw.data.filter(function (r) {
-            return String(r[wi] || '').toUpperCase() === WGMAC;
-        })[0] || null;
-    }
-    if (wgRow) {
-        var wgv = ensure(WGMAC);
-        wgv.name = 'WireGuard';
-        wgv.named = true;
-        wgv.wgSynthetic = true;
-    }
-
     var out = [];
     Object.keys(byMac).forEach(function (m) {
         var dv = byMac[m];
@@ -261,10 +237,6 @@ function model(d) {
         }
         out.push(dv);
     });
-
-    /* No links and no wired port, so the pass above filed it under 'idle',
-       which would have printed "currently offline" beside several gigabytes. */
-    out.forEach(function (dv) { if (dv.wgSynthetic) dv.medium = 'wg'; });
 
     /* traffic + connection counts, keyed differently by each source */
     var nl = d.nlbw;
@@ -331,11 +303,7 @@ function model(d) {
        order OS.netRank fixes - guest before IoT - then the two states that mean
        "not here". A group not in this map is a network, and scores 3 so it lands
        in that band; OS.netCmp then orders the band. */
-    /* 3.5 on purpose: an unrecognised group scores 3 and is treated as a
-       NETWORK, which then goes through OS.netCmp. WireGuard is not a network,
-       so it needs a rank of its own — after the networks, before the two states
-       that mean "not here". */
-    var order = { eth: 0, '5': 1, '2.4': 2, wg: 3.5, blocked: 4, idle: 5 };
+    var order = { eth: 0, '5': 1, '2.4': 2, blocked: 4, idle: 5 };
     function rank(g) { return order[g] === undefined ? 3 : order[g]; }
     out.sort(function (a, b) {
         if (rank(a.group) !== rank(b.group)) return rank(a.group) - rank(b.group);
@@ -1115,7 +1083,6 @@ var MEDIA = {
     '2.4':   { k: '2.4 GHz',   ico: 'wifi', note: '' },
     iot:     { k: 'IoT',       ico: 'wifi', note: '' },
     guest:   { k: 'Guest',     ico: 'wifi', note: '' },
-    wg:      { k: 'WireGuard', ico: 'tunnel', note: 'reaching this network from outside' },
     blocked: { k: 'Blocked',   ico: 'lock', note: 'denied by MAC filter' },
     idle:    { k: 'Not connected', ico: 'dev', note: 'known, currently offline' }
 };
