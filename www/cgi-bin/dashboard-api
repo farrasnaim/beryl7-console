@@ -1137,14 +1137,28 @@ printf '"classmap":%s,' "$CMJ"
 # "Connected" is the HANDSHAKE, not the interface: a WireGuard device stays up
 # forever once configured, so counting interfaces would report tunnels that
 # stopped answering hours ago. 180s matches vpnwatch and beryl-vpndns.
+# Which firewall zone carries an interface. A tunnel's zone is what decides
+# what it is FOR; its name decides nothing.
+_tzone_of() {
+    for _z in $(uci -q show firewall | sed -n 's/^firewall\.\([^.]*\)=zone$/\1/p'); do
+        for _n in $(uci -q get firewall.$_z.network 2>/dev/null); do
+            [ "$_n" = "$1" ] && { uci -q get firewall.$_z.name; return; }
+        done
+    done
+}
+
 TUN_TOTAL=0; TUN_UP=0; _tnow=$(date +%s)
 for _ti in $(uci -q show network 2>/dev/null | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
     [ "$(uci -q get network.$_ti.proto 2>/dev/null)" = "wireguard" ] || continue
-    # Same exclusion the VPN page makes: wgmgmt is the VPS management
-    # tunnel, not one of the owner's VPNs. Counting it here made the
-    # navigation say "3 tunnels" next to a VPN page listing two, which is
-    # the exact disagreement the shared routingLabel() exists to prevent.
-    [ "$_ti" = "wgmgmt" ] && continue
+    # Count what the VPN page counts, decided the same way it decides: zone `wg`
+    # is the set of paid VPN exits, and vpn-api is what puts a tunnel there.
+    #
+    # This was `[ "$_ti" = "wgmgmt" ]`, and the comment above it said in as many
+    # words that it existed to stop the navigation reading "3 tunnels" beside a
+    # VPN page listing two. It then produced exactly that, because a name test
+    # only ever excludes the tunnel somebody remembered and wgroad was added
+    # afterwards. Same lesson, third place: the zone cannot go stale that way.
+    [ "$(_tzone_of "$_ti")" = "wg" ] || continue
     TUN_TOTAL=$((TUN_TOTAL + 1))
     _ths=$(wg show "$_ti" latest-handshakes 2>/dev/null | awk 'NR==1{print $2+0}')
     case "$_ths" in ''|*[!0-9]*) _ths=0 ;; esac
