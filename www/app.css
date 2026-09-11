@@ -65,40 +65,41 @@ svg{display:block}
    elevation shadows. Airy and minimal, not dark and neon. Dark theme keeps the
    same warmth — a warm charcoal, never a blue-black. */
 :root{
-  --bg:#edeae5;
-  --ink:#2a2624;
-  --ink-2:rgba(42,38,36,.60);
-  --ink-3:rgba(42,38,36,.40);
-  --accent:#9c352d; --accent-2:#b8463b; --accent-ink:#fff;
-  --ok:#3f9d6c; --warn:#c98a2e; --bad:#c8483a; --idle:rgba(42,38,36,.28);
+  --bg:#f2f2f5;
+  --ink:#1c1c20;
+  --ink-2:rgba(28,28,34,.60);
+  --ink-3:rgba(28,28,34,.40);
+  --accent:#a0362d; --accent-2:#bb4a3d; --accent-ink:#fff;
+  --ok:#2fa15f; --warn:#d0912e; --bad:#d1493a; --idle:rgba(28,28,34,.26);
 
-  /* NEUTRAL ground — the maroon stays on the accents, never washes the page.
-     Just soft light-and-shadow so the frosted cards have something to refract,
-     plus one barely-there maroon whisper to keep it from reading as dead grey. */
-  --m1:rgba(255,255,255,.70);      /* light lift, top-right */
-  --m2:rgba(188,182,176,.30);      /* soft neutral shade, right */
-  --m3:rgba(255,255,255,.55);      /* light, bottom-left */
-  --m4:rgba(156,53,45,.055);       /* maroon whisper, top-left */
-  --m-vig:rgba(90,84,78,.06);
+  /* CLEAN SILVER-WHITE GROUND (file spec). No colour wash — soft light and a
+     maroon whisper so the glass slabs have a little to refract, nothing more. */
+  --m1:rgba(255,255,255,.80);
+  --m2:rgba(198,198,208,.30);
+  --m3:rgba(255,255,255,.60);
+  --m4:rgba(160,54,45,.05);
+  --m-vig:rgba(80,80,92,.05);
 
-  /* the card material: near-white, softly frosted, lifted by a warm shadow */
-  --glass:rgba(255,255,255,.66);
-  --glass-2:rgba(255,255,255,.78);
-  --glass-hi:rgba(255,255,255,.62);
-  --rim:rgba(255,255,255,.9);
-  --rim-hair:rgba(120,90,55,.10);
-  --rim-lo:rgba(120,90,55,.05);
-  --sep:rgba(60,44,28,.09);
-  --fieldwell:rgba(120,90,55,.06);
-  --shadow:0 12px 30px -12px rgba(60,54,50,.20),0 3px 10px -4px rgba(60,54,50,.10);
-  --shadow-sm:0 6px 16px -8px rgba(60,54,50,.18);
-  --blur:blur(20px) saturate(135%);
-  --blur-lg:blur(34px) saturate(150%);
+  /* THE CARD — a thick white glass slab: soft ambient shadow, a hairline
+     light-grey border, a whisper of top gloss (file spec). */
+  --glass:rgba(255,255,255,.80);
+  --glass-2:rgba(255,255,255,.72);
+  --glass-hi:rgba(255,255,255,.70);
+  --card-border:rgba(24,24,34,.08);
+  --rim:rgba(255,255,255,.95);
+  --rim-hair:rgba(24,24,34,.05);
+  --rim-lo:rgba(24,24,34,.03);
+  --sep:rgba(24,24,34,.07);
+  --fieldwell:rgba(120,120,135,.09);
+  --shadow:0 10px 26px -10px rgba(30,30,50,.14),0 2px 6px -2px rgba(30,30,50,.08);
+  --shadow-sm:0 5px 14px -7px rgba(30,30,50,.14);
+  --blur:blur(18px) saturate(130%);
+  --blur-lg:blur(32px) saturate(150%);
 
   /* type/space/radii (unchanged) */
   --t-hero:30px; --t-title:19px; --t-card:15.5px; --t-body:14px; --t-sub:12.5px; --t-cap:11px;
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:44px;
-  --r-card:24px; --r-inset:16px; --r-tile:13px; --r-pill:999px;
+  --r-card:20px; --r-inset:14px; --r-tile:12px; --r-pill:999px;
   --sys:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --ease:cubic-bezier(.32,.72,0,1); --spring:cubic-bezier(.5,1.4,.4,1);
@@ -119,30 +120,32 @@ svg{display:block}
    to dark; the default face of this console is the warm light one above. */
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#141315;
-  --ink:#efece7; --ink-2:rgba(239,236,231,.64); --ink-3:rgba(239,236,231,.42);
+  --bg:#131316;
+  --ink:#f2f2f5; --ink-2:rgba(242,242,245,.62); --ink-3:rgba(242,242,245,.40);
   --accent:#cf6152; --accent-2:#e08373; --accent-ink:#fff;
-  --ok:#54c98d; --warn:#e0ac54; --bad:#e2705a; --idle:rgba(239,236,231,.30);
-  --m1:rgba(98,94,102,.26); --m2:rgba(74,70,78,.20);
-  --m3:rgba(58,56,62,.24); --m4:rgba(207,97,82,.09); --m-vig:rgba(0,0,0,.38);
-  --glass:rgba(46,39,32,.52); --glass-2:rgba(54,46,38,.62); --glass-hi:rgba(255,255,255,.07);
-  --rim:rgba(255,255,255,.34); --rim-hair:rgba(255,255,255,.07); --rim-lo:rgba(0,0,0,.28);
-  --sep:rgba(255,255,255,.075); --fieldwell:rgba(0,0,0,.24);
-  --shadow:0 16px 36px -14px rgba(0,0,0,.6),0 4px 12px -6px rgba(0,0,0,.4);
+  --ok:#4fce8b; --warn:#e0ac54; --bad:#e2705a; --idle:rgba(242,242,245,.28);
+  --m1:rgba(96,96,110,.24); --m2:rgba(70,70,82,.18);
+  --m3:rgba(52,52,62,.22); --m4:rgba(207,97,82,.08); --m-vig:rgba(0,0,0,.40);
+  --glass:rgba(44,44,50,.72); --glass-2:rgba(52,52,58,.66); --glass-hi:rgba(255,255,255,.08);
+  --card-border:rgba(255,255,255,.09);
+  --rim:rgba(255,255,255,.16); --rim-hair:rgba(255,255,255,.06); --rim-lo:rgba(0,0,0,.3);
+  --sep:rgba(255,255,255,.08); --fieldwell:rgba(0,0,0,.26);
+  --shadow:0 14px 32px -12px rgba(0,0,0,.55),0 3px 10px -5px rgba(0,0,0,.4);
   --shadow-sm:0 8px 20px -10px rgba(0,0,0,.5);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   color-scheme:dark;
-  --bg:#141315;
-  --ink:#efece7; --ink-2:rgba(239,236,231,.64); --ink-3:rgba(239,236,231,.42);
+  --bg:#131316;
+  --ink:#f2f2f5; --ink-2:rgba(242,242,245,.62); --ink-3:rgba(242,242,245,.40);
   --accent:#cf6152; --accent-2:#e08373; --accent-ink:#fff;
-  --ok:#54c98d; --warn:#e0ac54; --bad:#e2705a; --idle:rgba(239,236,231,.30);
-  --m1:rgba(98,94,102,.26); --m2:rgba(74,70,78,.20);
-  --m3:rgba(58,56,62,.24); --m4:rgba(207,97,82,.09); --m-vig:rgba(0,0,0,.38);
-  --glass:rgba(46,39,32,.52); --glass-2:rgba(54,46,38,.62); --glass-hi:rgba(255,255,255,.07);
-  --rim:rgba(255,255,255,.34); --rim-hair:rgba(255,255,255,.07); --rim-lo:rgba(0,0,0,.28);
-  --sep:rgba(255,255,255,.075); --fieldwell:rgba(0,0,0,.24);
-  --shadow:0 16px 36px -14px rgba(0,0,0,.6),0 4px 12px -6px rgba(0,0,0,.4);
+  --ok:#4fce8b; --warn:#e0ac54; --bad:#e2705a; --idle:rgba(242,242,245,.28);
+  --m1:rgba(96,96,110,.24); --m2:rgba(70,70,82,.18);
+  --m3:rgba(52,52,62,.22); --m4:rgba(207,97,82,.08); --m-vig:rgba(0,0,0,.40);
+  --glass:rgba(44,44,50,.72); --glass-2:rgba(52,52,58,.66); --glass-hi:rgba(255,255,255,.08);
+  --card-border:rgba(255,255,255,.09);
+  --rim:rgba(255,255,255,.16); --rim-hair:rgba(255,255,255,.06); --rim-lo:rgba(0,0,0,.3);
+  --sep:rgba(255,255,255,.08); --fieldwell:rgba(0,0,0,.26);
+  --shadow:0 14px 32px -12px rgba(0,0,0,.55),0 3px 10px -5px rgba(0,0,0,.4);
   --shadow-sm:0 8px 20px -10px rgba(0,0,0,.5);
 }}
 :root[data-theme="light"]{color-scheme:light}
@@ -187,17 +190,15 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
    solid card. */
 .face,.dlg,.accent__pop{
   position:relative;
-  background:linear-gradient(160deg,var(--glass-hi),transparent 55%),var(--glass);
+  /* the file's spec: a thick white glass slab — a whisper of top gloss over a
+     near-opaque fill, a hairline light-grey border, and a soft ambient shadow.
+     The border and the shadow do the work; the blur is a light frost on top. */
+  background:linear-gradient(180deg,var(--glass-hi),transparent 42%),var(--glass);
+  border:1px solid var(--card-border);
   border-radius:var(--r-card);
   backdrop-filter:var(--blur);
   -webkit-backdrop-filter:var(--blur);
-  /* soft warm elevation (the SunCore look lifts its cards) PLUS a fine lens
-     edge — the shadow gives depth, the inset lines give the frosted boundary */
-  box-shadow:
-    var(--shadow),
-    inset 0 1px 0 var(--rim),
-    inset 0 0 0 .5px var(--rim-hair),
-    inset 0 -1px 0 var(--rim-lo);
+  box-shadow:var(--shadow),inset 0 1px 0 var(--rim);
 }
 .face{margin:0 0 var(--s4);padding:var(--s2) 0}
 .face--open{background:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;
@@ -490,10 +491,13 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .topo__row{display:flex;align-items:center;gap:var(--s3)}
 .topo__node{display:flex;align-items:center;gap:var(--s3);flex:1;min-width:0;
   padding:13px 15px;border-radius:var(--r-inset);background:var(--glass);
+  border:1px solid var(--card-border);
   backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
-  box-shadow:var(--shadow-sm),inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair)}
-.topo__node--live{box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 1px color-mix(in srgb,var(--ok) 40%,transparent)}
-.topo__node--bad{box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 1px color-mix(in srgb,var(--bad) 45%,transparent)}
+  box-shadow:var(--shadow-sm),inset 0 1px 0 var(--rim)}
+/* "live" is the NORMAL state — a green border on every healthy node made the
+   whole topology look outlined in green. Live nodes are plain slabs; only a
+   real fault (no route) gets a quiet red border. */
+.topo__node--bad{border-color:color-mix(in srgb,var(--bad) 45%,var(--card-border))}
 .topo__ico{width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:10px;
   background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
 .topo__ico svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8}
