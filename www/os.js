@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '8ab0d02eec';
+var CONSOLE_VERSION = '4f166dd85d';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -901,8 +901,8 @@ var STAGES = [
 var MTABS = [
     { href: '/dashboard/',  icon: 'overview', label: 'Overview' },
     { href: '/vpn/',        icon: 'routing',  label: 'VPN' },
-    { href: '/repeater/',   icon: 'wifi',     label: 'Wi-Fi uplink' },
-    { href: '/tethering/',  icon: 'usb',      label: 'USB uplink' }
+    { href: '/repeater/',   icon: 'wifi',     label: 'Wi-Fi' },
+    { href: '/tethering/',  icon: 'usb',      label: 'USB' }
 ];
 
 var spineNodes = {};
@@ -923,6 +923,7 @@ function buildShell(activeHref) {
         STAGES.forEach(function (s) {
             var n = el(s.href ? 'a' : 'div', 'pnode' + (s.branch ? ' pnode--branch' : ''));
             if (s.branch) n.appendChild(el('i', 'pnode__stub'));
+            if (s.icon) { var pico = el('div', 'pnode__ico'); pico.appendChild(icon(s.icon)); n.appendChild(pico); }
             if (s.href) {
                 n.href = s.href;
                 if (s.href === activeHref) {
@@ -931,9 +932,11 @@ function buildShell(activeHref) {
                 }
             }
             n.appendChild(el('i', 'pnode__dot'));
-            n.appendChild(el('div', 'pnode__k', s.k));
+            var tx = el('div', 'pnode__txt');
+            tx.appendChild(el('div', 'pnode__k', s.k));
             var v = el('div', 'pnode__v', s.static);
-            n.appendChild(v);
+            tx.appendChild(v);
+            n.appendChild(tx);
             spineNodes[s.id] = { node: n, val: v };
             path.appendChild(n);
         });

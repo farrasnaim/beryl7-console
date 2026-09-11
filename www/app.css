@@ -524,25 +524,58 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .main[data-stale="1"]{filter:saturate(.6)}
 .main[data-stale="1"] .tp[data-tp]{color:var(--warn)}
 
-/* ─── 13. DESKTOP ──────────────────────────────────────────────────────────
-   The tab bar becomes a floating side rail; the topline retires. Everything
-   else is the same system, wider. */
+/* ─── 13. DESKTOP — a macOS-style glass sidebar ────────────────────────────
+   On the desktop this is a Mac app, not a stretched phone. The floating phone
+   chrome (topline + tab pill) retires; the real sidebar takes over: a
+   full-height inset glass pane with the brand, the sections as icon+label nav
+   items, and the system controls docked in its foot. Content sits to its right
+   at a comfortable reading width. */
 @media (min-width:860px){
-  .mobilebar{flex-direction:column;left:16px;bottom:auto;top:50%;transform:translateY(-50%);
-    transform-origin:left center;gap:4px;border-radius:26px;padding:10px}
-  .mtab{flex-direction:row;justify-content:flex-start;gap:10px;padding:10px 16px;border-radius:18px;width:150px}
-  .mtab span{font-size:var(--t-sub)}
-  .mtab svg{width:20px;height:20px}
-  .main{max-width:760px;margin-left:210px;margin-right:auto;
-    padding:var(--s7) var(--s6) var(--s8)}
-  .head{padding-top:var(--s5)}
-  .head__t{font-size:40px}
+  .topline,.mobilebar{display:none}
+
+  .spine{display:flex;flex-direction:column;position:fixed;left:14px;top:14px;bottom:14px;
+    width:248px;z-index:40;padding:6px;border-radius:28px;
+    background:linear-gradient(158deg,var(--glass-hi),transparent 46%),var(--glass-2);
+    backdrop-filter:blur(44px) saturate(200%);-webkit-backdrop-filter:blur(44px) saturate(200%);
+    box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair),inset 0 -1px 0 var(--rim-lo)}
+  .brand{display:flex;flex-direction:column;gap:2px;padding:16px 14px 12px}
+  .brand__mark{display:flex;align-items:center;gap:9px}
+  .brand__gem{height:22px;width:auto;color:var(--accent)}
+  .brand__name{font-size:var(--t-card);font-weight:700}
+  .brand__sub{display:block;font-size:var(--t-cap);color:var(--ink-3);padding-left:1px}
+
+  .path{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:6px 6px 0}
+  .pnode{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:15px;
+    color:var(--ink-2);transition:background .16s var(--ease)}
+  .pnode__dot,.pnode__stub{display:none}
+  .pnode__ico{width:32px;height:32px;flex:none;display:grid;place-items:center;border-radius:10px;
+    color:var(--ink-2);background:var(--glass-hi);box-shadow:inset 0 0 0 .5px var(--rim-hair)}
+  .pnode__ico svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round}
+  .pnode__txt{display:flex;flex-direction:column;min-width:0}
+  .pnode__k{font-size:var(--t-sub);font-weight:600;line-height:1.25;white-space:nowrap}
+  .pnode__v{font-size:11px;color:var(--ink-3);line-height:1.2;margin-top:1px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pnode--branch{margin-left:16px}
+  a.pnode:hover{background:var(--glass-hi)}
+  a.pnode.is-active{background:color-mix(in srgb,var(--accent) 15%,transparent)}
+  a.pnode.is-active .pnode__k{color:var(--ink)}
+  a.pnode.is-active .pnode__ico{color:var(--accent);
+    background:color-mix(in srgb,var(--accent) 22%,transparent)}
+  div.pnode{opacity:.85;cursor:default}
+  .spine__foot{display:flex;align-items:center;gap:6px;padding:9px 8px;margin-top:4px;
+    border-top:1px solid var(--sep)}
+
+  /* left-docked to the sidebar, then centred in the space that remains once the
+     window is wide enough that centring would not collide with the rail */
+  .main{max-width:900px;margin-left:max(290px,calc(50vw - 305px));margin-right:auto;
+    padding:var(--s7) var(--s7) var(--s8)}
+  .head{padding-top:var(--s3)}
+  .head__t{font-size:42px}
+  .sect{margin-top:var(--s8)}
   .g2{grid-template-columns:1fr 1fr}
   .g3{grid-template-columns:1fr 1fr 1fr}
   .fgrid{grid-template-columns:1fr 1fr}
-}
-@media (min-width:1200px){
-  .main{margin-left:auto;padding-left:220px}
 }
 
 /* accent picker popover reuse */
