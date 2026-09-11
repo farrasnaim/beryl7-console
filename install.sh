@@ -301,7 +301,7 @@ echo "  . pingmon, wifiwatch and cpugovernor running"
 #                     it the only place a hand-written dnsmasq directive can go.
 touch /etc/sysupgrade.conf
 for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/vpn \
-         /www/repeater /www/tethering /www/settings \
+         /www/repeater /www/tethering /www/settings /www/fonts \
          /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
          /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
          /www/cgi-bin/wireguard-api /www/qr-vendor.js \

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>VPN — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=86ffbc0c">
+<link rel="stylesheet" href="/os.css?v=00ade902">
 </head>
 <body>
 <div class="shell">
@@ -107,7 +107,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=701404ef"></script>
+<script src="/os.js?v=7bb3fc6f"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
@@ -831,13 +831,10 @@ function renderFailmode(d) {
     ];
     opts.forEach(function (o) {
         var lab = el('label');
-        /* The chosen option is marked by a rule, not by a tinted card. Under
-             the maroon accent a filled panel read as an alert — the page was
-             warning you about the setting you had deliberately chosen. */
-        lab.style.cssText = 'display:flex;gap:12px;align-items:flex-start;' +
-            'padding:12px 0 12px 14px;border-left:2px solid ' +
-            (mode === o[0] ? 'var(--ac)' : 'var(--line)') + ';' +
-            'cursor:pointer;margin-bottom:8px';
+        lab.style.cssText = 'display:flex;gap:12px;align-items:flex-start;padding:12px;' +
+            'border:1px solid ' + (mode === o[0] ? 'var(--ac-line)' : 'var(--line-2)') + ';' +
+            'background:' + (mode === o[0] ? 'var(--ac-dim)' : 'transparent') + ';' +
+            'border-radius:var(--r);cursor:pointer;margin-bottom:8px';
         var i = el('input'); i.type = 'radio'; i.name = 'fm'; i.value = o[0];
         i.checked = mode === o[0];
         i.style.cssText = 'margin:2px 0 0;flex:none;width:16px;height:16px;accent-color:var(--ac)';
@@ -846,7 +843,8 @@ function renderFailmode(d) {
         var b = el('div', null, o[1]); b.style.cssText = 'font-size:13px;font-weight:600;margin-bottom:3px';
         t.appendChild(b);
         var hh = el('div', 'hint', o[2]);
-        /* prose, so --ink-2 rather than the --ink-3 a caption would take */
+        /* the selected card sits on --ac-dim, which lifts the ground enough that
+           --ink-3 drops to 3.5:1 — this line is prose, so it takes --ink-2. */
         hh.style.cssText = 'margin-top:0;color:var(--ink-2)';
         t.appendChild(hh);
         lab.appendChild(t);

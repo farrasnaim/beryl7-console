@@ -763,7 +763,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '30880f988f';
+var CONSOLE_VERSION = 'f6bf1d0de2';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1003,10 +1003,9 @@ function settingsBtn(activeHref) {
     a.appendChild(icon('sliders'));
     return a;
 }
-/* Accent picker. `key` is the data-accent value. Green is the palette in the
-   base :root block and is represented by the ATTRIBUTE BEING ABSENT; maroon is
-   what an unconfigured browser is GIVEN (see the boot block at the foot of this
-   file). Labels are the plain colour names, not the internal token names. */
+/* Accent picker. `key` is the data-accent value; green is the default and is
+   represented by the ATTRIBUTE BEING ABSENT, so it stays the zero-config case.
+   Labels are the plain colour names, not the internal token names. */
 var ACCENTS = [
     { key: 'maroon', label: 'Red',   sw: 'red' },
     { key: '',       label: 'Green', sw: 'green' },

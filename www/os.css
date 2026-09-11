@@ -63,20 +63,6 @@
 
     --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px;
     --r:2px; --r2:4px;
-
-    /* ---- FOLIO ----------------------------------------------------------
-       The sheet, not the card. Every token here is unitless or a var() of an
-       existing one, so the four theme blocks and all eight theme x accent
-       combinations hold by construction and no hue is written down. */
-    --pad:var(--s5);          /* THE single inset. One token, one place. */
-    --num-col:108px;          /* every figure on every page begins here */
-    --dsp:40px;               /* masthead display step */
-    /* 1.5px of mark in every 4px, at the strongest rule tint: at --rule-2
-       (13% white) a leader under a part-filled meter just stopped, which
-       read as a broken bar rather than as the unspent remainder. */
-    --leader:linear-gradient(90deg,var(--rule-3) 0 1.5px,transparent 1.5px 4px);
-    --sheet:var(--sig);       /* the ruling colour — THE one live token */
-    --sheet-line:var(--sig-line);
     --mono:ui-monospace,"SF Mono","Cascadia Mono","Segoe UI Mono","Roboto Mono",Menlo,Consolas,monospace;
     --sans:ui-sans-serif,-apple-system,"Segoe UI Variable Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;
     --ease:cubic-bezier(.2,.7,.3,1); --t:150ms;
@@ -245,9 +231,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .pnode__v{font-family:var(--mono);font-size:11px;color:var(--ink-4);margin-top:1px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 a.pnode:hover{background:var(--face)} a.pnode:hover .pnode__k{color:var(--ink)}
-/* The accent rule already says which page you are on; the fill was a panel
-   drawn inside a spine that is otherwise the same sheet as the page. */
-a.pnode.is-active{background:none}
+a.pnode.is-active{background:var(--face)}
 a.pnode.is-active::after{content:"";position:absolute;left:0;top:3px;bottom:3px;width:2px;
     background:var(--sig)}
 a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
@@ -264,6 +248,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .tp[data-tp="stale"] .tp__led{background:var(--caution)} .tp[data-tp="stale"]{color:var(--caution-fg)}
 .tp[data-tp="offline"] .tp__led{background:var(--fault)} .tp[data-tp="offline"]{color:var(--fault-fg)}
 @keyframes bpulse{0%,100%{box-shadow:0 0 0 3px var(--sig-dim)}50%{box-shadow:0 0 0 5px transparent}}
+.main[data-stale="1"] .face{opacity:.55;filter:saturate(.35);transition:opacity 260ms var(--ease)}
 
 .iconbtn{width:28px;height:28px;display:grid;place-items:center;background:transparent;
     border:1px solid transparent;border-radius:var(--r);color:var(--ink-4);cursor:pointer;
@@ -308,76 +293,28 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
   :root:not([data-theme]) .moon{display:none}}
 
 /* ---- the face: one plotted surface with corner ticks -------------------- */
-.main{min-width:0;padding:var(--s5) 0 var(--s7);position:relative;
-    /* THE RULING. Two printed column rules down the sheet: grey at the label
-       margin, accent at the figure column. It scrolls with the content because
-       ruling is printed on a page, not projected onto the desk. This is the
-       material — the accent rule marks where every figure on every page
-       begins, and it is what changes colour when the router stops answering. */
-    background-image:
-      linear-gradient(90deg,var(--sheet-line) 0 1px,transparent 1px),
-      linear-gradient(90deg,var(--rule-2) 0 1px,transparent 1px);
-    background-repeat:no-repeat,no-repeat;
-    background-size:1px 100%,1px 100%;
-    background-position:calc(100% - var(--pad) - var(--num-col)) 0,var(--pad) 0}
-
-/* THE MEASURE. The page had two insets — .main's padding and each panel's —
-   restated in three places that drifted. This is the one list. */
-.panel__h,.panel__b,.tbl__group,.row,.det,.empty,.adv>summary,.sect,.head,
-.face--open .panel__h,.face--open .panel__b{
-    padding-left:var(--pad);padding-right:var(--pad)}
-
-/* Crop marks on the SHEET, not on twenty cards. The signature mark is promoted
-   rather than deleted: one registration pair per page, and reaching a phone for
-   the first time — the per-card ones are hidden below 900px today. */
-.main::before,.main::after{content:"";position:absolute;width:11px;height:11px;
-    border:1px solid var(--rule-3);pointer-events:none}
-.main::before{top:var(--s3);left:calc(var(--pad) - 5px);border-right:0;border-bottom:0}
-.main::after{bottom:var(--s5);right:calc(var(--pad) - 5px);border-left:0;border-top:0}
-
-/* THE RULING CARRIES THE STATE. Full page height, both rules, the masthead and
-   every register head — a signal that cannot be missed and that touches no
-   text. Replaces dropping the whole page to 55% opacity. */
-.main[data-stale="1"]{--sheet:var(--caution);
-    --sheet-line:color-mix(in srgb,var(--caution) 38%,transparent)}
-/* THE MASTHEAD. A folio opens under a DOUBLE rule — two hairlines with air
-   between them. A register opens under a single one. That difference is the
-   whole reason you can tell, at a glance and with no label, that the page has
-   started rather than that another section has. */
+.main{min-width:0;padding:var(--s5) var(--s5) var(--s7)}
 .head{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--s4);
-    padding-top:0;padding-bottom:var(--s4);margin-bottom:var(--s6);position:relative}
-.head::after{content:"";position:absolute;left:var(--pad);right:var(--pad);bottom:0;
-    height:6px;border-top:2px solid var(--sheet-line);border-bottom:1px solid var(--rule-3)}
-.head__t{font-size:var(--dsp);font-weight:620;letter-spacing:-.035em;margin:0;line-height:1.04}
-.head__s{color:var(--ink-2);font-size:14.5px;margin-top:8px;max-width:66ch}
+    padding:0 0 var(--s4)}
+.head__t{font-size:23px;font-weight:600;letter-spacing:-.028em;margin:0;line-height:1.1}
+.head__s{color:var(--ink-2);font-size:13.5px;margin-top:6px;max-width:66ch}
 .head__aside{display:flex;align-items:center;gap:var(--s2);flex:none}
-/* A reading does not live in a box. A register opens with a 2px rule spanning
-   the measure and is held by the ruling and by type. */
-.face{position:relative;background:none;border:0;border-radius:0;margin:0 0 var(--s6)}
+.face{position:relative;background:var(--face);border:1px solid var(--rule);
+    border-radius:var(--r2);margin-bottom:var(--s4)}
 /* Open composition: content directly on the page, no container. The card is
    reserved for dense row-lists that genuinely need containment — everything
    else earns hierarchy from scale and whitespace instead of a border. */
-.face--open{background:none;border:0;border-radius:0;margin:0 0 var(--s6)}
+.face--open{background:none;border:0;border-radius:0;margin-bottom:var(--s2)}
 .face--open::before,.face--open::after{display:none}
 .face--open .panel__h{border-top:0;padding-left:0;padding-right:0}
 .face--open .panel__b{padding-left:0;padding-right:0}
 /* free-standing section header, used by open sections */
-.sect{display:flex;align-items:baseline;gap:var(--s3);padding-top:var(--s5);padding-bottom:var(--s3)}
+.sect{display:flex;align-items:baseline;gap:var(--s3);padding:var(--s5) 0 var(--s3)}
 .sect__t{font-size:16px;font-weight:600;letter-spacing:-.022em}
 .sect__m{font-family:var(--mono);font-size:11px;color:var(--ink-4)}
 .sect__aside{margin-left:auto;display:flex;align-items:center;gap:var(--s2)}
-.face::before,.face::after{display:none}
-
-/* THE HEAD RULE, and it carries the register's own worst judgement. :has() is
-   scoped to the header's single state word — never to the row list — so the
-   invalidation cost is one node rather than a sixty-row subtree. */
-.face>.panel:first-child{position:relative}
-.face>.panel:first-child::before{content:"";position:absolute;top:0;
-    left:var(--pad);right:var(--pad);height:2px;background:var(--rule-3)}
-.face>.panel:first-child:has(>.panel__h .sw--warn)::before{background:var(--caution)}
-.face>.panel:first-child:has(>.panel__h .sw--bad)::before{background:var(--fault)}
-.face--open>.panel:first-child::before{display:none}
-.face>.panel:first-child>.panel__h{padding-top:var(--s5)}
+.face::before,.face::after{content:"";position:absolute;width:9px;height:9px;
+    pointer-events:none;border:1px solid var(--rule-3)}
 .face::before{top:-1px;left:-1px;border-right:0;border-bottom:0}
 .face::after{bottom:-1px;right:-1px;border-left:0;border-top:0}
 
@@ -386,17 +323,12 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 /* Wraps rather than squeezes: a header whose aside is a control, not a word,
    needs to drop it to its own line on a phone instead of crushing both. */
 .panel__h{display:flex;align-items:baseline;gap:var(--s3);flex-wrap:wrap;row-gap:var(--s2);
-    padding-top:var(--s4);padding-bottom:var(--s3);border-top:1px solid var(--rule)}
+    padding:var(--s4) var(--s5) var(--s3);border-top:1px solid var(--rule)}
 .face>.panel:first-child>.panel__h,.face>.panel:first-child>.strip{border-top:0}
-/* A REGISTER HEAD. The page now has four typographic ranks and each one is a
-   different KIND of thing, not just a different size: masthead 40 (the
-   page), register 18 (a reading), subhead 10 small-caps (a division inside
-   one), row 13.5 (an entry). At 14.5 the register head sat one point above
-   its own rows and the page read as an undifferentiated list. */
-.panel__t{font-size:18px;font-weight:600;letter-spacing:-.022em;color:var(--ink);
+.panel__t{font-size:14.5px;font-weight:600;letter-spacing:-.015em;color:var(--ink);
     text-transform:none;font-family:var(--sans)}
 .panel__aside{margin-left:auto;display:flex;align-items:center;gap:var(--s2)}
-.panel__b{padding-top:0;padding-bottom:var(--s4)}
+.panel__b{padding:0 var(--s5) var(--s4)}
 /* Two classes on purpose. The density steps at 1220 and 420 restate padding for
    a selector list that includes bare .panel__b — same specificity, later in the
    file — so a single-class rule here loses and every flush list quietly gains a
@@ -497,7 +429,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
     white-space:nowrap;line-height:1}
 
 /* ---- TOPOLOGY ----------------------------------------------------------- */
-.topo{width:calc(100% - var(--num-col));display:block;overflow:visible}
+.topo{width:100%;display:block;overflow:visible}
 .topo .link{stroke:var(--rule-2);stroke-width:1.5;fill:none;vector-effect:non-scaling-stroke}
 .topo .link.on{stroke:var(--sig-line)}
 .topo .link.off{stroke:var(--rule);stroke-dasharray:3 4}
@@ -505,11 +437,8 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
     vector-effect:non-scaling-stroke;animation:dashflow 1.7s linear infinite}
 .topo .flow.rev{animation-direction:reverse}
 @keyframes dashflow{to{stroke-dashoffset:-16}}
-/* Outline only. A filled box is a card, and there are no cards left. */
-.topo .nodebox{fill:none;stroke:var(--rule-2);stroke-width:1;vector-effect:non-scaling-stroke}
-/* A live node is marked by its rule, not by a tinted panel behind it —
-   the fill was the card coming back in through the diagram. */
-.topo .nodebox.on{stroke:var(--sig);fill:none}
+.topo .nodebox{fill:var(--face-2);stroke:var(--rule-2);stroke-width:1;vector-effect:non-scaling-stroke}
+.topo .nodebox.on{stroke:var(--sig-line);fill:var(--sig-dim)}
 .topo .nodebox.bad{stroke:var(--fault)}
 .topo .t1{fill:var(--ink);font-family:var(--sans);font-size:11.5px;font-weight:600}
 .topo .t2{fill:var(--ink-4);font-family:var(--mono);font-size:10px}
@@ -561,11 +490,8 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
   100%{transform:scaleX(.15);opacity:.35}}
 
 /* ---- rows --------------------------------------------------------------- */
-/* A SUBHEAD, not a filled band. The fill was the last surviving card edge in
-   the device list; a rule and a letterspaced small-caps label say the same
-   thing and leave the sheet unbroken. It stays opaque because it is sticky. */
-.tbl__group{display:flex;align-items:center;gap:var(--s2);padding-top:11px;padding-bottom:8px;
-    background:var(--bg);border-top:1px solid var(--rule-2);
+.tbl__group{display:flex;align-items:center;gap:var(--s2);padding:7px var(--s5);
+    background:var(--face-2);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);
     position:sticky;top:0;z-index:2}
 .tbl__group:first-child{border-top:0}
 /* Group icon. Sized and coloured to sit with .tbl__gk rather than compete with
@@ -573,12 +499,9 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
    be squeezed when a long note sits beside it. */
 .tbl__group>svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;
     stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;color:var(--ink-4)}
-.tbl__gk{font-size:10px;font-weight:650;letter-spacing:.15em;text-transform:uppercase;
-    color:var(--ink-2)}
-/* the count is a figure, so it lives in the figure column with every other */
-.tbl__gn{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11px;
-    color:var(--ink-4);margin-left:auto;min-width:var(--num-col);text-align:right}
-.row{display:grid;align-items:center;gap:var(--s3);padding-top:9px;padding-bottom:9px;
+.tbl__gk{font-size:12px;font-weight:600;color:var(--ink-2)}
+.tbl__gn{font-family:var(--mono);font-size:11px;color:var(--ink-4);margin-left:auto}
+.row{display:grid;align-items:center;gap:var(--s3);padding:9px var(--s5);
     border-bottom:1px solid var(--rule);cursor:pointer;position:relative;
     transition:background var(--t) var(--ease)}
 .row:hover{background:var(--face-2)}
@@ -586,15 +509,6 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .row[aria-expanded="true"]::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
     background:var(--sig)}
 .row:last-child{border-bottom:0}
-/* THE GUTTER. An expand affordance is not a reading, so it is not allowed a
-   track: it sits past the figure column in the page's right margin, where it
-   can never push a number off the rule. This is also why every row can declare
-   the same three tracks and still align with a group subhead, which has none. */
-.re-caret{position:absolute;right:calc(var(--pad) - 14px);top:50%;margin-top:-4px;
-    width:5px;height:5px;border-right:1.5px solid var(--ink-4);
-    border-bottom:1.5px solid var(--ink-4);transition:transform 150ms var(--ease)}
-.tbl__group>.re-caret{top:calc(50% - 1px)}
-.re-state{text-align:right}
 .row__id{display:flex;align-items:center;gap:11px;min-width:0}
 .row__ico{width:28px;height:28px;flex:none;display:grid;place-items:center;
     border:1px solid var(--rule);border-radius:var(--r);color:var(--ink-2);background:var(--face-2)}
@@ -614,19 +528,9 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 @media (max-width:560px){.row--pick{grid-template-columns:minmax(0,1fr);gap:var(--s2)}
   .row--pick .select{width:100%;min-width:0;max-width:none}}
 .det{border-bottom:1px solid var(--rule);background:var(--face-2);
-    padding-top:var(--s4);padding-bottom:var(--s5)}
-/* Two columns at EVERY width. The narrow measure is where a leader earns its
-   keep, and stacking is what would leave it pointing at nothing. */
-.kv{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,max-content);
-    gap:6px var(--s3)}
-.kv dt::after{content:"";flex:1 1 auto;min-width:10px;height:1px;align-self:flex-end;
-    margin-bottom:.36em;background-image:var(--leader);background-size:4px 1px;
-    background-repeat:repeat-x}
-/* the always-on instance: a device name bound across the row to its figure */
-.row__id::after{content:"";flex:1 1 auto;min-width:14px;height:1px;align-self:center;
-    background-image:var(--leader);background-size:4px 1px;background-repeat:repeat-x}
-.kv dt{display:flex;align-items:baseline;font-size:11.5px;color:var(--ink-4);
-    white-space:nowrap}
+    padding:var(--s4) var(--s5) var(--s5)}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:5px var(--s4)}
+.kv dt{font-size:11.5px;color:var(--ink-4);white-space:nowrap}
 .kv dd{margin:0;font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;
     word-break:break-all}
 
@@ -655,16 +559,6 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .log__l--err .log__s{color:var(--fault-fg)}
 
 /* ---- forms -------------------------------------------------------------- */
-/* THE MEASURE ENDS AT THE RULE. A control is not a reading. Settings drew a
-   two-up radio grid and full-width selects straight through the accent rule,
-   which made a page-level column look like a stray line laid over a form.
-   Fields, field pairs, panel grids and callouts now stop where the figure
-   column begins, and the column on those pages carries what it should: the
-   state word for each section, at the same x as every figure elsewhere. */
-.field,.fgrid,.grid,.note{margin-right:var(--num-col)}
-/* ...once. A field inside a field pair, or inside a panel that is itself in a
-   grid, has already been inset by its container. */
-.fgrid .field,.grid .field,.grid .fgrid,.grid .note,.fgrid .note{margin-right:0}
 .field{margin-bottom:var(--s3)}
 .label{display:block;font-size:12px;font-weight:500;color:var(--ink-2);margin-bottom:6px}
 .input,.select,.ta{width:100%;padding:8px 10px;min-height:34px;background:var(--bg);
@@ -678,7 +572,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .hint{font-size:12px;color:var(--ink-4);margin-top:5px;line-height:1.5}
 
 /* ---- empty / skeleton / notice ------------------------------------------ */
-.empty{padding-top:var(--s6);padding-bottom:var(--s6);text-align:center}
+.empty{padding:var(--s6) var(--s5);text-align:center}
 .empty__i{width:36px;height:36px;margin:0 auto var(--s3);color:var(--ink-4);
     border:1px dashed var(--rule-2);border-radius:var(--r);display:grid;place-items:center}
 .empty__i svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.5;
@@ -733,30 +627,13 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
     justify-content:flex-end}
 
 /* ---- charts ------------------------------------------------------------- */
-/* A PLOT ENDS AT THE RULE. Stage A ran every trace straight through the accent
-   line, which made it read as an overlay drawn on top of the charts rather
-   than as the left edge of the figure column. Ending the drawing there turns
-   the same line into the thing the plot is measured against, and leaves the
-   column beyond it free for the reading — so "peak 1.4 Mb/s" sits directly
-   above "62.7 °C" and below "1.2 GB today". */
-.chart{width:calc(100% - var(--num-col));display:block}
-/* INK, NOT ACCENT. A maroon trace across a chart reads as an alarm, not as
-   a house colour — the page said CLEAN, STEADY and 8% while drawing four
-   red lines. The reading is ink; the wash under it keeps the tie to the
-   sheet, and the only red left on a healthy page is the ruling itself. */
-.chart .trace{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round;
+.chart{width:100%;display:block}
+.chart .trace{fill:none;stroke:var(--sig);stroke-width:1.5;stroke-linejoin:round;
     vector-effect:non-scaling-stroke}
 .chart .fill{fill:var(--sig-dim);stroke:none}
 .chart .trace-2{fill:none;stroke:var(--ink-4);stroke-width:1.25;vector-effect:non-scaling-stroke}
 .chart .fill-2{fill:var(--rule);stroke:none}
 .chart .axis{stroke:var(--rule-2);stroke-width:1;vector-effect:non-scaling-stroke}
-/* Scoped to the panel body on purpose: .cap is ALSO an SVG text class inside
-   the topology, and display:grid on a <text> node is not a thing. */
-.panel__b>.cap{display:grid;
-    grid-template-columns:max-content minmax(0,1fr) minmax(var(--num-col),max-content);
-    align-items:baseline;gap:var(--s3)}
-.panel__b>.cap>span:last-child{text-align:right}
-.panel__b>.cap>span:nth-child(2){text-align:center}
 .cap{display:flex;justify-content:space-between;gap:var(--s2);font-family:var(--mono);
     font-size:10.5px;color:var(--ink-4);margin-top:7px}
 .cap>span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -807,33 +684,9 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 /* ---- misc --------------------------------------------------------------- */
 .mut{color:var(--ink-2)} .dim{color:var(--ink-4)}
 .rowsep{height:1px;background:var(--rule);margin:var(--s3) 0}
-/* The device's own total for the day is the row's answer, so it is set as a
-   figure rather than as a caption under the state word. */
-.re-state .row__cap{font-size:11.5px;color:var(--ink-2);margin-top:2px}
-
-/* ---- the ledger row ------------------------------------------------------
-   Name, extent, figure — on ONE line, with the figure in the same column as
-   every other figure on the page. The old form stacked a label over a
-   full-width bar over a caption: three lines and a block of colour to carry
-   one number, and the number was the only part anyone read. Rows with nothing
-   to plot get the same construction with the run left fully dotted, so a
-   reading with an extent and a reading without one are visibly the same kind
-   of thing. */
-.led{display:grid;
-    grid-template-columns:max-content minmax(24px,1fr) minmax(var(--num-col),max-content);
-    align-items:center;gap:var(--s3);padding:11px 0;
-    border-bottom:1px solid var(--rule)}
-.led:last-child{border-bottom:0}
-.led>i{height:1px;background-image:var(--leader);background-size:4px 1px;
-    background-repeat:repeat-x;align-self:center}
-.led__v{text-align:right;font-size:14.5px;color:var(--ink)}
-.led__m{grid-column:1/-1;margin:3px 0 0;font-family:var(--mono);font-size:11px;
-    color:var(--ink-4)}
 /* Label + current reading, sitting above the chart it describes. */
-.metricrow{display:grid;
-    grid-template-columns:minmax(0,1fr) minmax(var(--num-col),max-content);
-    align-items:baseline;gap:var(--s3);margin-bottom:var(--s2)}
-.metricrow>:last-child{text-align:right}
+.metricrow{display:flex;justify-content:space-between;align-items:baseline;gap:var(--s2);
+    margin-bottom:var(--s2)}
 .metricrow .n{font-size:12px}
 .metricrow .inline{align-items:baseline;gap:9px;min-width:0}
 /* .select is full-width by default, which is right in a form and wrong beside
@@ -849,7 +702,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .push{margin-left:auto}
 .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
     clip:rect(0 0 0 0);white-space:nowrap;border:0}
-.adv>summary{list-style:none;cursor:pointer;padding-top:var(--s4);padding-bottom:var(--s4);font-size:12.5px;
+.adv>summary{list-style:none;cursor:pointer;padding:var(--s4) var(--s5);font-size:12.5px;
     font-weight:500;color:var(--ink-2);display:flex;align-items:center;gap:8px;
     border-top:1px solid var(--rule)}
 .adv>summary::-webkit-details-marker{display:none}
@@ -859,47 +712,29 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 .adv[open]>summary::after{transform:rotate(225deg)}
 .adv>summary:hover{color:var(--ink)}
 .face>.adv:first-child>summary{border-top:0}
-/* THE METER IS THE LEADER. A dot leader and a bar were two ways of drawing the
-   same 1px journey from a label to its figure, so they are now one object: the
-   run is dotted for the part not spent and solid for the part that is. Ten
-   segments at zero gap read as one continuous rule while keeping the honest
-   10% quantisation — and keeping the per-segment nodes, which is what lets the
-   fill fade instead of stepping. */
-.meter{display:flex;gap:0;height:3px;align-items:stretch}
-.meter i{flex:1;background-color:transparent;background-image:var(--leader);
-    background-size:4px 1px;background-position:0 center;background-repeat:repeat-x;
-    transition:background-color var(--t) var(--ease)}
-.meter i.on{background-image:none;background-color:var(--sig)}
+.meter{display:flex;gap:2px;height:10px;align-items:stretch}
+.meter i{flex:1;background:var(--rule);transition:background var(--t) var(--ease)}
+.meter i.on{background:var(--sig)}
 .meter[data-tone="ok"] i.on{background:var(--good)}
 .meter[data-tone="fair"] i.on{background:var(--fair)}
 .meter[data-tone="warn"] i.on{background:var(--caution)}
 .meter[data-tone="bad"] i.on{background:var(--fault)}
 .meter[data-tone="idle"] i.on{background:var(--idle)}
-.meter--sm{height:2px}
+.meter--sm{height:7px;gap:1.5px}
 
 /* ============================ responsive ================================= */
 .mobilebar,.topline{display:none}
 @media (max-width:1220px){
-  /* One inset, one figure column: the density steps move THOSE, and every rule
-     that reads them — the ruling, the measure, every figure track — follows.
-     The old form restated padding for a nine-selector list at each step. */
-  :root{--rail:206px; --pad:var(--s4); --num-col:96px}
-  .main{padding:var(--s4) 0 var(--s7)}
+  :root{--rail:206px}
+  .main{padding:var(--s4) var(--s4) var(--s7)}
   .g-2-1{grid-template-columns:minmax(0,1fr)}
   .grid>.panel+.panel{border-left:0}
   .grid>.panel+.panel>.panel__h{border-top:1px solid var(--rule)}
-  .strip>.ro{padding-left:var(--s4);padding-right:var(--s4)}
+  .panel__h,.panel__b,.strip>.ro,.tbl__group,.row,.det,.empty,.adv>summary{
+    padding-left:var(--s4);padding-right:var(--s4)}
   .dlg__h,.dlg__b,.dlg__f{padding-left:var(--s4);padding-right:var(--s4)}
 }
 @media (max-width:900px){
-  /* THE SHEET ON A PHONE. 108px reserved down one side of a 375px screen is a
-     third of the measure, and every figure here already sits at the right edge
-     of its own row. The column collapses to nothing — which is what the
-     minmax() floors above exist for — and the sheet keeps the one rule it can
-     still spare the width for, at the left margin. */
-  :root{--num-col:0px}
-  .main{background-image:linear-gradient(90deg,var(--rule-2) 0 1px,transparent 1px);
-    background-size:1px 100%;background-position:var(--pad) 0}
   .shell{grid-template-columns:minmax(0,1fr)}
   .spine{display:none}
   .main{padding:0 0 calc(84px + env(safe-area-inset-bottom))}
@@ -1037,8 +872,8 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
   .re-id .row__nm{white-space:normal}
 }
 @media (max-width:420px){
-  :root{--pad:var(--s3)}
-  .strip>.ro{padding-left:var(--s3);padding-right:var(--s3)}
+  .panel__h,.panel__b,.strip>.ro,.tbl__group,.row,.det,.empty,.adv>summary{
+    padding-left:var(--s3);padding-right:var(--s3)}
   .head{padding:var(--s3)} .head__t{font-size:19px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -1047,3 +882,475 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 }
 @media print{.spine,.mobilebar,.toasts{display:none}}
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   GLASS — the material layer.                    added 2026-09-12, rebuilt same day
+
+   Appended rather than woven in, deliberately. Every rule here overrides an
+   earlier one by document order alone; nothing above was edited. Delete this
+   block and the console is exactly what it was, which is the only honest way
+   to ship a change this wide to a stylesheet five pages share.
+
+   THE FIRST VERSION OF THIS BLOCK FAILED, and the post-mortem is worth keeping
+   because all four faults are the classic ones:
+
+     1. IT HAD NO BACKDROP. Glass shows what is behind it. Behind a flat fill
+        there is nothing to show, so a panel renders as a faintly outlined grey
+        box — and the instinct is then to add blur, which makes it worse. The
+        first version painted two soft corner washes and called that a ground;
+        11px of blur over a smooth gradient is arithmetically indistinguishable
+        from no blur at all. The ground below now carries a RULE GRID, and the
+        grid is the part that matters: it gives the blur edges to bend.
+
+     2. IT REACHED EIGHT SELECTORS AND STOPPED. .face, .spine, .mobilebar,
+        .dlg, .toast — and then every chip, button, input, icon and log inside
+        those panels kept its old opaque fill and its 2px radius. A 12px panel
+        full of 2px parts does not read as one material. The radius ramp and
+        the component tiers below are most of this block's length for that
+        reason.
+
+     3. DATA SAT ON GLASS. A translucent surface is where small mono figures go
+        to die. There is a second material here — THE SLAB — that is opaque on
+        purpose, and every dense list, every readout and every log sits on it.
+        Glass is the container; the slab is the page inside the container.
+
+     4. THE TYPE WAS NEVER TOUCHED, which was half the brief. See §1.
+
+   WHY NOT A DISPLACEMENT MAP. The liquid-glass recipe's refraction layer is
+   `backdrop-filter: url(#svg-filter)`, and that renders in Chromium only —
+   Safari parses the declaration and paints nothing, while @supports reports
+   success. Half this console is read on an iPhone. So the design is FINISHED
+   at the blur-and-rim level, which works everywhere; refraction would be a
+   bonus for one browser, never load-bearing.
+
+   CONTRAST IS THE RISK. This console's job is small numbers — dBm, handshake
+   ages, MB. That is what the slab is for, and it is why the ground is a calm
+   wash and a faint grid rather than the network map it could have been.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+
+/* ─── 1. TYPE ──────────────────────────────────────────────────────────────
+   SELF-HOSTED, and that is the whole point. Apple's SF cannot be embedded —
+   the licence forbids it — so `-apple-system` is the only way to get it, and
+   it yields SF on Apple devices and Segoe UI on Windows. That split is what
+   made the console look generic on the desktop it is actually administered
+   from, and one console that looks like two consoles is worse than either.
+
+   IBM Plex is the face the approved mockup used: a grotesque with real
+   engineering character, a mono that is a true sibling rather than a
+   different family, and an open licence. Latin subset only, from the Google
+   Fonts payload, served off the router — so the console keeps its typography
+   when the WAN is down, which is exactly when it gets opened.
+
+   The sans is ONE variable file for every weight (Google serves the identical
+   file for 400/500/600, which is the tell); the mono is three statics. 91 KB
+   for the set, cached after first paint. */
+@font-face{font-family:'Plex Sans';font-style:normal;font-weight:100 700;
+  font-display:swap;src:url(/fonts/plex-sans-var.woff2) format('woff2')}
+@font-face{font-family:'Plex Mono';font-style:normal;font-weight:400;
+  font-display:swap;src:url(/fonts/plex-mono-400.woff2) format('woff2')}
+@font-face{font-family:'Plex Mono';font-style:normal;font-weight:500;
+  font-display:swap;src:url(/fonts/plex-mono-500.woff2) format('woff2')}
+@font-face{font-family:'Plex Mono';font-style:normal;font-weight:600;
+  font-display:swap;src:url(/fonts/plex-mono-600.woff2) format('woff2')}
+
+
+/* ─── 2. TOKENS ────────────────────────────────────────────────────────────
+   The same four-block matrix the theme and accent tokens use above: bare
+   :root carries dark, the media query carries light for the no-attribute
+   case, and the two [data-theme] blocks let an explicit choice win in both
+   directions. Nothing here names a hue — the washes are drawn from
+   --sig-dim, so the ground follows the accent picker for free. */
+:root{
+  /* radius ramp. One material means one corner family, all the way down. */
+  --gl-r:14px;    /* panel            */
+  --gl-r2:10px;   /* slab, log, dialog body */
+  --gl-r3:8px;    /* button, input, select  */
+  --gl-r4:7px;    /* row icon, small square */
+
+  /* THE TINT IS COLOURLESS on purpose. Hue in the tint fights the hue coming
+     through from the ground and the surface turns muddy; the colour arrives
+     from behind or it does not arrive. */
+  --gl-a:rgba(255,255,255,.062);
+  --gl-b:rgba(179,179,179,.042);
+  --gl-hover-a:rgba(255,255,255,.10);
+  --gl-hover-b:rgba(179,179,179,.075);
+
+  /* THE RIM IS THE EFFECT. Four edges, not one border: a half-opacity white
+     line along the top (light landing on a bevel), a hairline all round, a
+     whisper along the bottom, and a real border outside all three. The top
+     rim is the single brightest value in this stylesheet, and it is what the
+     first version cut to .40 — which is how a lit edge becomes a grey one. */
+  --gl-rim:rgba(255,255,255,.50);
+  --gl-hair:rgba(255,255,255,.10);
+  --gl-bot:rgba(255,255,255,.055);
+  --gl-edge:rgba(255,255,255,.085);
+  --gl-shadow:0 12px 34px rgba(0,0,0,.46);
+
+  --gl-blur:blur(10px) saturate(128%);
+  --gl-chrome:blur(26px) saturate(146%);
+
+  /* THE SLAB — the second material. Opaque on purpose: this is where numbers
+     live. A device list, a log and a readout strip all sit on it, so no
+     figure on this console is ever read through a translucent surface. */
+  --slab:rgba(9,10,12,.60);
+  --slab-2:rgba(255,255,255,.035);      /* the inset inside the slab */
+  --slab-head:rgba(15,16,19,.88);       /* sticky group head, must not ghost */
+  --slab-rule:rgba(255,255,255,.075);
+  --gl-well:rgba(0,0,0,.26);            /* inputs read as recessed, not raised */
+
+  /* THE GROUND. Two accent washes, one cool counter-wash so the page is not
+     one hue, a rule grid for the blur to bend, and a vignette to keep the
+     corners dark enough for small type. */
+  --gl-wash-c:rgba(118,148,190,.075);
+  --gl-grid:rgba(255,255,255,.026);
+  --gl-vig:rgba(0,0,0,.55);
+}
+@media (prefers-color-scheme:light){:root{
+  --gl-a:rgba(255,255,255,.72);
+  --gl-b:rgba(255,255,255,.44);
+  --gl-hover-a:rgba(255,255,255,.88);
+  --gl-hover-b:rgba(255,255,255,.62);
+  /* In light the rim carries almost the whole edge, and the BOTTOM edge
+     inverts to a dark line — light still comes from above, so the underside
+     is in shadow rather than lit. */
+  --gl-rim:rgba(255,255,255,.92);
+  --gl-hair:rgba(255,255,255,.55);
+  --gl-bot:rgba(24,22,18,.05);
+  --gl-edge:rgba(24,22,18,.12);
+  --gl-shadow:0 12px 32px rgba(62,50,40,.11);
+  --slab:rgba(255,255,255,.68);
+  --slab-2:rgba(24,22,18,.03);
+  --slab-head:rgba(250,249,246,.93);
+  --slab-rule:rgba(24,22,18,.085);
+  --gl-well:rgba(255,255,255,.78);
+  --gl-wash-c:rgba(92,122,168,.085);
+  --gl-grid:rgba(24,22,18,.034);
+  --gl-vig:rgba(86,72,58,.17);
+}}
+:root[data-theme="dark"]{
+  --gl-a:rgba(255,255,255,.062); --gl-b:rgba(179,179,179,.042);
+  --gl-hover-a:rgba(255,255,255,.10); --gl-hover-b:rgba(179,179,179,.075);
+  --gl-rim:rgba(255,255,255,.50); --gl-hair:rgba(255,255,255,.10);
+  --gl-bot:rgba(255,255,255,.055); --gl-edge:rgba(255,255,255,.085);
+  --gl-shadow:0 12px 34px rgba(0,0,0,.46);
+  --slab:rgba(9,10,12,.60); --slab-2:rgba(255,255,255,.035);
+  --slab-head:rgba(15,16,19,.88); --slab-rule:rgba(255,255,255,.075);
+  --gl-well:rgba(0,0,0,.26);
+  --gl-wash-c:rgba(118,148,190,.075); --gl-grid:rgba(255,255,255,.026);
+  --gl-vig:rgba(0,0,0,.55);
+}
+:root[data-theme="light"]{
+  --gl-a:rgba(255,255,255,.72); --gl-b:rgba(255,255,255,.44);
+  --gl-hover-a:rgba(255,255,255,.88); --gl-hover-b:rgba(255,255,255,.62);
+  --gl-rim:rgba(255,255,255,.92); --gl-hair:rgba(255,255,255,.55);
+  --gl-bot:rgba(24,22,18,.05); --gl-edge:rgba(24,22,18,.12);
+  --gl-shadow:0 12px 32px rgba(62,50,40,.11);
+  --slab:rgba(255,255,255,.68); --slab-2:rgba(24,22,18,.03);
+  --slab-head:rgba(250,249,246,.93); --slab-rule:rgba(24,22,18,.085);
+  --gl-well:rgba(255,255,255,.78);
+  --gl-wash-c:rgba(92,122,168,.085); --gl-grid:rgba(24,22,18,.034);
+  --gl-vig:rgba(86,72,58,.17);
+}
+
+/* The faces, last, so they beat --sans/--mono in the block far above. Plex
+   first on every platform: consistency across his PC, phone and iPad beats a
+   slightly nicer face on two of the three. */
+:root{
+  --sans:'Plex Sans',-apple-system,ui-sans-serif,system-ui,"Segoe UI",sans-serif;
+  --mono:'Plex Mono',ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+
+
+/* ─── 3. THE GROUND ────────────────────────────────────────────────────────
+   Build this before styling a single panel, and check it looks uneven with no
+   glass on it at all. Paint order is first-layer-on-top, so the vignette is
+   declared first and the washes last.
+
+   The grid is 56px and barely there (2.6% white). Its job is not to be seen:
+   it is to put a hundred hard edges behind every panel so the blur has
+   something to smear. Masked away toward the bottom so a long page does not
+   turn into graph paper. */
+body{background:var(--bg)}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(128% 94% at 50% -6%,transparent 40%,var(--gl-vig) 100%),
+    repeating-linear-gradient(90deg,var(--gl-grid) 0 1px,transparent 1px 56px),
+    repeating-linear-gradient(0deg,var(--gl-grid) 0 1px,transparent 1px 56px),
+    radial-gradient(74% 54% at 14% 0%,var(--sig-dim),transparent 62%),
+    radial-gradient(66% 52% at 90% 98%,var(--sig-dim),transparent 64%),
+    radial-gradient(54% 46% at 98% 22%,var(--gl-wash-c),transparent 66%);
+}
+
+
+/* ─── 4. PANEL TIER ───────────────────────────────────────────────────────
+   .face is the only element that gets the full material. Its children paint
+   no surface of their own — the panel already supplies background, border and
+   radius, and an opaque child paints over the very backdrop that is the
+   effect. That rule is why .panel, .panel__h and .rowsep are stripped here. */
+.face{
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  border:1px solid var(--gl-edge);
+  border-radius:var(--gl-r);
+  box-shadow:var(--gl-shadow),
+             inset 0 1px 0 var(--gl-rim),
+             inset 0 0 0 1px var(--gl-hair),
+             inset 0 -1px 0 var(--gl-bot);
+  backdrop-filter:var(--gl-blur);
+  -webkit-backdrop-filter:var(--gl-blur);
+  margin-bottom:var(--s4);
+}
+/* The corner registration marks go. They were a signature drawn for a square
+   1px card; a 9px bracket parked 4px outside a 14px radius traces a corner
+   that is no longer there, and reads as a rendering fault rather than a mark. */
+.face::before,.face::after{display:none}
+/* A section with no container sits directly on the ground — which is now a
+   real surface, so "no container" still means "on something". */
+.face--open{background:none;border:0;box-shadow:none;border-radius:0;
+  backdrop-filter:none;-webkit-backdrop-filter:none;margin-bottom:var(--s4)}
+.panel{background:none;border:0}
+.panel__h{border-top:0}
+.face>.panel+.panel>.panel__h,
+.grid>.panel+.panel>.panel__h{border-top:1px solid var(--gl-hair)}
+.grid>.panel+.panel{border-left:1px solid var(--gl-hair)}
+.rowsep{background:var(--gl-hair)}
+
+/* STALENESS WITHOUT A FILTER. The old rule put opacity AND filter:saturate on
+   the very elements that now carry backdrop-filter; stacking those forces a
+   second composited pass per panel and, on WebKit, intermittently drops the
+   backdrop entirely. The rim carries it instead — which is also more legible,
+   because it stops dimming the figures the console exists to show. */
+.main[data-stale="1"] .face{opacity:1;filter:none;
+  border-color:color-mix(in srgb,var(--caution) 38%,transparent);
+  box-shadow:var(--gl-shadow),
+             inset 0 1px 0 color-mix(in srgb,var(--caution) 62%,transparent),
+             inset 0 0 0 1px color-mix(in srgb,var(--caution) 18%,transparent),
+             inset 0 -1px 0 var(--gl-bot)}
+
+
+/* ─── 5. SLAB TIER ────────────────────────────────────────────────────────
+   Data never sits on glass. Every flush list — the device table, the tunnel
+   list, the routing table, the log — gets an opaque plate inside the panel,
+   inset from the panel's own padding so it reads as a page inside a folder.
+
+   The rows' horizontal padding is restated to match the inset, so a device
+   name still starts on the same x as the panel heading above it.
+
+   No overflow:hidden. It would make this a scroll container and kill the
+   sticky group heads inside it; the square corner under a 4%-alpha hover is
+   the cheaper price. */
+.panel__b--flush{background:var(--slab);border-radius:var(--gl-r2);
+  margin:0 12px 12px}
+.panel__b--flush>.row,.panel__b--flush>.tbl__group,.panel__b--flush>.det,
+.panel__b--flush>.empty{padding-left:12px;padding-right:12px}
+.row{border-bottom:1px solid var(--slab-rule)}
+.row:hover,.row[aria-expanded="true"]{
+  background:linear-gradient(180deg,var(--gl-hover-a),var(--gl-hover-b))}
+/* The sticky group head slides over the slab, so it needs to be MORE opaque
+   than the slab, not less — a translucent head ghosts the rows passing under
+   it. Rounded at the top only, because it is the first thing on the plate. */
+.tbl__group{background:var(--slab-head);border-top:1px solid var(--slab-rule);
+  border-bottom:1px solid var(--slab-rule);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.tbl__group:first-child{border-top:0;
+  border-radius:var(--gl-r2) var(--gl-r2) 0 0}
+.det{background:var(--slab-2);border-bottom:1px solid var(--slab-rule)}
+.det__wifi{border-left:2px solid var(--sig-line)}
+.log{background:var(--slab);border:1px solid var(--gl-edge);
+  border-radius:var(--gl-r2)}
+.log__l{border-bottom:1px solid var(--slab-rule)}
+.strip{border-top:1px solid var(--gl-hair)}
+.strip--open{border-top:1px solid var(--gl-hair);border-bottom:1px solid var(--gl-hair)}
+.strip>.ro{border-left:1px solid var(--gl-hair)}
+.strip>.ro:first-child{border-left:0}
+.empty{background:none}
+
+
+/* ─── 6. COMPONENT TIERS ──────────────────────────────────────────────────
+   The radius ramp reaches everything, because a 14px panel containing 2px
+   chips is two materials pretending to be one.
+
+   CHIPS GET NO BLUR. The recipe would give them blur(6px); a real device list
+   is sixty rows carrying up to two chips each, which is a hundred and twenty
+   independently composited layers re-sampling their backdrop on every scroll
+   frame. On the phones this console is read on that is the difference between
+   smooth and not. Tint and rim alone read perfectly well on a slab. */
+.chip{border-radius:999px;padding:2px 9px;
+  border:1px solid var(--gl-edge);
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  box-shadow:inset 0 1px 0 var(--gl-rim)}
+.chip--on{color:var(--sig-fg);border-color:var(--sig-line);
+  background:linear-gradient(180deg,var(--sig-dim),var(--sig-dim))}
+/* A FAULT IS NEVER GLASS. It is the one surface in this console allowed to be
+   opaque and loud, because an alarm that has to be read through frost is not
+   an alarm. */
+.chip--bad{color:var(--sig-ink);background:var(--fault);border-color:var(--fault);
+  box-shadow:none;font-weight:600}
+.chip--bad::before{background:rgba(0,0,0,.35)}
+
+.btn{border-radius:var(--gl-r3);
+  border:1px solid var(--gl-edge);
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  box-shadow:inset 0 1px 0 var(--gl-rim)}
+.btn:hover:not(:disabled){border-color:var(--gl-edge);
+  background:linear-gradient(180deg,var(--gl-hover-a),var(--gl-hover-b))}
+.btn--primary,.btn--primary:hover:not(:disabled){
+  background:var(--sig-solid);border-color:var(--sig-solid);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+.btn--ghost{background:none;border-color:transparent;box-shadow:none}
+.btn--ghost:hover:not(:disabled){border-color:var(--gl-edge);
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b))}
+.btn--sm{border-radius:var(--gl-r4)}
+.seg{border-radius:var(--gl-r3);border:1px solid var(--gl-edge);overflow:hidden}
+.seg .btn{border-radius:0;border:0;background:none;box-shadow:none}
+.seg .btn[aria-pressed="true"]{background:var(--sig-dim);color:var(--sig-fg)}
+
+/* INPUTS ARE WELLS, NOT PANELS. Everything else on the page is lit from
+   above and raised; a field you type into should read as cut INTO the
+   surface, so it takes a darker fill and an inset shadow instead of a rim. */
+.input,.select,.ta{border-radius:var(--gl-r3);
+  background:var(--gl-well);border:1px solid var(--gl-edge);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.16)}
+.input:focus,.select:focus,.ta:focus{border-color:var(--sig);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.16),0 0 0 3px var(--sig-dim)}
+.input--inline,.select--inline{border-radius:var(--gl-r4)}
+
+.row__ico{border-radius:var(--gl-r4);border:1px solid var(--gl-edge);
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  box-shadow:inset 0 1px 0 var(--gl-rim)}
+.note{border-radius:var(--gl-r3)}
+.iconbtn{border-radius:var(--gl-r4)}
+.sk{border-radius:var(--gl-r4)}
+/* An unlit meter segment is a groove in the surface, so it takes the hairline
+   rather than the old flat --rule, which was tuned against an opaque panel. */
+.meter i{background:var(--gl-hair)}
+.scale__track{background:var(--gl-hair)}
+
+
+/* ─── 7. CHROME TIER ──────────────────────────────────────────────────────
+   The spine and the mobile bar float OVER the page rather than sitting in it,
+   so they take the heavy blur — nearly three times the panel's. That ratio is
+   what puts them at a different distance from the eye; compress it and the
+   spine flattens into the page. */
+.spine{
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  border-right:1px solid var(--gl-edge);
+  box-shadow:inset -1px 0 0 var(--gl-hair);
+  backdrop-filter:var(--gl-chrome);
+  -webkit-backdrop-filter:var(--gl-chrome);
+}
+.mobilebar,.topline{
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  backdrop-filter:var(--gl-chrome);
+  -webkit-backdrop-filter:var(--gl-chrome);
+}
+.mobilebar{border-top:1px solid var(--gl-edge);
+  box-shadow:inset 0 1px 0 var(--gl-rim)}
+.topline{border-bottom:1px solid var(--gl-edge)}
+.spine__foot{border-top:1px solid var(--gl-hair)}
+.pnode__dot{background:var(--bg)}
+a.pnode:hover{background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  border-radius:var(--gl-r4)}
+a.pnode.is-active{background:linear-gradient(180deg,var(--gl-hover-a),var(--gl-hover-b));
+  border-radius:var(--gl-r4)}
+
+
+/* ─── 8. OVERLAY TIERS ────────────────────────────────────────────────────
+   A menu floats over arbitrary page content and a dialog over a scrim, so
+   neither can let its labels depend on what is behind. Both trade some
+   transparency for a wash — the menu through heavy blur, the dialog and the
+   toast through an opaque backing under the tint. Do not "fix" either back to
+   the plain panel tier. */
+.accent__pop{border-radius:var(--gl-r2);border:1px solid var(--gl-edge);
+  background:color-mix(in srgb,var(--face) 62%,transparent);
+  box-shadow:0 16px 40px rgba(0,0,0,.42),inset 0 1px 0 var(--gl-rim);
+  backdrop-filter:var(--gl-chrome);-webkit-backdrop-filter:var(--gl-chrome)}
+.accent__opt:hover{background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  border-radius:var(--gl-r4)}
+.dlg,.toast{
+  background:
+    linear-gradient(180deg,var(--gl-a),var(--gl-b)),
+    linear-gradient(180deg,var(--face),var(--face));
+  border:1px solid var(--gl-edge);
+  border-radius:var(--gl-r);
+  box-shadow:var(--gl-shadow),
+             inset 0 1px 0 var(--gl-rim),
+             inset 0 0 0 1px var(--gl-hair);
+  backdrop-filter:var(--gl-chrome);
+  -webkit-backdrop-filter:var(--gl-chrome);
+}
+.dlg__h{border-bottom:1px solid var(--gl-hair)}
+.dlg__f{border-top:1px solid var(--gl-hair)}
+.veil{backdrop-filter:blur(6px) saturate(80%);
+  -webkit-backdrop-filter:blur(6px) saturate(80%)}
+
+
+/* ─── 9. WHEN THE MATERIAL CANNOT BE DRAWN ────────────────────────────────
+   Two branches, and both must look deliberate rather than stripped.
+
+   Without backdrop-filter a .062-alpha film over the ground is very nearly no
+   container at all, so every glass surface falls back to the opaque panel
+   fill it had before this block existed — the console simply stops being
+   glass and goes back to being correct.
+
+   prefers-reduced-transparency is an accessibility setting, not a capability
+   one: somebody has asked for this. Same answer, plus the ground's grid goes,
+   because a grid nobody can see through a panel is just noise. */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .face,.spine,.mobilebar,.topline,.dlg,.toast,.accent__pop,.tbl__group{
+    background:var(--face)}
+  .panel__b--flush{background:var(--face-2)}
+}
+@media (prefers-reduced-transparency:reduce){
+  body::before{display:none}
+  .face,.spine,.mobilebar,.topline,.dlg,.toast,.accent__pop,.tbl__group{
+    background:var(--face);
+    backdrop-filter:none;-webkit-backdrop-filter:none}
+  .panel__b--flush{background:var(--face-2)}
+  .chip,.btn,.row__ico{background:var(--face-2)}
+  .veil{backdrop-filter:none;-webkit-backdrop-filter:none}
+}
+
+
+/* ─── 10. NARROW ──────────────────────────────────────────────────────────
+   On a phone the panel is nearly the full width of the screen, so its own
+   left and right rims sit at the very edge of the viewport where they read as
+   a stray line rather than as an edge. The panel keeps its top rim and loses
+   its radius and side borders — and the slab loses its inset with them,
+   because a 12px gutter inside a 16px gutter is just a thinner column. */
+@media (max-width:640px){
+  .face{border-left:0;border-right:0;border-radius:0;
+    box-shadow:inset 0 1px 0 var(--gl-rim),inset 0 -1px 0 var(--gl-bot);
+    margin-bottom:var(--s3)}
+  .panel__b--flush{margin:0;border-radius:0;background:var(--slab)}
+  .panel__b--flush>.row,.panel__b--flush>.tbl__group,.panel__b--flush>.det,
+  .panel__b--flush>.empty{padding-left:var(--s4);padding-right:var(--s4)}
+  .tbl__group:first-child{border-radius:0}
+}
+
+
+/* ─── 11. GRAPHICS ON GLASS ───────────────────────────────────────────────
+   Every quantity below was tuned against an opaque --face-3 panel and has to
+   be restated for a translucent host. Three specific faults, all visible in
+   the first render of this layer:
+
+   THE TOPOLOGY NODES went red. Their fill is an opaque panel colour and the
+   live ones carry --sig-dim, so over a maroon ground every reachable node
+   read as an alarm. They take the slab instead — a node is a plate, and only
+   its RULE says whether the path is live.
+
+   THE TRACES went red for the same reason, on a page whose own words said
+   CLEAN, STEADY and 4.2 ms. A reading is drawn in ink; the wash under it
+   keeps the tie to the accent, and the only accent-coloured line left on a
+   healthy page is one you are meant to look at.
+
+   THE METERS were a 10px ladder of blocks — the loudest object on the page
+   and the last thing on it that looked like a stock dashboard. Six pixels,
+   and the unlit segments become grooves in the glass rather than grey bricks. */
+.topo .nodebox{fill:var(--slab);stroke:var(--gl-edge)}
+.topo .nodebox.on{fill:var(--slab);stroke:var(--sig)}
+.topo .nodebox.bad{fill:var(--slab);stroke:var(--fault)}
+.chart .trace{stroke:var(--ink)}
+.chart .axis{stroke:var(--gl-hair)}
+.meter{height:6px;gap:2px}
+.meter i{border-radius:1px}
+.meter--sm{height:5px;gap:1.5px}
