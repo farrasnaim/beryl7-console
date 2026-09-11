@@ -1,3 +1,8 @@
+# Rendered screenshots from shots.ps1. Build output, and some of them show the
+# live network: device names, addresses, and whatever the log panel happened to
+# be displaying. Never committed.
+.shots/
+
 Thumbs.db
 .DS_Store
 *.prenav
