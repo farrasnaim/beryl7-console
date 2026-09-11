@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=9bc20acb">
+<link rel="stylesheet" href="/os.css?v=86ffbc0c">
 </head>
 <body>
 <div class="shell">
@@ -147,7 +147,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=68b09b87"></script>
+<script src="/os.js?v=701404ef"></script>
 <script>
 (function () {
 'use strict';
@@ -963,15 +963,17 @@ function paintSys(sys) {
     function bar(label, valTxt, frac, tone, meta) {
         var r = box._bars && box._bars[label];
         if (!r) {
-            r = el('div'); r.style.marginBottom = '14px';
-            var top = el('div'); top.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px';
-            top.appendChild(el('span', 'ro__k', label));
-            r._val = el('span', 'n'); r._val.style.fontSize = '12px';
-            top.appendChild(r._val);
-            r.appendChild(top);
+            /* One line: name, extent, figure — the figure landing in the same
+               column as every other figure on the page. The meter is the run
+               between the two, which is why it is no longer a block under a
+               label with its own line to itself. */
+            r = el('div', 'led');
+            r.appendChild(el('span', 'ro__k', label));
             r._meter = OS.meter(0, null, true);
             r.appendChild(r._meter);
-            r._meta = el('div', 'ro__m'); r._meta.style.marginTop = '5px';
+            r._val = el('span', 'n led__v');
+            r.appendChild(r._val);
+            r._meta = el('div', 'ro__m led__m');
             r.appendChild(r._meta);
             box.appendChild(r);
             (box._bars = box._bars || {})[label] = r;
@@ -1023,14 +1025,15 @@ function paintSys(sys) {
     function row(key, label, valTxt, meta) {
         var r = box._rows && box._rows[key];
         if (!r) {
-            r = el('div'); r.style.marginTop = '10px';
-            var top = el('div');
-            top.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:8px';
-            top.appendChild(el('span', 'ro__k', label));
-            r._val = el('span', 'n'); r._val.style.fontSize = '12px';
-            top.appendChild(r._val);
-            r.appendChild(top);
-            r._meta = el('div', 'ro__m'); r._meta.style.marginTop = '4px';
+            /* Same construction as a bar, with the run left fully dotted:
+               a reading with an extent and a reading without one should not
+               look like two different kinds of object. */
+            r = el('div', 'led');
+            r.appendChild(el('span', 'ro__k', label));
+            r.appendChild(el('i'));
+            r._val = el('span', 'n led__v');
+            r.appendChild(r._val);
+            r._meta = el('div', 'ro__m led__m');
             r.appendChild(r._meta);
             box.appendChild(r);
             (box._rows = box._rows || {})[key] = r;
@@ -1202,10 +1205,7 @@ function groupHead(key) {
     if (m.note) g.appendChild(el('span', 'row__sub', m.note));
     g._n = el('span', 'tbl__gn');
     g.appendChild(g._n);
-    g._caret = el('div'); g._caret.style.cssText =
-        'width:5px;height:5px;flex:none;margin-left:2px;' +
-        'border-right:1.5px solid var(--ink-4);border-bottom:1.5px solid var(--ink-4);' +
-        'transition:transform 150ms var(--ease)';
+    g._caret = el('div', 're-caret');
     g.appendChild(g._caret);
     function toggle() {
         if (!g._ap) return;
@@ -1241,7 +1241,10 @@ function syncGroupHead(g, key, ap, n) {
    motion of their own (chips, the state word) are still replaced. */
 function rowFor(mac) {
     var r = el('div', 'row row--entity');
-    r.style.gridTemplateColumns = 'minmax(0,1fr) auto auto auto';
+    /* Three tracks, not four: the caret left the grid for the page margin
+       (os.css, THE GUTTER), so the last track is the figure column itself and
+       every state word on the page ends on the accent rule. */
+    r.style.gridTemplateColumns = 'minmax(0,1fr) auto minmax(var(--num-col),max-content)';
     r.setAttribute('role', 'button');
     r.setAttribute('tabindex', '0');
 
@@ -1276,13 +1279,11 @@ function rowFor(mac) {
     r.appendChild(mid);
 
     /* the state word: the single uppercase element in the row */
-    r._word = el('div', 're-state'); r._word.style.cssText = 'text-align:right;min-width:82px';
+    r._word = el('div', 're-state');
     r.appendChild(r._word);
 
     /* expand affordance */
-    r._caret = el('div', 're-caret'); r._caret.style.cssText =
-        'width:5px;height:5px;border-right:1.5px solid var(--ink-4);' +
-        'border-bottom:1.5px solid var(--ink-4);transition:transform 150ms var(--ease)';
+    r._caret = el('div', 're-caret');
     r.appendChild(r._caret);
 
     function toggle() {

@@ -763,7 +763,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = 'df3f9ccdec';
+var CONSOLE_VERSION = '30880f988f';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1003,9 +1003,10 @@ function settingsBtn(activeHref) {
     a.appendChild(icon('sliders'));
     return a;
 }
-/* Accent picker. `key` is the data-accent value; green is the default and is
-   represented by the ATTRIBUTE BEING ABSENT, so it stays the zero-config case.
-   Labels are the plain colour names, not the internal token names. */
+/* Accent picker. `key` is the data-accent value. Green is the palette in the
+   base :root block and is represented by the ATTRIBUTE BEING ABSENT; maroon is
+   what an unconfigured browser is GIVEN (see the boot block at the foot of this
+   file). Labels are the plain colour names, not the internal token names. */
 var ACCENTS = [
     { key: 'maroon', label: 'Red',   sw: 'red' },
     { key: '',       label: 'Green', sw: 'green' },
@@ -1588,10 +1589,15 @@ global.OS = {
     try {
         var t = localStorage.getItem('beryl-theme');
         if (t) document.documentElement.setAttribute('data-theme', t);
-        var a = localStorage.getItem('beryl-accent');
+        /* Maroon is the console's colour, so it is what an unconfigured
+           browser gets. The ATTRIBUTE-ABSENT case is still the green base
+           palette in os.css — "Green" in the picker writes 'mint' and clears
+           the attribute — but absent-from-storage now resolves to maroon
+           rather than falling through to it. */
+        var a = localStorage.getItem('beryl-accent') || 'maroon';
         /* validate against the known set: a stale or hand-edited value must
            not leave the page stuck on an attribute no CSS defines */
-        if (a && a !== 'mint' && ['maroon', 'navy', 'grey'].indexOf(a) >= 0) {
+        if (a !== 'mint' && ['maroon', 'navy', 'grey'].indexOf(a) >= 0) {
             document.documentElement.setAttribute('data-accent', a);
         }
     } catch (e) {}
