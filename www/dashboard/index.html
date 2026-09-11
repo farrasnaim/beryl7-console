@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=f8e50663">
+<link rel="stylesheet" href="/os.css?v=9bc20acb">
 </head>
 <body>
 <div class="shell">
@@ -50,9 +50,16 @@
       </section>
     </div>
 
-    <!-- Diagnostics: quieter, contained, lower on the page. -->
+    <!-- Diagnostics: quieter, contained, lower on the page.
+
+         Throughput and System were side by side in a 2:1 grid. They are now one
+         under the other, at full width, because the order down this page is the
+         order the questions get asked: what is here, how fast is it moving, is
+         the box itself healthy, who spent the connection today. A two-column
+         row made System a footnote to Throughput when it answers a different
+         question entirely — and on a phone the grid collapsed to this order
+         anyway, so the wide layout was the odd one out. -->
     <div class="face">
-      <div class="grid g-2-1">
         <section class="panel">
           <div class="panel__h">
             <span class="panel__t">Throughput</span>
@@ -114,12 +121,14 @@
             <div class="cap"><span id="lossL"></span><span id="lossM"></span><span id="lossR"></span></div>
           </div>
         </section>
+    </div>
+
+    <div class="face">
         <section class="panel">
           <div class="panel__h"><span class="panel__t">System</span>
             <div class="panel__aside" id="sysChip"></div></div>
           <div class="panel__b" id="sys"></div>
         </section>
-      </div>
     </div>
 
     <!-- Maintenance actions moved to Settings (2026-08-09): configuration
@@ -138,7 +147,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=a185fd77"></script>
+<script src="/os.js?v=68b09b87"></script>
 <script>
 (function () {
 'use strict';

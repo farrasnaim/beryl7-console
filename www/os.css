@@ -881,3 +881,167 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
     transition-duration:.001ms!important}
 }
 @media print{.spine,.mobilebar,.toasts{display:none}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GLASS — the material layer.                               added 2026-09-12
+
+   Appended rather than woven in, deliberately. Every rule here overrides an
+   earlier one by document order alone; nothing above was edited. Delete this
+   block and the console is exactly what it was, which is the only honest way
+   to ship a change this wide to a stylesheet five pages share.
+
+   WHAT GLASS NEEDS. A frosted surface is meaningless over a flat fill — there
+   is nothing behind it to bend. So the page gains a ground: two soft washes of
+   the CURRENT ACCENT, fixed to the viewport, that the panels sit over. It costs
+   no markup, no script, and no request, and it follows the accent picker for
+   free because it is drawn from --sig-dim.
+
+   WHY NOT A DISPLACEMENT MAP. The liquid-glass recipe's refraction layer is
+   `backdrop-filter: url(#svg-filter)`, and that renders in Chromium only —
+   Safari parses the declaration and paints nothing, while @supports reports
+   success. Half this console is read on an iPhone. So the design is FINISHED at
+   the blur-and-rim level, which works everywhere; refraction would be a bonus
+   for one browser, never load-bearing.
+
+   CONTRAST IS THE RISK, and it is why the ground is a calm wash rather than the
+   network map it could have been. This console's job is small numbers — dBm,
+   handshake ages, MB. A busy backdrop behind a translucent panel is how
+   glassmorphism turns an instrument into a poster.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root{
+  /* Tint is near-transparent: the frost comes from the blur, not from paint.
+     Two stops, lighter at the top, so the surface reads as a lit plane rather
+     than a flat wash. */
+  --gl-a:rgba(255,255,255,.055);
+  --gl-b:rgba(190,185,178,.035);
+  /* The rim is what sells it. A bright hairline along the top edge, a fainter
+     one all round, and a whisper at the bottom: light caught on a bevel. */
+  --gl-rim:rgba(255,255,255,.40);
+  --gl-hair:rgba(255,255,255,.075);
+  --gl-bot:rgba(255,255,255,.04);
+  --gl-edge:rgba(255,255,255,.085);
+  --gl-shadow:0 16px 44px rgba(0,0,0,.45);
+  --gl-blur:blur(11px) saturate(126%);
+  --gl-chrome:blur(26px) saturate(142%);
+  /* 12px, not the console's 4px and not Apple's 20px. A rim needs curvature to
+     catch light at all, but this is an instrument and 20px reads as a phone
+     app. The corner marks stay: they are this console's signature and a
+     redesign that quietly deletes them is a redesign that flattens it. */
+  --gl-r:12px;
+  --gl-wash:rgba(201,87,74,.07); --gl-grid:rgba(255,255,255,.032);
+  --gl-c:rgba(255,255,255,.015);
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  /* On a warm cream page the panel is LIGHTER than its ground, so the tint does
+     real work here and the edge must be a dark hairline — a white border simply
+     vanishes into the background. */
+  --gl-a:rgba(255,255,255,.62);
+  --gl-b:rgba(255,255,255,.40);
+  --gl-rim:rgba(255,255,255,.95);
+  --gl-hair:rgba(255,255,255,.55);
+  --gl-bot:rgba(24,22,18,.035);
+  --gl-edge:rgba(24,22,18,.12);
+  --gl-shadow:0 14px 38px rgba(48,38,30,.10);
+  --gl-wash:rgba(160,58,50,.055); --gl-grid:rgba(24,22,18,.040);
+  --gl-c:rgba(255,255,255,.24);
+}}
+:root[data-theme="dark"]{
+  --gl-a:rgba(255,255,255,.055); --gl-b:rgba(190,185,178,.035);
+  --gl-rim:rgba(255,255,255,.40); --gl-hair:rgba(255,255,255,.075);
+  --gl-bot:rgba(255,255,255,.04); --gl-edge:rgba(255,255,255,.085);
+  --gl-shadow:0 16px 44px rgba(0,0,0,.45);
+  --gl-wash:rgba(201,87,74,.07); --gl-grid:rgba(255,255,255,.032);
+  --gl-c:rgba(255,255,255,.015);
+}
+:root[data-theme="light"]{
+  --gl-a:rgba(255,255,255,.62); --gl-b:rgba(255,255,255,.40);
+  --gl-rim:rgba(255,255,255,.95); --gl-hair:rgba(255,255,255,.55);
+  --gl-bot:rgba(24,22,18,.035); --gl-edge:rgba(24,22,18,.12);
+  --gl-shadow:0 14px 38px rgba(48,38,30,.10);
+  --gl-wash:rgba(160,58,50,.055); --gl-grid:rgba(24,22,18,.040);
+  --gl-c:rgba(255,255,255,.24);
+}
+
+/* ---- the ground -------------------------------------------------------- */
+/* Fixed, so it does not travel with the scroll: the panels move across a still
+   field, which is what makes them read as sitting ON something. Drawn on a
+   pseudo-element rather than the body background so `background:var(--bg)`
+   above still paints the base colour underneath. */
+body::before{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  /* THE GRID IS THE POINT, not the wash. A frosted panel over a flat colour is
+     indistinguishable from a slightly lighter rectangle — there is nothing for
+     the blur to act ON, and the first build of this looked exactly like the old
+     console wearing rounded corners. A fine rule grid gives the blur edges to
+     soften, so a panel visibly BLURS what is behind it instead of merely
+     tinting. It is also the right vernacular: this is an instrument, and graph
+     paper is what instruments are read against.
+
+     The accent washes stayed but came down hard. At --sig-dim they read as a
+     colour cast over the whole page rather than as light falling on it. */
+  background:
+    radial-gradient(70% 46% at 16% 2%,var(--gl-wash),transparent 60%),
+    radial-gradient(58% 46% at 88% 96%,var(--gl-wash),transparent 62%),
+    repeating-linear-gradient(0deg,var(--gl-grid) 0 1px,transparent 1px 56px),
+    repeating-linear-gradient(90deg,var(--gl-grid) 0 1px,transparent 1px 56px);
+}
+.shell{position:relative;z-index:1}
+
+/* ---- L2 · panels ------------------------------------------------------- */
+.face{
+  /* DIRECTIONAL, not vertical. A rim of uniform brightness is read as a border;
+     what makes a surface look like material is a highlight that changes across
+     it. The tint runs on the same diagonal as the wash in the ground, so every
+     panel on the page appears lit from the same corner — the cheapest honest
+     way to fake a light source, and the one thing that separates glass from a
+     rounded rectangle. */
+  background:linear-gradient(118deg,var(--gl-a),var(--gl-b) 62%,var(--gl-c));
+  border:1px solid var(--gl-edge);
+  border-radius:var(--gl-r);
+  box-shadow:var(--gl-shadow),
+             inset 0 1px 0 var(--gl-rim),
+             inset 0 0 0 1px var(--gl-hair),
+             inset 0 -1px 0 var(--gl-bot);
+  backdrop-filter:var(--gl-blur);
+  -webkit-backdrop-filter:var(--gl-blur);
+}
+/* The corner marks sat ON the old 1px border. With a rim they need to step out
+   of it, or they read as a scratch rather than a bracket. */
+.face::before{top:-4px;left:-4px}
+.face::after{bottom:-4px;right:-4px}
+/* An open section has no container, so it must not grow one. */
+.face--open{background:none;border:0;box-shadow:none;backdrop-filter:none;
+  -webkit-backdrop-filter:none;border-radius:0}
+
+/* ---- L1 · chrome: heavier blur, because it floats over content ---------- */
+.spine{
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  border-right:1px solid var(--gl-edge);
+  backdrop-filter:var(--gl-chrome);
+  -webkit-backdrop-filter:var(--gl-chrome);
+}
+.mobilebar{
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  border-top:1px solid var(--gl-edge);
+  box-shadow:inset 0 1px 0 var(--gl-rim);
+  backdrop-filter:var(--gl-chrome);
+  -webkit-backdrop-filter:var(--gl-chrome);
+}
+
+/* ---- L4 · dialogs and toasts: heaviest, over arbitrary content ---------- */
+.dlg,.toast{
+  background:linear-gradient(180deg,var(--gl-a),var(--gl-b));
+  border:1px solid var(--gl-edge);
+  border-radius:var(--gl-r);
+  box-shadow:var(--gl-shadow),inset 0 1px 0 var(--gl-rim),
+             inset 0 0 0 1px var(--gl-hair);
+  backdrop-filter:var(--gl-chrome);
+  -webkit-backdrop-filter:var(--gl-chrome);
+}
+/* A dialog's labels cannot depend on whatever happens to be behind it, so
+   unlike a panel it keeps the solid surface and wears the tint on top of it —
+   two background layers, glass first, face underneath. */
+.dlg{background:
+  linear-gradient(180deg,var(--gl-a),var(--gl-b)),
+  linear-gradient(180deg,var(--face),var(--face))}
