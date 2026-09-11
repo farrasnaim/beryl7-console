@@ -59,101 +59,106 @@ svg{display:block}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 [hidden]{display:none!important}
 
-/* ─── 2. PALETTE & THE LIVING MESH ─────────────────────────────────────────
-   Dark is the default. Deep, slightly violet ground with vivid off-screen
-   colour fields; light is a warm near-white with pastel fields. The accent is
-   a single warm coral-red, used only where it means something. Semantic
-   colours are separate from the accent and never inherit it. */
+/* ─── 2. PALETTE & THE WARM GROUND ─────────────────────────────────────────
+   WARM LIGHT is the intent (the SunCore / Kraftbase reference): a cream ground,
+   a single warm-amber accent, near-white frosted cards that float on soft
+   elevation shadows. Airy and minimal, not dark and neon. Dark theme keeps the
+   same warmth — a warm charcoal, never a blue-black. */
 :root{
-  --bg:#07070d;
-  --ink:#f4f3f7;
-  --ink-2:rgba(244,243,247,.66);   /* secondary = primary at reduced opacity */
-  --ink-3:rgba(244,243,247,.42);
-  --accent:#ff6b57;
-  --accent-ink:#fff;
-  --ok:#4fd39a; --warn:#ffcf5c; --bad:#ff6b6b; --idle:rgba(244,243,247,.34);
+  --bg:#f1ebe1;
+  --ink:#2a241f;
+  --ink-2:rgba(42,36,31,.60);
+  --ink-3:rgba(42,36,31,.40);
+  --accent:#df7c2b; --accent-2:#eba24a; --accent-ink:#fff;
+  --ok:#3f9d6c; --warn:#dd9a34; --bad:#d5573a; --idle:rgba(42,36,31,.28);
 
-  /* mesh fields */
-  --m1:rgba(255,107,87,.42);       /* accent, top-left */
-  --m2:rgba(120,86,255,.40);       /* violet, right */
-  --m3:rgba(60,196,214,.30);       /* cyan, bottom */
-  --m4:rgba(255,150,90,.26);       /* amber, top-right */
-  --m-vig:rgba(0,0,0,.42);
+  /* soft warm wash — peach, amber, a breath of rose. Gentle, not saturated. */
+  --m1:rgba(240,170,110,.50);      /* peach, top-right */
+  --m2:rgba(232,140,70,.30);       /* amber, right */
+  --m3:rgba(246,214,180,.55);      /* cream light, bottom-left */
+  --m4:rgba(226,150,120,.22);      /* warm rose, top-left */
+  --m-vig:rgba(150,110,70,.05);
 
-  /* glass */
-  --glass:rgba(38,36,52,.42);
-  --glass-2:rgba(46,44,60,.55);    /* nav / overlays: denser */
-  --glass-hi:rgba(255,255,255,.10);
-  --rim:rgba(255,255,255,.44);     /* top+left specular */
-  --rim-hair:rgba(255,255,255,.10);
-  --rim-lo:rgba(0,0,0,.30);        /* bottom lens shadow line */
-  --sep:rgba(255,255,255,.085);    /* list hairline */
-  --fieldwell:rgba(0,0,0,.26);
+  /* the card material: near-white, softly frosted, lifted by a warm shadow */
+  --glass:rgba(255,255,255,.66);
+  --glass-2:rgba(255,255,255,.78);
+  --glass-hi:rgba(255,255,255,.62);
+  --rim:rgba(255,255,255,.9);
+  --rim-hair:rgba(120,90,55,.10);
+  --rim-lo:rgba(120,90,55,.05);
+  --sep:rgba(60,44,28,.09);
+  --fieldwell:rgba(120,90,55,.06);
+  --shadow:0 12px 30px -12px rgba(120,80,40,.22),0 3px 10px -4px rgba(120,80,40,.12);
+  --shadow-sm:0 6px 16px -8px rgba(120,80,40,.20);
+  --blur:blur(20px) saturate(135%);
+  --blur-lg:blur(34px) saturate(150%);
 
-  /* COMPATIBILITY ALIASES. The five page scripts and their inline styles still
-     name the old token set. Rather than hunt every inline style, map the old
-     names onto this system here, once. They reference the live palette vars, so
-     they follow the theme and the accent automatically. */
-  --ink-4:var(--ink-3);
-  --line:var(--sep); --line-2:var(--sep); --rule:var(--sep);
+  /* type/space/radii (unchanged) */
+  --t-hero:34px; --t-title:22px; --t-card:17px; --t-body:15px; --t-sub:13.5px; --t-cap:12px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:44px;
+  --r-card:24px; --r-inset:16px; --r-tile:13px; --r-pill:999px;
+  --sys:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --ease:cubic-bezier(.32,.72,0,1); --spring:cubic-bezier(.5,1.4,.4,1);
+
+  /* compatibility aliases for the old token names still used inline */
+  --ink-4:var(--ink-3); --line:var(--sep); --line-2:var(--sep); --rule:var(--sep);
   --r:var(--r-tile); --t:.2s;
   --sig:var(--accent); --sig-fg:var(--accent);
   --sig-line:color-mix(in srgb,var(--accent) 42%,transparent);
-  --sig-dim:color-mix(in srgb,var(--accent) 16%,transparent);
+  --sig-dim:color-mix(in srgb,var(--accent) 15%,transparent);
   --ac:var(--accent); --ac-fg:var(--accent);
   --ac-line:color-mix(in srgb,var(--accent) 42%,transparent);
-  --ac-dim:color-mix(in srgb,var(--accent) 16%,transparent);
+  --ac-dim:color-mix(in srgb,var(--accent) 15%,transparent);
   --bad-fg:var(--bad); --fault-fg:var(--bad); --caution-fg:var(--warn);
 }
-@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
-  --bg:#eef0f6;
-  --ink:#14131c;
-  --ink-2:rgba(20,19,28,.62);
-  --ink-3:rgba(20,19,28,.40);
-  --accent:#ec5a44; --accent-ink:#fff;
-  --ok:#1e9e6a; --warn:#c9902e; --bad:#d9483f; --idle:rgba(20,19,28,.30);
-  --m1:rgba(255,120,96,.40); --m2:rgba(138,110,255,.34);
-  --m3:rgba(70,200,220,.30); --m4:rgba(255,168,108,.36);
-  --m-vig:rgba(120,110,140,.10);
-  --glass:rgba(255,255,255,.52);
-  --glass-2:rgba(255,255,255,.62);
-  --glass-hi:rgba(255,255,255,.7);
-  --rim:rgba(255,255,255,.9);
-  --rim-hair:rgba(255,255,255,.6);
-  --rim-lo:rgba(60,50,70,.10);
-  --sep:rgba(20,19,28,.08);
-  --fieldwell:rgba(255,255,255,.6);
-}}
-:root[data-theme="dark"]{color-scheme:dark}
-:root[data-theme="light"]{
-  color-scheme:light;
-  --bg:#eef0f6; --ink:#14131c; --ink-2:rgba(20,19,28,.62); --ink-3:rgba(20,19,28,.40);
-  --accent:#ec5a44; --accent-ink:#fff;
-  --ok:#1e9e6a; --warn:#c9902e; --bad:#d9483f; --idle:rgba(20,19,28,.30);
-  --m1:rgba(255,120,96,.40); --m2:rgba(138,110,255,.34);
-  --m3:rgba(70,200,220,.30); --m4:rgba(255,168,108,.36); --m-vig:rgba(120,110,140,.10);
-  --glass:rgba(255,255,255,.52); --glass-2:rgba(255,255,255,.62); --glass-hi:rgba(255,255,255,.7);
-  --rim:rgba(255,255,255,.9); --rim-hair:rgba(255,255,255,.6); --rim-lo:rgba(60,50,70,.10);
-  --sep:rgba(20,19,28,.08); --fieldwell:rgba(255,255,255,.6);
-}
 
-/* the mesh — fixed, so panes bend a stable field as the page scrolls. Two
-   layers: soft colour blobs, and a slow drift so it reads as alive not static.
-   This is the thing glass is glass OVER. */
-body::before{content:"";position:fixed;inset:-25%;z-index:-2;pointer-events:none;
+/* DARK — warm charcoal, same amber. Chosen only by explicit toggle or an OS set
+   to dark; the default face of this console is the warm light one above. */
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#171310;
+  --ink:#f3ede4; --ink-2:rgba(243,237,228,.64); --ink-3:rgba(243,237,228,.42);
+  --accent:#ef9243; --accent-2:#f6b25f; --accent-ink:#241606;
+  --ok:#54c98d; --warn:#e6b45a; --bad:#e77a5f; --idle:rgba(243,237,228,.30);
+  --m1:rgba(224,124,43,.34); --m2:rgba(200,110,50,.24);
+  --m3:rgba(120,80,45,.30); --m4:rgba(180,90,70,.20); --m-vig:rgba(0,0,0,.34);
+  --glass:rgba(46,39,32,.52); --glass-2:rgba(54,46,38,.62); --glass-hi:rgba(255,255,255,.07);
+  --rim:rgba(255,255,255,.34); --rim-hair:rgba(255,255,255,.07); --rim-lo:rgba(0,0,0,.28);
+  --sep:rgba(255,255,255,.075); --fieldwell:rgba(0,0,0,.24);
+  --shadow:0 16px 36px -14px rgba(0,0,0,.6),0 4px 12px -6px rgba(0,0,0,.4);
+  --shadow-sm:0 8px 20px -10px rgba(0,0,0,.5);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --bg:#171310;
+  --ink:#f3ede4; --ink-2:rgba(243,237,228,.64); --ink-3:rgba(243,237,228,.42);
+  --accent:#ef9243; --accent-2:#f6b25f; --accent-ink:#241606;
+  --ok:#54c98d; --warn:#e6b45a; --bad:#e77a5f; --idle:rgba(243,237,228,.30);
+  --m1:rgba(224,124,43,.34); --m2:rgba(200,110,50,.24);
+  --m3:rgba(120,80,45,.30); --m4:rgba(180,90,70,.20); --m-vig:rgba(0,0,0,.34);
+  --glass:rgba(46,39,32,.52); --glass-2:rgba(54,46,38,.62); --glass-hi:rgba(255,255,255,.07);
+  --rim:rgba(255,255,255,.34); --rim-hair:rgba(255,255,255,.07); --rim-lo:rgba(0,0,0,.28);
+  --sep:rgba(255,255,255,.075); --fieldwell:rgba(0,0,0,.24);
+  --shadow:0 16px 36px -14px rgba(0,0,0,.6),0 4px 12px -6px rgba(0,0,0,.4);
+  --shadow-sm:0 8px 20px -10px rgba(0,0,0,.5);
+}}
+:root[data-theme="light"]{color-scheme:light}
+
+/* the ground — a soft warm wash, barely drifting. This is what the frosted
+   cards pick up; it is calm on purpose, the opposite of a neon mesh. */
+body::before{content:"";position:fixed;inset:-15%;z-index:-2;pointer-events:none;
   background:
-    radial-gradient(38% 44% at 18% 12%,var(--m1),transparent 60%),
-    radial-gradient(42% 40% at 88% 26%,var(--m2),transparent 62%),
-    radial-gradient(46% 46% at 30% 92%,var(--m3),transparent 60%),
-    radial-gradient(34% 34% at 78% 84%,var(--m4),transparent 60%);
+    radial-gradient(46% 50% at 88% 6%,var(--m1),transparent 62%),
+    radial-gradient(40% 44% at 100% 40%,var(--m2),transparent 64%),
+    radial-gradient(56% 54% at 6% 100%,var(--m3),transparent 64%),
+    radial-gradient(38% 38% at 4% 4%,var(--m4),transparent 62%);
   background-color:var(--bg);
-  filter:saturate(1.15);
-  animation:drift 34s var(--ease) infinite alternate}
+  animation:drift 40s var(--ease) infinite alternate}
 body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-  background:radial-gradient(120% 90% at 50% 40%,transparent 55%,var(--m-vig) 100%)}
-@keyframes drift{
-  0%{transform:translate3d(0,0,0) scale(1)}
-  100%{transform:translate3d(-3%,-2%,0) scale(1.08)}}
+  background:radial-gradient(130% 100% at 50% 30%,transparent 62%,var(--m-vig) 100%)}
+@keyframes drift{0%{transform:translate3d(0,0,0) scale(1)}
+  100%{transform:translate3d(-2%,-1.5%,0) scale(1.05)}}
 @media (prefers-reduced-motion:reduce){body::before{animation:none}}
 
 /* ─── 3. SHELL / LAYOUT ────────────────────────────────────────────────────
@@ -180,13 +185,15 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
    solid card. */
 .face,.dlg,.accent__pop{
   position:relative;
-  background:linear-gradient(158deg,var(--glass-hi),transparent 46%),var(--glass);
+  background:linear-gradient(160deg,var(--glass-hi),transparent 55%),var(--glass);
   border-radius:var(--r-card);
-  backdrop-filter:blur(30px) saturate(180%);
-  -webkit-backdrop-filter:blur(30px) saturate(180%);
+  backdrop-filter:var(--blur);
+  -webkit-backdrop-filter:var(--blur);
+  /* soft warm elevation (the SunCore look lifts its cards) PLUS a fine lens
+     edge — the shadow gives depth, the inset lines give the frosted boundary */
   box-shadow:
+    var(--shadow),
     inset 0 1px 0 var(--rim),
-    inset 1px 0 0 var(--rim-hair),
     inset 0 0 0 .5px var(--rim-hair),
     inset 0 -1px 0 var(--rim-lo);
 }
@@ -347,9 +354,9 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .mobilebar{position:fixed;left:50%;transform:translateX(-50%);
   bottom:calc(env(safe-area-inset-bottom) + 12px);z-index:50;
   display:flex;gap:2px;padding:6px;border-radius:var(--r-pill);
-  background:var(--glass-2);backdrop-filter:blur(40px) saturate(200%);
-  -webkit-backdrop-filter:blur(40px) saturate(200%);
-  box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair),inset 0 -1px 0 var(--rim-lo)}
+  background:var(--glass-2);backdrop-filter:var(--blur-lg);
+  -webkit-backdrop-filter:var(--blur-lg);
+  box-shadow:var(--shadow),inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair)}
 .mtab{display:flex;flex-direction:column;align-items:center;gap:3px;
   padding:8px 14px;border-radius:var(--r-pill);color:var(--ink-3);
   transition:color .2s var(--ease),background .2s var(--ease)}
@@ -379,15 +386,15 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
    Glass pills and wells. Press states scale and brighten; nothing bounces. */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;
   padding:10px 18px;border:0;border-radius:var(--r-pill);cursor:pointer;font-weight:600;
-  font-size:var(--t-sub);color:var(--ink);background:var(--glass-hi);
-  box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair);
-  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  font-size:var(--t-sub);color:var(--ink);background:var(--glass);
+  box-shadow:var(--shadow-sm),inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair);
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
   transition:transform .12s var(--ease),background .2s var(--ease)}
 .btn:active:not(:disabled){transform:scale(.96)}
 .btn:disabled{opacity:.4;cursor:default}
 .btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9}
-.btn--primary{background:linear-gradient(160deg,color-mix(in srgb,#fff 18%,var(--accent)),var(--accent));
-  color:var(--accent-ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.4)}
+.btn--primary{background:linear-gradient(160deg,var(--accent-2),var(--accent));
+  color:var(--accent-ink);box-shadow:var(--shadow-sm),inset 0 1px 0 rgba(255,255,255,.35)}
 .btn--ghost{background:none;box-shadow:none;color:var(--ink-2)}
 .btn--danger{color:var(--bad)}
 .btn--sm{padding:7px 13px;font-size:var(--t-cap)}
@@ -457,9 +464,9 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   bottom:calc(env(safe-area-inset-bottom) + 84px);display:flex;flex-direction:column;gap:var(--s2);
   width:min(420px,calc(100vw - 32px));pointer-events:none}
 .toast{display:flex;gap:11px;align-items:center;padding:13px 16px;border-radius:var(--r-inset);
-  background:var(--glass-2);backdrop-filter:blur(30px) saturate(180%);
-  -webkit-backdrop-filter:blur(30px) saturate(180%);pointer-events:auto;
-  box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair);
+  background:var(--glass-2);backdrop-filter:var(--blur-lg);
+  -webkit-backdrop-filter:var(--blur-lg);pointer-events:auto;
+  box-shadow:var(--shadow),inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair);
   font-size:var(--t-sub);animation:rise .3s var(--spring) both}
 .toast svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9}
 .toast--ok svg{color:var(--ok)}.toast--bad svg{color:var(--bad)}.toast--warn svg{color:var(--warn)}
@@ -480,8 +487,9 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .topo{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) var(--s3)}
 .topo__row{display:flex;align-items:center;gap:var(--s3)}
 .topo__node{display:flex;align-items:center;gap:var(--s3);flex:1;min-width:0;
-  padding:12px 14px;border-radius:var(--r-inset);
-  background:var(--glass-hi);box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair)}
+  padding:13px 15px;border-radius:var(--r-inset);background:var(--glass);
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  box-shadow:var(--shadow-sm),inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair)}
 .topo__node--live{box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 1px color-mix(in srgb,var(--ok) 40%,transparent)}
 .topo__node--bad{box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 1px color-mix(in srgb,var(--bad) 45%,transparent)}
 .topo__ico{width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:10px;
@@ -536,8 +544,8 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   .spine{display:flex;flex-direction:column;position:fixed;left:14px;top:14px;bottom:14px;
     width:248px;z-index:40;padding:6px;border-radius:28px;
     background:linear-gradient(158deg,var(--glass-hi),transparent 46%),var(--glass-2);
-    backdrop-filter:blur(44px) saturate(200%);-webkit-backdrop-filter:blur(44px) saturate(200%);
-    box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair),inset 0 -1px 0 var(--rim-lo)}
+    backdrop-filter:var(--blur-lg);-webkit-backdrop-filter:var(--blur-lg);
+    box-shadow:var(--shadow),inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair)}
   .brand{display:flex;flex-direction:column;gap:2px;padding:16px 14px 12px}
   .brand__mark{display:flex;align-items:center;gap:9px}
   .brand__gem{height:22px;width:auto;color:var(--accent)}
