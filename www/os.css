@@ -974,16 +974,16 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 
   /* THE MATERIAL. Opaque enough to be a surface; a wash of the backdrop's
      colour arrives through it, never its content. */
-  --mat:rgba(54,50,59,.55);
-  --mat-hi:rgba(255,255,255,.10);   /* the lit top of the tint gradient */
+  --mat:rgba(36,30,40,.34);
+  --mat-hi:rgba(255,255,255,.13);   /* the lit top of the tint gradient */
   --mat-lo:rgba(255,255,255,.012);
-  --mat-chrome:rgba(48,44,53,.60);
-  --frost:blur(34px) saturate(185%);
-  --frost-chrome:blur(46px) saturate(200%);
+  --mat-chrome:rgba(30,25,34,.44);
+  --frost:blur(44px) saturate(210%);
+  --frost-chrome:blur(60px) saturate(230%);
 
   /* THE LENS. Specular line, refraction ring, inner falloff, outer definition. */
-  --rim:rgba(255,255,255,.55);
-  --ring:rgba(255,255,255,.11);
+  --rim:rgba(255,255,255,.72);
+  --ring:rgba(255,255,255,.16);
   --rim-lo:rgba(255,255,255,.045);
   --edge:0 0 0 .5px rgba(0,0,0,.55);
   --lift:0 26px 64px -20px rgba(0,0,0,.74),0 8px 24px -12px rgba(0,0,0,.55);
@@ -997,17 +997,17 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
   --well:rgba(0,0,0,.30);
 
   /* THE WALLPAPER. Four overlapping fields plus grain. */
-  --wp:#110f13;
-  --wp-warm:rgba(214,130,78,.20);
-  --wp-cool:rgba(104,126,186,.20);
-  --wp-vig:rgba(0,0,0,.58);
+  --wp:#0a0711;
+  --wp-warm:rgba(238,146,84,.52);
+  --wp-cool:rgba(108,92,204,.44);
+  --wp-vig:rgba(0,0,0,.50);
   --grain:.055;
 }
 @media (prefers-color-scheme:light){:root{
-  --mat:rgba(255,255,255,.66);
+  --mat:rgba(255,255,255,.46);
   --mat-hi:rgba(255,255,255,.55);
   --mat-lo:rgba(255,255,255,.16);
-  --mat-chrome:rgba(255,255,255,.74);
+  --mat-chrome:rgba(255,255,255,.56);
   --rim:rgba(255,255,255,.95);
   --ring:rgba(255,255,255,.62);
   --rim-lo:rgba(28,24,20,.045);
@@ -1019,28 +1019,28 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
   --sep:rgba(28,24,20,.085);
   --sel:rgba(28,24,20,.05);
   --well:rgba(255,255,255,.72);
-  --wp:#e9e4db;
-  --wp-warm:rgba(212,150,96,.26);
-  --wp-cool:rgba(120,142,190,.22);
+  --wp:#f1ece4;
+  --wp-warm:rgba(240,168,104,.52);
+  --wp-cool:rgba(140,132,216,.42);
   --wp-vig:rgba(92,74,58,.16);
   --grain:.035;
 }}
 :root[data-theme="dark"]{
-  --mat:rgba(54,50,59,.55); --mat-hi:rgba(255,255,255,.10);
-  --mat-lo:rgba(255,255,255,.012); --mat-chrome:rgba(48,44,53,.60);
-  --rim:rgba(255,255,255,.55); --ring:rgba(255,255,255,.11);
+  --mat:rgba(36,30,40,.34); --mat-hi:rgba(255,255,255,.13);
+  --mat-lo:rgba(255,255,255,.012); --mat-chrome:rgba(30,25,34,.44);
+  --rim:rgba(255,255,255,.72); --ring:rgba(255,255,255,.16);
   --rim-lo:rgba(255,255,255,.045); --edge:0 0 0 .5px rgba(0,0,0,.55);
   --lift:0 26px 64px -20px rgba(0,0,0,.74),0 8px 24px -12px rgba(0,0,0,.55);
   --lift-sm:0 10px 26px -12px rgba(0,0,0,.6);
   --sheen-a:rgba(255,255,255,.13); --sheen-b:rgba(255,255,255,.045);
   --sep:rgba(255,255,255,.085); --sel:rgba(255,255,255,.06);
   --well:rgba(0,0,0,.30);
-  --wp:#110f13; --wp-warm:rgba(214,130,78,.20); --wp-cool:rgba(104,126,186,.20);
-  --wp-vig:rgba(0,0,0,.58); --grain:.055;
+  --wp:#0a0711; --wp-warm:rgba(238,146,84,.52); --wp-cool:rgba(108,92,204,.44);
+  --wp-vig:rgba(0,0,0,.50); --grain:.055;
 }
 :root[data-theme="light"]{
-  --mat:rgba(255,255,255,.66); --mat-hi:rgba(255,255,255,.55);
-  --mat-lo:rgba(255,255,255,.16); --mat-chrome:rgba(255,255,255,.74);
+  --mat:rgba(255,255,255,.46); --mat-hi:rgba(255,255,255,.55);
+  --mat-lo:rgba(255,255,255,.16); --mat-chrome:rgba(255,255,255,.56);
   --rim:rgba(255,255,255,.95); --ring:rgba(255,255,255,.62);
   --rim-lo:rgba(28,24,20,.045); --edge:0 0 0 .5px rgba(72,58,48,.12);
   --lift:0 26px 60px -24px rgba(72,56,44,.36),0 6px 18px -10px rgba(72,56,44,.18);
@@ -1048,7 +1048,7 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
   --sheen-a:rgba(255,255,255,.6); --sheen-b:rgba(255,255,255,.2);
   --sep:rgba(28,24,20,.085); --sel:rgba(28,24,20,.05);
   --well:rgba(255,255,255,.72);
-  --wp:#e9e4db; --wp-warm:rgba(212,150,96,.26); --wp-cool:rgba(120,142,190,.22);
+  --wp:#f1ece4; --wp-warm:rgba(240,168,104,.52); --wp-cool:rgba(140,132,216,.42);
   --wp-vig:rgba(92,74,58,.16); --grain:.035;
 }
 
@@ -1072,11 +1072,12 @@ a.pnode.is-active .pnode__k{color:var(--ink);font-weight:600}
 body{background:var(--wp)}
 body::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
   background:
-    radial-gradient(130% 96% at 50% -8%,transparent 38%,var(--wp-vig) 100%),
-    radial-gradient(86% 68% at 6% -6%,color-mix(in srgb,var(--sig) 58%,transparent),transparent 62%),
-    radial-gradient(72% 62% at 98% 104%,color-mix(in srgb,var(--sig) 36%,transparent),transparent 64%),
-    radial-gradient(52% 44% at 88% 6%,var(--wp-warm),transparent 66%),
-    radial-gradient(64% 56% at 2% 78%,var(--wp-cool),transparent 68%);
+    radial-gradient(140% 104% at 50% 42%,transparent 30%,var(--wp-vig) 100%),
+    radial-gradient(64% 52% at 4% -8%,color-mix(in srgb,var(--sig) 92%,transparent),transparent 62%),
+    radial-gradient(50% 42% at 94% 2%,var(--wp-warm),transparent 64%),
+    radial-gradient(58% 50% at 100% 88%,color-mix(in srgb,var(--sig) 62%,transparent),transparent 66%),
+    radial-gradient(62% 54% at -6% 86%,var(--wp-cool),transparent 68%),
+    radial-gradient(90% 70% at 50% 50%,color-mix(in srgb,var(--sig) 14%,transparent),transparent 72%);
 }
 body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   opacity:var(--grain);
@@ -1400,3 +1401,55 @@ a.pnode.is-active::after{display:none}
   .btn,.chip{background:var(--face-2);backdrop-filter:none;-webkit-backdrop-filter:none}
   .input,.select,.ta,.seg,.log{background:var(--face-2)}
 }
+
+/* ─── 13. THE PAGE OPENS ON GLASS ─────────────────────────────────────────
+   Three revisions in, the verdict was still "kaya ga ada bedanya", and the
+   reason was not the panels — it was that the FIRST thing on every page was
+   bare text on a background. A console that opens with an <h1> floating in
+   space reads like the console it always was, whatever the cards below it are
+   doing. The masthead is now a piece of the material, sitting over the
+   brightest part of the wallpaper, which is where a translucent surface is
+   most obviously translucent. */
+.head{
+  background:linear-gradient(176deg,var(--mat-hi),var(--mat-lo)),
+             linear-gradient(0deg,var(--mat),var(--mat));
+  border-radius:var(--gr);
+  padding:var(--s6) var(--s6) calc(var(--s6) - 4px);
+  margin-bottom:var(--s5);
+  box-shadow:var(--lift),var(--edge),
+             inset 0 1px 0 var(--rim),
+             inset 0 0 0 1px var(--ring),
+             inset 0 -16px 28px -20px var(--rim-lo);
+  backdrop-filter:var(--frost);
+  -webkit-backdrop-filter:var(--frost);
+  position:relative;overflow:hidden}
+.head::before{content:"";position:absolute;inset:0;border-radius:inherit;
+  pointer-events:none;
+  background:radial-gradient(128% 84% at 6% -18%,var(--sheen-a),transparent 58%)}
+.head>*{position:relative;z-index:1}
+
+/* THE SPECULAR SWEEP. A rim alone says "outlined"; a band of light crossing
+   the top third says "this is a curved surface and there is a lamp above it".
+   Cheap — one gradient on a pseudo already in play — and it is most of what
+   separates a glass button study from a div with a border. */
+.face::before{
+  background:
+    linear-gradient(102deg,transparent 18%,var(--sheen-a) 34%,transparent 52%),
+    radial-gradient(128% 84% at 8% -14%,var(--sheen-a),transparent 56%),
+    radial-gradient(88% 62% at 96% 112%,var(--sheen-b),transparent 62%)}
+
+/* ROOM. The old density is the other half of "looks the same": 9px rows and a
+   14px heading are a control panel, and every reference he sent breathes. */
+.panel__h{padding-top:var(--s6);padding-bottom:var(--s4)}
+.panel__b{padding-bottom:var(--s5)}
+.row{padding-top:14px;padding-bottom:14px}
+.row__nm{font-size:14.5px}
+.row__sub{font-size:11.5px}
+.face{margin-bottom:var(--s6)}
+.main{padding-top:var(--s5)}
+.sect{padding-top:var(--s6);padding-bottom:var(--s4)}
+
+/* Small type over a lit backdrop needs a little more than it did over an
+   opaque panel — this is the one contrast concession the thinner material
+   costs, and it is cheaper than making the material opaque again. */
+.row__sub,.ro__m,.cap,.hint,.pnode__v{color:var(--ink-2)}
