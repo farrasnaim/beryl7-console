@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/os.css?v=e89dd49c">
+<link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <div class="shell">
@@ -1241,49 +1241,39 @@ function syncGroupHead(g, key, ap, n) {
    motion of their own (chips, the state word) are still replaced. */
 function rowFor(mac) {
     var r = el('div', 'row row--entity');
-    r.style.gridTemplateColumns = 'minmax(0,1fr) auto auto auto';
     r.setAttribute('role', 'button');
     r.setAttribute('tabindex', '0');
 
-    var id = el('div', 'row__id re-id');
+    /* [icon + identity] as one leading block, then the end cluster — the glass
+       row idiom in app.css, shared with every other page's rows. */
+    var id = el('div', 'row__id');
     r._ico = el('div', 'row__ico');
     id.appendChild(r._ico);
-    var txt = el('div'); txt.style.minWidth = '0';
+    var txt = el('div', 'row__txt');
     r._title = el('div', 'row__title');
     r._nm = el('span', 'row__nm');
     r._title.appendChild(r._nm);
     txt.appendChild(r._title);
     /* the identity line reads like the operator would say it:
-       "5 GHz · Wi-Fi 7 · 2402 Mb/s" */
+       "5 GHz · Wi-Fi 7 · 192.168.x.x" */
     r._sub = el('div', 'row__sub');
     txt.appendChild(r._sub);
     id.appendChild(txt);
     r.appendChild(id);
 
-    /* signal, plotted on the calibrated -90..-20 rule. The scale is created
-       here and only ever moved afterwards: os.css asks for a 400ms travel on
-       the fill and the marker, and a scale rebuilt every poll has no previous
-       position to travel from — which is exactly why it used to jump. Wired and
-       blocked rows hide the two children rather than the wrapper, so the row
-       keeps its four grid columns either way. */
-    var mid = el('div', 're-sig'); mid.style.cssText = 'display:flex;align-items:center;gap:10px';
+    var end = el('div', 'row__end');
+    /* signal as four bars; created once and only ever relit so the tint eases */
     r._sc = OS.rssiScale(-90, true);
-    r._sc.style.width = '64px';
-    mid.appendChild(r._sc);
+    end.appendChild(r._sc);
     r._dbm = el('span', 'row__num');
-    r._dbm.style.cssText += ';color:var(--ink-2);width:56px';
-    mid.appendChild(r._dbm);
-    r.appendChild(mid);
-
-    /* the state word: the single uppercase element in the row */
-    r._word = el('div', 're-state'); r._word.style.cssText = 'text-align:right;min-width:82px';
-    r.appendChild(r._word);
-
-    /* expand affordance */
-    r._caret = el('div', 're-caret'); r._caret.style.cssText =
-        'width:5px;height:5px;border-right:1.5px solid var(--ink-4);' +
-        'border-bottom:1.5px solid var(--ink-4);transition:transform 150ms var(--ease)';
-    r.appendChild(r._caret);
+    end.appendChild(r._dbm);
+    /* the status: a coloured dot and a sentence-case word, stacked over the
+       device's footprint for the day */
+    r._word = el('div', 'row__status');
+    end.appendChild(r._word);
+    r._caret = el('div', 'row__caret');
+    end.appendChild(r._caret);
+    r.appendChild(end);
 
     function toggle() {
         expanded[mac] = !expanded[mac];

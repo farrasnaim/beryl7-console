@@ -1,0 +1,599 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   app.css — a ground-up Liquid-Glass system for the Beryl 7 console.
+
+   Written from zero, not diffed from the old stylesheet. The old console was a
+   flat ledger: opaque cards, mono type, uppercase status, bordered rows, a bar
+   meter, an ASCII topology. None of that is referenced here. The class names
+   survive because the JavaScript toggles them — they are a data contract, not a
+   design — but every visual rule below is new.
+
+   The system, once, then every page composes from it:
+     · a living background mesh (§2) so glass has colour to bend
+     · one glass pane recipe (§4) at three blur depths
+     · a large-radius, borderless, spacious list idiom (§6)
+     · floating navigation (§8) with content passing beneath
+     · San Francisco via the system stack (§1), never downloaded
+
+   DEPTH IS NEVER A DROP SHADOW. Layers separate by blur and translucency: the
+   nav blurs harder than the cards and the page scrolls visibly under it. The
+   only box-shadows here are INSET — the specular lens edge of a pane, which is
+   what gives glass its boundary.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── 1. TYPE & RESET ──────────────────────────────────────────────────────
+   The Apple system stack. On the iPhone and iPad this console is read on, this
+   resolves to San Francisco with the platform's own optical sizing; on the
+   desktop it administers from, Segoe UI. Never a webfont — nothing to download
+   in a hotel with one bar. Live figures get tabular-nums so they do not jitter
+   as they tick. */
+:root{
+  --sys:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",
+        system-ui,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+
+  /* type scale — big jumps, real hierarchy */
+  --t-hero:34px; --t-title:22px; --t-card:17px; --t-body:15px;
+  --t-sub:13.5px; --t-cap:12px;
+
+  /* spacing rhythm */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:44px;
+
+  /* radii — large, squircle-ish, nothing under 16 on a surface */
+  --r-card:26px; --r-inset:18px; --r-tile:14px; --r-pill:999px;
+
+  --ease:cubic-bezier(.32,.72,0,1);
+  --spring:cubic-bezier(.5,1.4,.4,1);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-family:var(--sys);font-size:var(--t-body);line-height:1.5;
+  color:var(--ink);background:var(--bg);letter-spacing:-.01em;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  min-height:100vh;overflow-x:hidden}
+h1,h2,h3,p{margin:0}
+button{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+svg{display:block}
+.n{font-variant-numeric:tabular-nums;letter-spacing:0}
+::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+[hidden]{display:none!important}
+
+/* ─── 2. PALETTE & THE LIVING MESH ─────────────────────────────────────────
+   Dark is the default. Deep, slightly violet ground with vivid off-screen
+   colour fields; light is a warm near-white with pastel fields. The accent is
+   a single warm coral-red, used only where it means something. Semantic
+   colours are separate from the accent and never inherit it. */
+:root{
+  --bg:#07070d;
+  --ink:#f4f3f7;
+  --ink-2:rgba(244,243,247,.66);   /* secondary = primary at reduced opacity */
+  --ink-3:rgba(244,243,247,.42);
+  --accent:#ff6b57;
+  --accent-ink:#fff;
+  --ok:#4fd39a; --warn:#ffcf5c; --bad:#ff6b6b; --idle:rgba(244,243,247,.34);
+
+  /* mesh fields */
+  --m1:rgba(255,107,87,.42);       /* accent, top-left */
+  --m2:rgba(120,86,255,.40);       /* violet, right */
+  --m3:rgba(60,196,214,.30);       /* cyan, bottom */
+  --m4:rgba(255,150,90,.26);       /* amber, top-right */
+  --m-vig:rgba(0,0,0,.42);
+
+  /* glass */
+  --glass:rgba(38,36,52,.42);
+  --glass-2:rgba(46,44,60,.55);    /* nav / overlays: denser */
+  --glass-hi:rgba(255,255,255,.10);
+  --rim:rgba(255,255,255,.44);     /* top+left specular */
+  --rim-hair:rgba(255,255,255,.10);
+  --rim-lo:rgba(0,0,0,.30);        /* bottom lens shadow line */
+  --sep:rgba(255,255,255,.085);    /* list hairline */
+  --fieldwell:rgba(0,0,0,.26);
+
+  /* COMPATIBILITY ALIASES. The five page scripts and their inline styles still
+     name the old token set. Rather than hunt every inline style, map the old
+     names onto this system here, once. They reference the live palette vars, so
+     they follow the theme and the accent automatically. */
+  --ink-4:var(--ink-3);
+  --line:var(--sep); --line-2:var(--sep); --rule:var(--sep);
+  --r:var(--r-tile); --t:.2s;
+  --sig:var(--accent); --sig-fg:var(--accent);
+  --sig-line:color-mix(in srgb,var(--accent) 42%,transparent);
+  --sig-dim:color-mix(in srgb,var(--accent) 16%,transparent);
+  --ac:var(--accent); --ac-fg:var(--accent);
+  --ac-line:color-mix(in srgb,var(--accent) 42%,transparent);
+  --ac-dim:color-mix(in srgb,var(--accent) 16%,transparent);
+  --bad-fg:var(--bad); --fault-fg:var(--bad); --caution-fg:var(--warn);
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#eef0f6;
+  --ink:#14131c;
+  --ink-2:rgba(20,19,28,.62);
+  --ink-3:rgba(20,19,28,.40);
+  --accent:#ec5a44; --accent-ink:#fff;
+  --ok:#1e9e6a; --warn:#c9902e; --bad:#d9483f; --idle:rgba(20,19,28,.30);
+  --m1:rgba(255,120,96,.40); --m2:rgba(138,110,255,.34);
+  --m3:rgba(70,200,220,.30); --m4:rgba(255,168,108,.36);
+  --m-vig:rgba(120,110,140,.10);
+  --glass:rgba(255,255,255,.52);
+  --glass-2:rgba(255,255,255,.62);
+  --glass-hi:rgba(255,255,255,.7);
+  --rim:rgba(255,255,255,.9);
+  --rim-hair:rgba(255,255,255,.6);
+  --rim-lo:rgba(60,50,70,.10);
+  --sep:rgba(20,19,28,.08);
+  --fieldwell:rgba(255,255,255,.6);
+}}
+:root[data-theme="dark"]{color-scheme:dark}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#eef0f6; --ink:#14131c; --ink-2:rgba(20,19,28,.62); --ink-3:rgba(20,19,28,.40);
+  --accent:#ec5a44; --accent-ink:#fff;
+  --ok:#1e9e6a; --warn:#c9902e; --bad:#d9483f; --idle:rgba(20,19,28,.30);
+  --m1:rgba(255,120,96,.40); --m2:rgba(138,110,255,.34);
+  --m3:rgba(70,200,220,.30); --m4:rgba(255,168,108,.36); --m-vig:rgba(120,110,140,.10);
+  --glass:rgba(255,255,255,.52); --glass-2:rgba(255,255,255,.62); --glass-hi:rgba(255,255,255,.7);
+  --rim:rgba(255,255,255,.9); --rim-hair:rgba(255,255,255,.6); --rim-lo:rgba(60,50,70,.10);
+  --sep:rgba(20,19,28,.08); --fieldwell:rgba(255,255,255,.6);
+}
+
+/* the mesh — fixed, so panes bend a stable field as the page scrolls. Two
+   layers: soft colour blobs, and a slow drift so it reads as alive not static.
+   This is the thing glass is glass OVER. */
+body::before{content:"";position:fixed;inset:-25%;z-index:-2;pointer-events:none;
+  background:
+    radial-gradient(38% 44% at 18% 12%,var(--m1),transparent 60%),
+    radial-gradient(42% 40% at 88% 26%,var(--m2),transparent 62%),
+    radial-gradient(46% 46% at 30% 92%,var(--m3),transparent 60%),
+    radial-gradient(34% 34% at 78% 84%,var(--m4),transparent 60%);
+  background-color:var(--bg);
+  filter:saturate(1.15);
+  animation:drift 34s var(--ease) infinite alternate}
+body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(120% 90% at 50% 40%,transparent 55%,var(--m-vig) 100%)}
+@keyframes drift{
+  0%{transform:translate3d(0,0,0) scale(1)}
+  100%{transform:translate3d(-3%,-2%,0) scale(1.08)}}
+@media (prefers-reduced-motion:reduce){body::before{animation:none}}
+
+/* ─── 3. SHELL / LAYOUT ────────────────────────────────────────────────────
+   Phone first: one column, content that scrolls under a floating tab bar and a
+   floating top bar. Desktop promotes the nav to a floating side rail and caps
+   the reading width. */
+.shell{min-height:100vh}
+.main{max-width:720px;margin:0 auto;padding:0 var(--s4) calc(96px + env(safe-area-inset-bottom))}
+.head{padding:var(--s6) 2px var(--s4)}
+.head__t{font-size:var(--t-hero);font-weight:800;letter-spacing:-.03em;line-height:1.05}
+.head__s{color:var(--ink-2);font-size:var(--t-body);margin-top:6px;max-width:46ch}
+.head__aside{display:flex;gap:var(--s2);margin-top:var(--s4);flex-wrap:wrap}
+
+.sect{display:flex;align-items:baseline;gap:var(--s3);margin:var(--s7) 2px var(--s3)}
+.sect__t{font-size:var(--t-title);font-weight:700;letter-spacing:-.02em}
+.sect__m{color:var(--ink-3);font-size:var(--t-sub)}
+.sect__aside{margin-left:auto}
+
+/* ─── 4. THE GLASS PANE ────────────────────────────────────────────────────
+   One recipe. Translucent fill + heavy backdrop blur + a lens edge made of
+   three inset lines: a bright specular top/left, an all-round hairline, and a
+   dark bottom line. Remove backdrop-filter and this is a faint tinted shape
+   with no boundary — proof the design is built FOR glass, not painted over a
+   solid card. */
+.face,.dlg,.accent__pop{
+  position:relative;
+  background:linear-gradient(158deg,var(--glass-hi),transparent 46%),var(--glass);
+  border-radius:var(--r-card);
+  backdrop-filter:blur(30px) saturate(180%);
+  -webkit-backdrop-filter:blur(30px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 var(--rim),
+    inset 1px 0 0 var(--rim-hair),
+    inset 0 0 0 .5px var(--rim-hair),
+    inset 0 -1px 0 var(--rim-lo);
+}
+.face{margin:0 0 var(--s4);padding:var(--s2) 0}
+.face--open{background:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;
+  border-radius:0;margin:0 0 var(--s4);padding:0}
+.panel{background:none;border:0}
+.panel__h{display:flex;align-items:center;gap:var(--s3);padding:var(--s4) var(--s5) var(--s2)}
+.panel__t{font-size:var(--t-card);font-weight:650;letter-spacing:-.015em}
+.panel__aside{margin-left:auto;display:flex;align-items:center;gap:var(--s2);color:var(--ink-2)}
+.panel__b{padding:var(--s3) var(--s5) var(--s4)}
+.panel__b--flush{padding:0}
+
+/* the hairline that divides panels stacked in one pane — inset, faint, iOS */
+.face .panel+.panel{position:relative}
+.face .panel+.panel::before{content:"";position:absolute;left:var(--s5);right:var(--s5);top:0;
+  height:1px;background:var(--sep)}
+
+/* ─── 5. STAGGERED ENTRANCE ────────────────────────────────────────────────
+   Panes settle in on load — a short, eased rise, never a bounce. Visible at
+   rest immediately after; this is polish, not a loading gate. */
+@media (prefers-reduced-motion:no-preference){
+  .face,.sect{animation:rise .5s var(--ease) both}
+  .sect+.face{animation-delay:.02s}
+}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ─── 6. LISTS — spacious, borderless, iOS grouped ─────────────────────────
+   No table, no full-width borders. Rows breathe; a hairline inset past the
+   leading tile divides them, and the whole row lifts on press. */
+.row{display:flex;align-items:center;gap:var(--s3);justify-content:space-between;
+  padding:var(--s3) var(--s5);position:relative;cursor:pointer;
+  transition:background .18s var(--ease),transform .12s var(--ease)}
+.row+.row::before{content:"";position:absolute;left:calc(var(--s5) + 48px);right:var(--s5);top:0;
+  height:1px;background:var(--sep)}
+.row:hover{background:color-mix(in srgb,var(--glass-hi) 60%,transparent)}
+.row:active{transform:scale(.99)}
+.row[aria-expanded="true"]{background:color-mix(in srgb,var(--glass-hi) 60%,transparent)}
+.row__id{display:flex;align-items:center;gap:var(--s3);min-width:0;flex:1}
+.row__txt{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:0}
+.row__ico{width:36px;height:36px;flex:none;display:grid;place-items:center;
+  border-radius:var(--r-tile);color:var(--accent);
+  background:linear-gradient(160deg,color-mix(in srgb,var(--accent) 24%,transparent),
+    color-mix(in srgb,var(--accent) 8%,transparent));
+  box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair)}
+.row__ico svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.row__title{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap}
+.row__nm{font-size:var(--t-body);font-weight:600;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.row__sub{color:var(--ink-3);font-size:var(--t-sub);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.row__num{font-variant-numeric:tabular-nums;font-size:var(--t-sub);text-align:right;
+  color:var(--ink-2);white-space:nowrap}
+.row__cap{color:var(--ink-3);font-size:var(--t-cap)}
+.row__end{display:flex;align-items:center;gap:var(--s3);justify-content:flex-end}
+.row__status{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.row__caret{width:7px;height:7px;flex:none;margin-left:2px;
+  border-right:1.6px solid var(--ink-3);border-bottom:1.6px solid var(--ink-3);
+  transition:transform .18s var(--ease)}
+
+/* group heading inside a list — a real heading, sentence case, not a caps chip */
+.tbl__group{display:flex;align-items:center;gap:var(--s2);
+  padding:var(--s4) var(--s5) var(--s1);color:var(--ink-3)}
+.tbl__group>svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;color:var(--ink-3)}
+.tbl__gk{font-size:var(--t-sub);font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink-2)}
+.tbl__gn{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--ink-3);font-size:var(--t-sub)}
+
+/* expanded detail = an inset glass drawer inside the row list */
+.det{margin:var(--s1) var(--s4) var(--s3);padding:var(--s4);border-radius:var(--r-inset);
+  background:var(--fieldwell);box-shadow:inset 0 0 0 .5px var(--rim-hair)}
+.det__wifi{margin-top:var(--s3);padding-top:var(--s3);border-top:1px solid var(--sep)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px var(--s4);margin:0}
+.kv dt{color:var(--ink-3);font-size:var(--t-sub)}
+.kv dd{margin:0;font-variant-numeric:tabular-nums;font-size:var(--t-sub);text-align:right;word-break:break-word}
+
+/* ─── 7. STATUS, TAGS, SIGNAL, METERS ──────────────────────────────────────
+   Sentence case everywhere. A state is a coloured dot + a word, or a soft
+   tinted capsule — never an all-caps shout. */
+.tag{display:inline-flex;align-items:center;gap:6px;font-size:var(--t-sub);font-weight:600;
+  color:var(--ink-2);white-space:nowrap;text-transform:none}
+.tag::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--idle);flex:none}
+.tag--ok{color:var(--ink)}.tag--ok::before{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.tag--fair::before{background:var(--ok);opacity:.7}
+.tag--warn{color:var(--ink)}.tag--warn::before{background:var(--warn);box-shadow:0 0 8px var(--warn)}
+.tag--bad{color:var(--ink)}.tag--bad::before{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+.tag--idle::before{background:var(--idle)}
+.tag--flat::before{display:none}
+
+/* capsule (chips): filter states, selectors, labels */
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:var(--t-cap);font-weight:600;
+  padding:5px 11px;border-radius:var(--r-pill);color:var(--ink-2);
+  background:var(--glass-hi);box-shadow:inset 0 0 0 .5px var(--rim-hair);white-space:nowrap}
+.chip--on{color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 18%,transparent);
+  box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--accent) 40%,transparent)}
+.chip--warn{color:var(--warn)}
+.chip--bad{color:var(--accent-ink);background:var(--bad);box-shadow:none}
+.chip svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8}
+
+/* signal — four ascending bars, iOS-style, tinted by quality. Replaces the
+   bar-with-diamond entirely. */
+.sig{display:inline-flex;align-items:flex-end;gap:2.5px;height:16px}
+.sig i{width:3.5px;border-radius:2px;background:var(--idle);transition:background .3s var(--ease)}
+.sig i:nth-child(1){height:36%}.sig i:nth-child(2){height:58%}
+.sig i:nth-child(3){height:80%}.sig i:nth-child(4){height:100%}
+.sig[data-tone="ok"] i.on{background:var(--ok)}
+.sig[data-tone="fair"] i.on{background:var(--ok);opacity:.8}
+.sig[data-tone="warn"] i.on{background:var(--warn)}
+.sig[data-tone="bad"] i.on{background:var(--bad)}
+.sig[data-tone="idle"] i.on{background:var(--idle)}
+
+/* meter — a slim continuous rounded track with an accent/semantic fill and a
+   soft cap glow. Not segmented, not a diamond. */
+.meter{height:8px;border-radius:var(--r-pill);background:var(--fieldwell);
+  box-shadow:inset 0 0 0 .5px var(--rim-hair);overflow:hidden;position:relative}
+.meter i{display:block;height:100%;border-radius:var(--r-pill);width:0;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 70%,#fff),var(--accent));
+  transition:width .5s var(--ease)}
+.meter[data-tone="ok"] i{background:linear-gradient(90deg,color-mix(in srgb,var(--ok) 70%,#fff),var(--ok))}
+.meter[data-tone="warn"] i{background:linear-gradient(90deg,color-mix(in srgb,var(--warn) 70%,#fff),var(--warn))}
+.meter[data-tone="bad"] i{background:linear-gradient(90deg,color-mix(in srgb,var(--bad) 70%,#fff),var(--bad))}
+.meter--sm{height:5px}
+
+/* readout — a big number stat */
+.ro{min-width:0}
+.ro__k{font-size:var(--t-cap);color:var(--ink-3);font-weight:600}
+.ro__v{font-size:26px;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
+  line-height:1.1;margin-top:2px}
+.ro__u{font-size:var(--t-sub);color:var(--ink-3);font-weight:600;margin-left:3px}
+.ro__m{font-size:var(--t-cap);color:var(--ink-3);margin-top:3px}
+.ro--sm .ro__v{font-size:18px;font-weight:700}
+.ro[data-state="good"] .ro__v{color:var(--ok)}
+.ro[data-state="warn"] .ro__v{color:var(--warn)}
+.ro[data-state="fault"] .ro__v{color:var(--bad)}
+
+/* metric row (label + live number) */
+.metricrow{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);
+  margin-bottom:var(--s2)}
+.stat{display:grid;gap:var(--s2);padding:var(--s2) 0}
+.stat__top{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3)}
+.stat__k{font-size:var(--t-sub);color:var(--ink-2);font-weight:600}
+.stat__v{font-size:var(--t-sub);font-variant-numeric:tabular-nums;color:var(--ink)}
+.stat__m{font-size:var(--t-cap);color:var(--ink-3)}
+
+/* ─── 8. FLOATING NAVIGATION ───────────────────────────────────────────────
+   Phone: a floating glass tab bar, off every edge, content scrolling under it.
+   A denser blur than the cards so it reads as nearer the eye — depth by blur,
+   not shadow. Desktop turns the same material into a floating side rail. */
+.spine{display:none}
+.topline{position:fixed;top:0;left:0;right:0;z-index:40;display:flex;align-items:center;gap:var(--s3);
+  padding:calc(env(safe-area-inset-top) + 10px) var(--s4) 10px;
+  background:linear-gradient(180deg,var(--bg),transparent);backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px)}
+.topline .push{margin-left:auto}
+.main{padding-top:calc(env(safe-area-inset-top) + 52px)}
+
+.mobilebar{position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(env(safe-area-inset-bottom) + 12px);z-index:50;
+  display:flex;gap:2px;padding:6px;border-radius:var(--r-pill);
+  background:var(--glass-2);backdrop-filter:blur(40px) saturate(200%);
+  -webkit-backdrop-filter:blur(40px) saturate(200%);
+  box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair),inset 0 -1px 0 var(--rim-lo)}
+.mtab{display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:8px 14px;border-radius:var(--r-pill);color:var(--ink-3);
+  transition:color .2s var(--ease),background .2s var(--ease)}
+.mtab svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.mtab span{font-size:10.5px;font-weight:600}
+.mtab.is-active{color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.mtab:active{transform:scale(.94)}
+
+/* brand + transport pill live in the topline on phone */
+.brand__mark{display:flex;align-items:center;gap:8px}
+.brand__name{font-size:var(--t-card);font-weight:700;letter-spacing:-.01em}
+.brand__gem{height:20px;width:auto;color:var(--accent)}
+.brand__sub{display:none}
+.tp{display:inline-flex;align-items:center;gap:6px;font-size:var(--t-cap);color:var(--ink-3);
+  padding:5px 10px;border-radius:var(--r-pill);background:var(--glass-hi)}
+.tp__led{width:7px;height:7px;border-radius:50%;background:var(--idle)}
+.tp[data-tp="live"] .tp__led{background:var(--ok);box-shadow:0 0 8px var(--ok);animation:pulse 2.4s var(--ease) infinite}
+.tp[data-tp="stale"] .tp__led,.tp[data-tp="down"] .tp__led{background:var(--warn)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.iconbtn{width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:var(--r-pill);
+  background:var(--glass-hi);color:var(--ink-2);cursor:pointer;box-shadow:inset 0 0 0 .5px var(--rim-hair)}
+.iconbtn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8}
+.iconbtn:active{transform:scale(.92)}
+
+/* ─── 9. CONTROLS ──────────────────────────────────────────────────────────
+   Glass pills and wells. Press states scale and brighten; nothing bounces. */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  padding:10px 18px;border:0;border-radius:var(--r-pill);cursor:pointer;font-weight:600;
+  font-size:var(--t-sub);color:var(--ink);background:var(--glass-hi);
+  box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  transition:transform .12s var(--ease),background .2s var(--ease)}
+.btn:active:not(:disabled){transform:scale(.96)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9}
+.btn--primary{background:linear-gradient(160deg,color-mix(in srgb,#fff 18%,var(--accent)),var(--accent));
+  color:var(--accent-ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.4)}
+.btn--ghost{background:none;box-shadow:none;color:var(--ink-2)}
+.btn--danger{color:var(--bad)}
+.btn--sm{padding:7px 13px;font-size:var(--t-cap)}
+.btn.is-busy{color:transparent;position:relative;pointer-events:none}
+.btn.is-busy::after{content:"";position:absolute;width:15px;height:15px;border-radius:50%;
+  border:2px solid currentColor;border-top-color:transparent;animation:spin .7s linear infinite;color:var(--ink)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.seg{display:inline-flex;padding:3px;gap:2px;border-radius:var(--r-pill);
+  background:var(--fieldwell);box-shadow:inset 0 0 0 .5px var(--rim-hair)}
+.seg .btn{background:none;box-shadow:none;border-radius:var(--r-pill);padding:6px 14px;color:var(--ink-3)}
+.seg .btn[aria-pressed="true"]{background:var(--glass-hi);color:var(--ink);
+  box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair)}
+
+.input,.select,.ta{width:100%;padding:11px 14px;border:0;border-radius:var(--r-inset);
+  font:inherit;color:var(--ink);background:var(--fieldwell);
+  box-shadow:inset 0 0 0 .5px var(--rim-hair),inset 0 2px 5px rgba(0,0,0,.18)}
+.input::placeholder,.ta::placeholder{color:var(--ink-3)}
+.input:focus,.select:focus,.ta:focus{outline:none;
+  box-shadow:inset 0 0 0 1px var(--accent),0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+.select{appearance:none;-webkit-appearance:none;padding-right:34px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23888' stroke-width='1.8'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 14px center}
+.input--inline,.select--inline{width:auto;padding:7px 12px;border-radius:var(--r-pill)}
+.select--inline{padding-right:30px}
+.field{margin-bottom:var(--s4)}
+.label{display:block;font-size:var(--t-sub);font-weight:600;color:var(--ink-2);margin-bottom:7px}
+.hint{font-size:var(--t-cap);color:var(--ink-3);margin-top:6px;line-height:1.45}
+.fgrid{display:grid;grid-template-columns:1fr;gap:var(--s4)}
+.g2,.g3,.grid{display:grid;gap:var(--s4)}
+
+/* toggle switch */
+.sw-toggle{position:relative;width:50px;height:30px;flex:none;border-radius:var(--r-pill);
+  background:var(--fieldwell);box-shadow:inset 0 0 0 .5px var(--rim-hair);cursor:pointer;
+  transition:background .25s var(--ease)}
+.sw-toggle::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .25s var(--spring)}
+.sw-toggle[aria-checked="true"]{background:var(--accent)}
+.sw-toggle[aria-checked="true"]::after{transform:translateX(20px)}
+
+/* ─── 10. NOTES, EMPTY, SKELETON, TOAST, DIALOG ────────────────────────────*/
+.note{display:flex;gap:11px;padding:14px 16px;border-radius:var(--r-inset);
+  background:var(--glass-hi);box-shadow:inset 0 0 0 .5px var(--rim-hair);
+  font-size:var(--t-sub);color:var(--ink-2);align-items:flex-start;margin-bottom:var(--s4)}
+.note svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;color:var(--ink-3)}
+.note--warn{color:var(--ink);box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--warn) 45%,transparent)}
+.note--warn svg{color:var(--warn)}
+.note--bad{box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--bad) 45%,transparent)}
+.note--bad svg{color:var(--bad)}
+.note--on{box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--accent) 45%,transparent)}
+.note--on svg{color:var(--accent)}
+
+.empty{text-align:center;padding:var(--s8) var(--s5);color:var(--ink-3)}
+.empty__i{width:52px;height:52px;margin:0 auto var(--s4);display:grid;place-items:center;
+  border-radius:var(--r-inset);background:var(--glass-hi);color:var(--ink-3);
+  box-shadow:inset 0 0 0 .5px var(--rim-hair)}
+.empty__i svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.6}
+.empty__t{font-size:var(--t-card);font-weight:650;color:var(--ink);margin-bottom:6px}
+.empty__s{font-size:var(--t-sub);max-width:38ch;margin:0 auto;line-height:1.5}
+
+.sk{height:13px;border-radius:7px;background:linear-gradient(90deg,var(--glass-hi),
+  color-mix(in srgb,var(--glass-hi) 40%,transparent),var(--glass-hi));
+  background-size:200% 100%;animation:sheen 1.4s linear infinite}
+@keyframes sheen{to{background-position:-200% 0}}
+
+.toasts{position:fixed;left:50%;transform:translateX(-50%);z-index:100;
+  bottom:calc(env(safe-area-inset-bottom) + 84px);display:flex;flex-direction:column;gap:var(--s2);
+  width:min(420px,calc(100vw - 32px));pointer-events:none}
+.toast{display:flex;gap:11px;align-items:center;padding:13px 16px;border-radius:var(--r-inset);
+  background:var(--glass-2);backdrop-filter:blur(30px) saturate(180%);
+  -webkit-backdrop-filter:blur(30px) saturate(180%);pointer-events:auto;
+  box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair);
+  font-size:var(--t-sub);animation:rise .3s var(--spring) both}
+.toast svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9}
+.toast--ok svg{color:var(--ok)}.toast--bad svg{color:var(--bad)}.toast--warn svg{color:var(--warn)}
+
+.veil{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
+  padding:var(--s4);background:color-mix(in srgb,var(--bg) 50%,transparent);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.veil.on{display:flex}
+.dlg{width:min(440px,100%);padding:0;overflow:hidden;animation:rise .3s var(--spring) both}
+.dlg__h{padding:var(--s5) var(--s5) var(--s2)}
+.dlg__t{font-size:var(--t-card);font-weight:700}
+.dlg__b{padding:var(--s3) var(--s5);color:var(--ink-2);font-size:var(--t-sub)}
+.dlg__f{padding:var(--s3) var(--s5) var(--s5);display:flex;gap:var(--s2);justify-content:flex-end}
+
+/* ─── 11. TOPOLOGY (glass nodes) & CHARTS ──────────────────────────────────
+   Nodes are little glass tiles connected by thin lines. No box drawing, no
+   monospace. Charts keep the ink line but on a glass field. */
+.topo{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) var(--s3)}
+.topo__row{display:flex;align-items:center;gap:var(--s3)}
+.topo__node{display:flex;align-items:center;gap:var(--s3);flex:1;min-width:0;
+  padding:12px 14px;border-radius:var(--r-inset);
+  background:var(--glass-hi);box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair)}
+.topo__node--live{box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 1px color-mix(in srgb,var(--ok) 40%,transparent)}
+.topo__node--bad{box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 1px color-mix(in srgb,var(--bad) 45%,transparent)}
+.topo__ico{width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:10px;
+  background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.topo__ico svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8}
+.topo__k{font-size:var(--t-cap);color:var(--ink-3);font-weight:600}
+.topo__v{font-size:var(--t-sub);font-weight:650}
+.topo__link{width:2px;height:14px;margin-left:35px;border-radius:2px;
+  background:linear-gradient(var(--ink-3),transparent)}
+.topo__branch{display:flex;flex-direction:column;gap:6px;margin-left:var(--s7)}
+.topo__leaf{display:flex;align-items:center;gap:var(--s2);padding:9px 13px;border-radius:var(--r-tile);
+  background:var(--glass-hi);box-shadow:inset 0 0 0 .5px var(--rim-hair);font-size:var(--t-sub)}
+.topo__leaf .n{margin-left:auto;color:var(--ink-2)}
+.topo__leaf--off{opacity:.45}
+
+.chart{width:100%;display:block;border-radius:var(--r-inset);overflow:visible}
+.chart .trace{fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.chart .trace-2{fill:none;stroke:var(--ink-3);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.chart .fill{fill:color-mix(in srgb,var(--accent) 12%,transparent);stroke:none}
+.chart .fill-2{fill:color-mix(in srgb,var(--ink) 6%,transparent);stroke:none}
+.chart .axis{stroke:var(--sep);stroke-width:1;vector-effect:non-scaling-stroke}
+.cap{display:flex;justify-content:space-between;gap:var(--s2);font-size:var(--t-cap);
+  color:var(--ink-3);margin-top:8px}
+.cap .n{color:var(--ink-2)}
+
+/* log — the one place monospace is allowed */
+.log{max-height:340px;overflow-y:auto;border-radius:var(--r-inset);background:var(--fieldwell);
+  box-shadow:inset 0 0 0 .5px var(--rim-hair)}
+.log__l{padding:9px 14px 10px;border-left:2px solid transparent}
+.log__l+.log__l{border-top:1px solid var(--sep)}
+.log__l--warn{border-left-color:var(--warn)}
+.log__l--err{border-left-color:var(--bad)}
+.log__h{display:flex;gap:var(--s2);align-items:baseline}
+.log__t,.log__s{font-family:var(--mono);font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.log__m{font-size:var(--t-sub);color:var(--ink);line-height:1.45;margin-top:2px;word-break:break-word}
+
+/* ─── 12. STALE ────────────────────────────────────────────────────────────
+   When the data ages, the accent cools out of the mesh rather than dimming the
+   figures. Legible; the numbers never fade. */
+.main[data-stale="1"]{filter:saturate(.6)}
+.main[data-stale="1"] .tp[data-tp]{color:var(--warn)}
+
+/* ─── 13. DESKTOP ──────────────────────────────────────────────────────────
+   The tab bar becomes a floating side rail; the topline retires. Everything
+   else is the same system, wider. */
+@media (min-width:860px){
+  .mobilebar{flex-direction:column;left:16px;bottom:auto;top:50%;transform:translateY(-50%);
+    transform-origin:left center;gap:4px;border-radius:26px;padding:10px}
+  .mtab{flex-direction:row;justify-content:flex-start;gap:10px;padding:10px 16px;border-radius:18px;width:150px}
+  .mtab span{font-size:var(--t-sub)}
+  .mtab svg{width:20px;height:20px}
+  .main{max-width:760px;margin-left:210px;margin-right:auto;
+    padding:var(--s7) var(--s6) var(--s8)}
+  .head{padding-top:var(--s5)}
+  .head__t{font-size:40px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:1fr 1fr 1fr}
+  .fgrid{grid-template-columns:1fr 1fr}
+}
+@media (min-width:1200px){
+  .main{margin-left:auto;padding-left:220px}
+}
+
+/* accent picker popover reuse */
+.accent__pop{position:absolute;z-index:60;min-width:170px;padding:6px;border-radius:var(--r-inset)}
+.accent__opt{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--r-tile);
+  cursor:pointer;font-size:var(--t-sub);width:100%;border:0;background:none;color:var(--ink)}
+.accent__opt:hover{background:var(--glass-hi)}
+.accent__sw{width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 .5px var(--rim-hair)}
+.push{margin-left:auto}
+
+/* ─── 14. SHARED UTILITIES & ODDS ──────────────────────────────────────────
+   Small shared classes the page scripts emit. Styled here so no element on any
+   page falls back to unstyled — the system is the single source, per the
+   brief: a component a page needs is added to the system, never styled locally. */
+.rowsep{height:1px;background:var(--sep);margin:var(--s3) var(--s5)}
+.inline{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.stack{display:flex;flex-direction:column;gap:var(--s2)}
+.mut{color:var(--ink-3)}
+.dim{color:var(--ink-3)}
+.probecustom{display:flex;gap:var(--s2);align-items:center;margin-top:var(--s2)}
+.probenote{font-size:var(--t-cap);color:var(--ink-3);margin-top:6px}
+
+/* airtime spectrum — occupied band on the real channel axis, on a glass field */
+.specwrap{margin-top:var(--s2)}
+.spec{width:100%;height:34px;display:block;border-radius:10px;background:var(--fieldwell);
+  box-shadow:inset 0 0 0 .5px var(--rim-hair)}
+.spec .band{fill:color-mix(in srgb,var(--accent) 26%,transparent);
+  stroke:var(--accent);stroke-width:1;vector-effect:non-scaling-stroke}
+.spec .axis,.spec .tick,.spec .line{stroke:var(--sep);stroke-width:1;vector-effect:non-scaling-stroke}
+.spec-lab{font-size:var(--t-cap);fill:var(--ink-3)}
+.spec-mhz{font-size:10px;fill:var(--ink-3)}
+
+/* advanced disclosure (settings/vpn) */
+.adv{border-radius:var(--r-inset);overflow:hidden;background:var(--glass-hi);
+  box-shadow:inset 0 0 0 .5px var(--rim-hair);margin-top:var(--s3)}
+.adv>summary{list-style:none;cursor:pointer;padding:13px 16px;font-weight:600;font-size:var(--t-sub)}
+.adv>summary::-webkit-details-marker{display:none}
+.adv[open]>summary{border-bottom:1px solid var(--sep)}
+.adv__b{padding:var(--s4) var(--s5)}
+
+/* segmented radio groups reused as glass cards in forms */
+.radioset{display:grid;gap:var(--s2)}
+.radiocard{display:flex;gap:12px;align-items:flex-start;padding:14px;border-radius:var(--r-inset);
+  cursor:pointer;background:var(--glass-hi);box-shadow:inset 0 0 0 .5px var(--rim-hair)}
+.radiocard--on{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent);
+  background:color-mix(in srgb,var(--accent) 12%,transparent)}
+
+/* uplink source strip (repeater/tethering) — the failover metric list */
+.strip{display:grid;gap:var(--s2);margin-top:var(--s2)}
+.strip>.ro{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);
+  padding:11px 0;border-bottom:1px solid var(--sep)}
+.strip>.ro:last-child{border-bottom:0}
+.g-2-1{display:grid;gap:var(--s4)}
+@media (min-width:860px){.g-2-1{grid-template-columns:1.4fr 1fr}}

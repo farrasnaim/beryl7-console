@@ -247,24 +247,19 @@ function icon(name) { return svg(I[name] || I.dev); }
    because meterSet has to light the same number it was built with - a
    mismatch would leave stale segments lit at the end of the row.
    Signal strength passes 5, the shape everyone already reads as bars. */
-function meter(frac, tone, small, segs) {
-    var n = segs || 10;
+/* A continuous glass track with a single fill, not a segmented ladder. One
+   child <i> whose width is the fraction; the fill eases because it keeps its
+   previous computed width. */
+function meter(frac, tone, small) {
     var m = el('div', 'meter' + (small ? ' meter--sm' : ''));
-    m._segs = n;
-    for (var i = 0; i < n; i++) m.appendChild(el('i'));
+    m.appendChild(el('i'));
     meterSet(m, frac, tone);
     return m;
 }
-/* Re-light an existing meter. Only the segments that changed are written, so
-   the ones that did not are never restyled and never re-run their fade. */
 function meterSet(m, frac, tone) {
     if (tone) m.setAttribute('data-tone', tone); else m.removeAttribute('data-tone');
-    var n = m._segs || m.children.length || 10;
-    var lit = Math.max(0, Math.min(n, Math.round(frac * n)));
-    for (var i = 0; i < n; i++) {
-        var want = i < lit ? 'on' : '';
-        if (m.children[i].className !== want) m.children[i].className = want;
-    }
+    var f = Math.max(0, Math.min(1, frac || 0));
+    (m.firstChild || m.appendChild(el('i'))).style.width = (f * 100).toFixed(1) + '%';
 }
 function readout(k, v, u, meta, state, small) {
     var r = el('div', 'ro' + (small ? ' ro--sm' : ''));
@@ -1241,45 +1236,41 @@ function gem() {
 /* Wi-Fi quality, expressed the way an operator says it out loud. Thresholds
    are the ones that actually change rate selection, not a linear split. */
 function quality(dbm) {
-    if (dbm == null || dbm === 0) return { word: 'NO SIGNAL', tone: 'idle', f: 0 };
-    if (dbm >= -55) return { word: 'EXCELLENT', tone: 'ok',   f: 1 };
-    if (dbm >= -67) return { word: 'GOOD',      tone: 'fair', f: .72 };
-    if (dbm >= -75) return { word: 'WEAK',      tone: 'warn', f: .45 };
-    return                 { word: 'POOR',      tone: 'bad',  f: .2 };
+    if (dbm == null || dbm === 0) return { word: 'No signal', tone: 'idle', f: 0 };
+    if (dbm >= -55) return { word: 'Excellent', tone: 'ok',   f: 1 };
+    if (dbm >= -67) return { word: 'Good',      tone: 'fair', f: .72 };
+    if (dbm >= -75) return { word: 'Weak',      tone: 'warn', f: .45 };
+    return                 { word: 'Poor',      tone: 'bad',  f: .2 };
 }
+/* A status is a coloured dot and a sentence-case word, never an all-caps
+   shout. Any legacy ALL-CAPS string a caller still passes is normalised to
+   Sentence case here, so no page has to be hunted for stray uppercase. Mixed
+   or already-cased text (a tunnel name, an SSID) passes through untouched. */
 function stateWord(text, tone) {
-    return el('span', 'sw' + (tone ? ' sw--' + tone : ''), text);
+    text = String(text);
+    if (/[A-Z]/.test(text) && !/[a-z]/.test(text)) {
+        text = text.charAt(0) + text.slice(1).toLowerCase();
+    }
+    var t = el('span', 'tag' + (tone ? ' tag--' + tone : ''));
+    t.appendChild(document.createTextNode(text));
+    return t;
 }
 
-/* A value on its axis. ticks[] mark the thresholds worth knowing, so the eye
-   reads "past the good line" instead of decoding a percentage. */
+/* A value on an axis, drawn as the same continuous glass track a meter uses —
+   no needle, no diamond. min/max are remembered so a caller cannot rescale the
+   axis under a fill that is mid-ease. ticks are accepted and ignored: the glass
+   track carries the reading by fill, not by printed gradations. */
 function scale(val, min, max, ticks, tone, small) {
-    var s = el('div', 'scale' + (small ? ' scale--sm' : ''));
-    s.appendChild(el('i', 'scale__track'));
-    s._fill = el('i', 'scale__fill');
-    s.appendChild(s._fill);
-    (ticks || []).forEach(function (t) {
-        var p = (t - min) / (max - min);
-        if (p < 0 || p > 1) return;
-        var k = el('i', 'scale__tick'); k.style.left = (p * 100) + '%';
-        s.appendChild(k);
-    });
-    s._m = el('i', 'scale__m');
-    s.appendChild(s._m);
+    var s = el('div', 'meter' + (small ? ' meter--sm' : ''));
+    s.appendChild(el('i'));
     s._min = min; s._max = max;
     scaleSet(s, val, tone);
     return s;
 }
-/* Move an existing scale to a new value. THIS is what makes the 400ms
-   transitions in os.css run: the fill and the marker keep their previous
-   computed width/left, so the browser has something to interpolate from.
-   min/max are remembered from the build so a caller cannot silently rescale
-   the axis under a needle that is mid-flight. */
 function scaleSet(s, val, tone) {
     if (tone) s.setAttribute('data-tone', tone); else s.removeAttribute('data-tone');
-    var pct = Math.max(0, Math.min(1, (val - s._min) / (s._max - s._min))) * 100;
-    s._fill.style.width = pct + '%';
-    s._m.style.left = pct + '%';
+    var f = Math.max(0, Math.min(1, (val - s._min) / (s._max - s._min)));
+    s.firstChild.style.width = (f * 100).toFixed(1) + '%';
 }
 /* RSSI is the number everyone misreads, so it gets a named helper with the
    quality boundaries drawn on the rule itself. */
@@ -1290,10 +1281,22 @@ function rssiClamp(dbm) { return Math.max(-90, Math.min(-20, dbm || -90)); }
    meaning but sat bunched in the weak half, which is what made the bar hard
    to read. The meaning has not been lost - it moved to the fill COLOUR, which
    still switches on exactly those thresholds via quality(). */
+/* Signal is drawn as four ascending bars — the iOS idiom — tinted by the same
+   quality() bands. No axis, no needle: the number of lit bars IS the reading,
+   and the colour carries excellent/good/weak/poor. */
 function rssiScale(dbm, small) {
-    return scale(rssiClamp(dbm), -90, -20, [-76, -62, -48, -34], quality(dbm).tone, small);
+    var s = el('div', 'sig');
+    for (var i = 0; i < 4; i++) s.appendChild(el('i'));
+    rssiScaleSet(s, dbm);
+    return s;
 }
-function rssiScaleSet(s, dbm) { scaleSet(s, rssiClamp(dbm), quality(dbm).tone); }
+function rssiScaleSet(s, dbm) {
+    var q = quality(dbm);
+    s.setAttribute('data-tone', q.tone);
+    var lit = (dbm == null || dbm === 0) ? 0
+        : q.tone === 'ok' ? 4 : q.tone === 'fair' ? 3 : q.tone === 'warn' ? 2 : 1;
+    for (var i = 0; i < 4; i++) s.children[i].className = i < lit ? 'on' : '';
+}
 
 /* SPECTRUM — the occupied band drawn at true centre and true width on the
    real channel axis. The difference between being told "channel 40, EHT160"
@@ -1354,212 +1357,54 @@ function spectrum(band, chan, centerChan, widthMHz, h) {
    node/link/flow vocabulary; the chain simply runs down the page:
    Internet / Uplink / Router / radio lanes / VPN, with the VPN bypass drawn
    up the left margin back to the Internet node. */
-function topologyV(m) {
-    /* Phone composition of the same drawing, built to be short: each node's
-       caption sits INSIDE the box as a label column instead of claiming its own
-       line above it, which removes a whole line per node, and every metric is
-       tightened. Same nodes, same links, same flow — about a third less height,
-       so the clients list starts that much sooner. */
-    var W = 360, LX = 34, NW = W - LX - 14, BH = 34, GAP = 10, LANE = 19, LBL = 96;
-    var lanes = m.lanes || [];
-    var lanesH = lanes.length ? lanes.length * LANE + 8 : 0;
-    var vpnH = m.vpn ? GAP + BH : 0;
-    var H = BH * 3 + GAP * 2 + (lanesH ? 6 + lanesH : 0) + vpnH + 6;
-    var s = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, 'class': 'topo',
-                        preserveAspectRatio: 'xMidYMin meet' });
-    s.style.width = '100%';
-    s.style.height = 'auto';
-    var cx = LX + 20, y = 0;
-
-    function block(cap, capOn, t1, t2, cls) {
-        /* The caption is ALWAYS on the box's centre line, whatever the value
-           column holds beside it. The value column centres too: one line sits
-           on the same centre, two lines straddle it at 14/27 (midpoint 20.5).
-           Previously the caption inherited the value's first baseline, so on a
-           two-line node it rode up level with the top line and read as
-           top-aligned next to the single-line nodes above and below it. */
-        var yc = y + 21;
-        var yv = t2 ? y + 14 : yc;
-        s.appendChild(sv('rect', { 'class': 'nodebox ' + (cls || ''),
-            x: LX, y: y, width: NW, height: BH, rx: 2 }));
-        s.appendChild(svtext(LX + 12, yc, cap, 'cap' + (capOn ? ' capon' : '')));
-        s.appendChild(svtext(LX + LBL, yv, t1, 't1'));
-        if (t2) s.appendChild(svtext(LX + LBL, y + 27, t2, 't2'));
-        var out = { top: y, mid: y + BH / 2, bot: y + BH };
-        y += BH;
-        return out;
-    }
-    function connect(y1, y2, on, flow) {
-        s.appendChild(sv('path', { 'class': 'link ' + (on ? 'on' : 'off'),
-                                   d: 'M' + cx + ' ' + y1 + ' V' + y2 }));
-        if (flow) s.appendChild(sv('path', { 'class': 'flow',
-                                   d: 'M' + cx + ' ' + y1 + ' V' + y2 }));
-    }
-
-    var a = block('Internet', m.online, m.online ? 'Reachable' : 'No route',
-                  m.latency, m.online ? 'on' : 'bad');
-    y += GAP; connect(a.bot, y, m.online, m.flowing);
-    var b = block('Uplink', m.online, m.uplink, m.uplinkSub, m.online ? 'on' : '');
-    y += GAP; connect(b.bot, y, m.online, m.flowing);
-    var c = block('Router', true, m.router, m.routerSub, 'on');
-
-    if (lanes.length) {
-        y += 6;
-        var lastLy = 0;
-        lanes.forEach(function (L, i) {
-            var ly = y + 10 + i * LANE;
-            lastLy = ly;
-            s.appendChild(sv('path', { 'class': 'link ' + (L.clients ? 'on' : 'off'),
-                d: 'M' + cx + ' ' + ly + ' H' + (cx + 16) }));
-            s.appendChild(svtext(cx + 24, ly + 4, L.name, 't1'));
-            s.appendChild(svtext(W - 14, ly + 4,
-                L.clients + (L.clients === 1 ? ' device' : ' devices'), 't2', 'end'));
-        });
-        s.appendChild(sv('path', { 'class': 'link on',
-            d: 'M' + cx + ' ' + c.bot + ' V' + lastLy }));
-        y += lanesH;
-    }
-
-    if (m.vpn) {
-        y += GAP;
-        var vTop = y, vMid = vTop + BH / 2;
-        s.appendChild(sv('rect', { 'class': 'nodebox ' + (m.vpnUp ? 'on' : 'bad'),
-            x: LX, y: vTop, width: NW, height: BH, rx: 2 }));
-        /* same label column as the nodes above, so the bypass reads as part of
-           the same drawing rather than a footnote to it */
-        /* "VPN", not "Encrypted path" — it fits on one line, so the label sits
-           on the same centre as every other single-line node instead of being
-           split across two. */
-        s.appendChild(svtext(LX + 12, vTop + 21, 'VPN', 'cap' + (m.vpnUp ? ' capon' : '')));
-        s.appendChild(svtext(LX + LBL, vTop + 21, m.vpnLabel, 't1'));
-        /* the bypass: up the left margin, back into the Internet node */
-        var d = 'M' + LX + ' ' + vMid + ' H14 V' + a.mid + ' H' + LX;
-        s.appendChild(sv('path', { 'class': 'link ' + (m.vpnUp ? 'on' : 'off'), d: d }));
-        if (m.vpnUp) s.appendChild(sv('path', { 'class': 'flow rev', d: d }));
-    }
-    return s;
-}
-
+/* The topology as a stack of glass nodes, not a box-drawing diagram. Same model
+   the page builds — Internet, Uplink, Router, the lanes fanning out, the VPN
+   bypass — rendered as translucent tiles joined by thin links. `compact` no
+   longer forks the drawing: the column reads identically on phone and desktop. */
 function topology(m, compact) {
-    if (compact) return topologyV(m);
-    /* HEIGHT GROWS WITH THE LANE COUNT. It used to be the constant 170, or 216
-       with a VPN node, chosen when this router had four lanes. The lanes are
-       drawn centred on midY and 40 apart, so each one added pushes 20px past
-       BOTH ends: at five - which is what adding a guest network produced - the
-       first box started at -11 and the last ended at 179, and the wrapper's
-       overflow clipped the bottom one. The numbers below reproduce 170 and 216
-       exactly at four lanes or fewer, so nothing moves on a router that has
-       not grown one.
-
-       AND THE HEIGHT IS NO LONGER PINNED IN PIXELS. `meet` scales the drawing
-       to fit its box and centres what is left over, so a fixed 170px box at any
-       width between the 660px minimum and the 980px viewBox left the drawing
-       shrunk in the middle with empty bands above and below it - the gap that
-       showed up under the last lane. `auto` lets the height follow the aspect
-       ratio instead, so the drawing always fills the space it is given. */
-    /* 34, not 40. The lane pitch set the whole drawing's height, and at four
-       lanes it was generous; at five it made the hero taller than the client
-       list it sits above. Boxes are 30 tall, so 34 keeps a 4px gutter between
-       them - tight, still legibly separate. */
-    var W = 980, laneH = 34;
-    var laneN = (m.lanes || []).length;
-    var half = laneN > 1 ? (laneN - 1) * (laneH / 2) + 21 : 45;
-    var midY = Math.max(m.vpn ? 92 : 84, half);
-    /* 124 is what sits below midY today with a VPN node: the block starts 78
-       down, is 30 tall, and keeps a margin. It has to grow with the lanes too
-       - leaving it constant reproduced the same bug one lane count further
-       out, which the geometry test caught at seven. */
-    var H = midY + (m.vpn ? Math.max(124, half) : Math.max(86, half));
-    var s = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, 'class': 'topo',
-                        preserveAspectRatio: 'xMinYMid meet' });
-    s.style.minWidth = '660px';
-    s.style.height = 'auto';
-    /* NEVER LARGER THAN IT WAS DRAWN. The width is 100% of a container that is
-       wider than this on any desktop, and the height follows the aspect ratio -
-       so on a 1270px window the whole drawing was being magnified by a third,
-       and every pixel of that magnification pushed the client list down. Capped
-       at the viewBox's own width it renders at its design size and stops. */
-    s.style.maxWidth = W + 'px';
-
-    function node(x, y, w, hh, cls) {
-        s.appendChild(sv('rect', { 'class': 'nodebox ' + (cls || ''), x: x, y: y,
-                                   width: w, height: hh, rx: 2 }));
+    var t = el('div', 'topo');
+    function node(ic, k, v, cls) {
+        var n = el('div', 'topo__node' + (cls ? ' topo__node--' + cls : ''));
+        var i = el('div', 'topo__ico'); i.appendChild(icon(ic)); n.appendChild(i);
+        var b = el('div'); b.style.minWidth = '0';
+        b.appendChild(el('div', 'topo__k', k));
+        b.appendChild(el('div', 'topo__v', v));
+        n.appendChild(b);
+        return n;
     }
-    function link(x1, y1, x2, y2, cls, live) {
-        s.appendChild(sv('path', { 'class': 'link ' + (cls || ''),
-                                   d: 'M' + x1 + ' ' + y1 + ' H' + x2 }));
-        if (live) s.appendChild(sv('path', { 'class': 'flow',
-                                   d: 'M' + x1 + ' ' + y1 + ' H' + x2 }));
-    }
-    function cap(x, y, t, on) { s.appendChild(svtext(x, y, t, 'cap' + (on ? ' capon' : ''))); }
+    function link() { return el('div', 'topo__link'); }
 
-    var NW = 150, NH = 54;
-    var col = [16, 236, 456, 688];
+    t.appendChild(node('globe', 'Internet',
+        m.online ? (m.latency || 'Reachable') : (m.latency || 'No route'),
+        m.online ? 'live' : 'bad'));
+    t.appendChild(link());
+    t.appendChild(node('eth', 'Uplink',
+        m.uplink + (m.uplinkSub ? '  ·  ' + m.uplinkSub : ''),
+        m.online ? 'live' : null));
+    t.appendChild(link());
+    t.appendChild(node('router', 'Router',
+        m.router + (m.routerSub ? '  ·  ' + m.routerSub : ''), 'live'));
 
-    node(col[0], midY - NH / 2, NW, NH, m.online ? 'on' : 'bad');
-    cap(col[0] + 12, midY - NH / 2 - 9, 'Internet', m.online);
-    s.appendChild(svtext(col[0] + 12, midY - 4, m.online ? 'Reachable' : 'No route', 't1'));
-    s.appendChild(svtext(col[0] + 12, midY + 13, m.latency, 't2'));
-
-    link(col[0] + NW, midY, col[1], midY, m.online ? 'on' : 'off', m.flowing);
-    node(col[1], midY - NH / 2, NW, NH, m.online ? 'on' : '');
-    cap(col[1] + 12, midY - NH / 2 - 9, 'Uplink', m.online);
-    s.appendChild(svtext(col[1] + 12, midY - 4, m.uplink, 't1'));
-    s.appendChild(svtext(col[1] + 12, midY + 13, m.uplinkSub, 't2'));
-
-    link(col[1] + NW, midY, col[2], midY, m.online ? 'on' : 'off', m.flowing);
-    node(col[2], midY - NH / 2, NW, NH, 'on');
-    cap(col[2] + 12, midY - NH / 2 - 9, 'Router', true);
-    s.appendChild(svtext(col[2] + 12, midY - 4, m.router, 't1'));
-    s.appendChild(svtext(col[2] + 12, midY + 13, m.routerSub, 't2'));
-
-    var lanes = m.lanes || [], n = lanes.length;
-    var laneH = 40, spanTop = midY - ((n - 1) * laneH) / 2;
-    var bx = col[2] + NW, jx = bx + 24;
-    s.appendChild(sv('path', { 'class': 'link ' + (m.online ? 'on' : ''),
-        d: 'M' + bx + ' ' + midY + ' H' + jx }));
-    if (n > 1) s.appendChild(sv('path', { 'class': 'link ' + (m.online ? 'on' : ''),
-        d: 'M' + jx + ' ' + spanTop + ' V' + (spanTop + (n - 1) * laneH) }));
-
-    lanes.forEach(function (L, i) {
-        var y = spanTop + i * laneH;
-        link(jx, y, col[3], y, L.clients ? 'on' : 'off', L.active);
-        node(col[3], y - 15, 122, 30, L.clients ? 'on' : '');
-        s.appendChild(svtext(col[3] + 10, y + 4, L.name, 't1'));
-        var cx = col[3] + 122 + 16;
-        link(col[3] + 122, y, cx, y, L.clients ? 'on' : 'off', false);
-        s.appendChild(svtext(cx + 6, y + 5, String(L.clients), 'tn'));
-        s.appendChild(svtext(cx + 6 + (String(L.clients).length * 9) + 6, y + 5,
-            L.clients === 1 ? 'device' : 'devices', 't2'));
-    });
-
-    if (m.vpn) {
-        var vy = midY + 78;
-        var sx = col[2] + NW / 2;
-        var ex = col[0] + NW / 2;
-        var lx = (sx + ex) / 2, bw = 196, bx = lx - bw / 2;
-        /* Two segments that STOP at the tunnel box, not one run passing behind
-           it. .nodebox.on is only 15% opaque, so a continuous path showed the
-           marching dash straight through the label. Router -> tunnel -> out. */
-        var dR = 'M' + sx + ' ' + (midY + NH / 2) + ' V' + (vy - 14) +
-                 ' Q' + sx + ' ' + vy + ' ' + (sx - 20) + ' ' + vy +
-                 ' H' + (bx + bw);
-        var dL = 'M' + bx + ' ' + vy + ' H' + (ex + 20) +
-                 ' Q' + ex + ' ' + vy + ' ' + ex + ' ' + (vy - 14) +
-                 ' V' + (midY + NH / 2);
-        [dR, dL].forEach(function (dd) {
-            s.appendChild(sv('path', { 'class': 'link ' + (m.vpnUp ? 'on' : 'off'), d: dd }));
-            if (m.vpnUp) s.appendChild(sv('path', { 'class': 'flow rev', d: dd }));
+    var lanes = m.lanes || [];
+    if (lanes.length) {
+        var br = el('div', 'topo__branch');
+        lanes.forEach(function (L) {
+            var leaf = el('div', 'topo__leaf' + (L.clients ? '' : ' topo__leaf--off'));
+            leaf.appendChild(el('span', null, L.name));
+            leaf.appendChild(el('span', 'n',
+                L.clients + (L.clients === 1 ? ' device' : ' devices')));
+            br.appendChild(leaf);
         });
-        s.appendChild(sv('rect', { 'class': 'nodebox ' + (m.vpnUp ? 'on' : 'bad'),
-            x: bx, y: vy - 15, width: bw, height: 30, rx: 2 }));
-        s.appendChild(svtext(bx + 12, vy + 4, m.vpnLabel, 't1'));
-        /* "VPN", matching the phone composition — the desktop drawing kept the
-           old "Encrypted path" wording because it is a separate function. */
-        cap(bx + 12, vy - 21, 'VPN', m.vpnUp);
+        t.appendChild(br);
     }
-    return s;
+    if (m.vpn) {
+        t.appendChild(link());
+        t.appendChild(node('lock', 'Encrypted path',
+            m.vpnLabel || 'Tunnel', m.vpnUp ? 'live' : 'bad'));
+    }
+    return t;
 }
+
 
 global.OS = {
     el: el, $: $, $$: $$, clear: clear, setTxt: setTxt, frag: frag, svg: svg, icon: icon,
