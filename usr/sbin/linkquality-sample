@@ -1,0 +1,11 @@
+#!/bin/sh
+# Appends one "epoch loss_pct avg_rtt_ms" line to /tmp/linkquality.log every
+# time cron runs this (every 5 min). tmpfs on purpose - a reboot losing part
+# of a day's samples is fine, this only feeds a daily average.
+LOG=/tmp/linkquality.log
+OUT=$(ping -c 5 -w 10 1.1.1.1 2>/dev/null)
+LOSS=$(echo "$OUT" | sed -n 's/.* \([0-9]*\)% packet loss.*/\1/p')
+RTT=$(echo "$OUT" | sed -n 's#.*rtt min/avg/max/mdev = [0-9.]*/\([0-9.]*\)/.*#\1#p')
+[ -z "$LOSS" ] && LOSS=100
+[ -z "$RTT" ] && RTT=0
+echo "$(date +%s) $LOSS $RTT" >> "$LOG"

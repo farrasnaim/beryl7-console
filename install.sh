@@ -306,7 +306,7 @@ for p in /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/v
          /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
          /www/cgi-bin/wireguard-api /www/qr-vendor.js \
          /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch /usr/sbin/beryl-vpndns \
-         /usr/sbin/notifymon \
+         /usr/sbin/notifymon /usr/sbin/linkquality-sample \
          /usr/sbin/wifiwatch /etc/init.d/wifiwatch \
          /usr/sbin/beryl-pbrtbl /usr/share/beryl/cgi-lib.sh \
          /etc/dashboard /etc/crontabs/root \
