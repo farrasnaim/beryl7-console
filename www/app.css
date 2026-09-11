@@ -65,36 +65,37 @@ svg{display:block}
    elevation shadows. Airy and minimal, not dark and neon. Dark theme keeps the
    same warmth — a warm charcoal, never a blue-black. */
 :root{
-  --bg:#f2f2f5;
-  --ink:#1c1c20;
-  --ink-2:rgba(28,28,34,.60);
-  --ink-3:rgba(28,28,34,.40);
+  --bg:#efe6e6;
+  --ink:#241b1b;
+  --ink-2:rgba(36,27,27,.62);
+  --ink-3:rgba(36,27,27,.42);
   --accent:#a0362d; --accent-2:#bb4a3d; --accent-ink:#fff;
-  --ok:#2fa15f; --warn:#d0912e; --bad:#d1493a; --idle:rgba(28,28,34,.26);
+  --ok:#2fa15f; --warn:#c98a2e; --bad:#c8433a; --idle:rgba(36,27,27,.26);
 
-  /* CLEAN SILVER-WHITE GROUND (file spec). No colour wash — soft light and a
-     maroon whisper so the glass slabs have a little to refract, nothing more. */
-  --m1:rgba(255,255,255,.80);
-  --m2:rgba(198,198,208,.30);
-  --m3:rgba(255,255,255,.60);
-  --m4:rgba(160,54,45,.05);
-  --m-vig:rgba(80,80,92,.05);
+  /* A MAROON GROUND, on purpose — this is what makes the glass READ as glass:
+     scroll, and each translucent card shows the maroon bleeding through,
+     blurred. Bold where the cards overlap it, calmer in the middle. */
+  --m1:rgba(170,58,48,.38);        /* maroon, top-right */
+  --m2:rgba(128,40,38,.30);        /* deep maroon, right */
+  --m3:rgba(206,132,120,.34);      /* rose, bottom-left */
+  --m4:rgba(152,48,42,.28);        /* maroon, top-left */
+  --m-vig:rgba(110,36,32,.07);
 
-  /* THE CARD — a thick white glass slab: soft ambient shadow, a hairline
-     light-grey border, a whisper of top gloss (file spec). */
-  --glass:rgba(255,255,255,.80);
-  --glass-2:rgba(255,255,255,.72);
-  --glass-hi:rgba(255,255,255,.70);
-  --card-border:rgba(24,24,34,.08);
-  --rim:rgba(255,255,255,.95);
-  --rim-hair:rgba(24,24,34,.05);
-  --rim-lo:rgba(24,24,34,.03);
-  --sep:rgba(24,24,34,.07);
-  --fieldwell:rgba(120,120,135,.09);
-  --shadow:0 10px 26px -10px rgba(30,30,50,.14),0 2px 6px -2px rgba(30,30,50,.08);
-  --shadow-sm:0 5px 14px -7px rgba(30,30,50,.14);
-  --blur:blur(18px) saturate(130%);
-  --blur-lg:blur(32px) saturate(150%);
+  /* THE CARD is genuinely TRANSLUCENT now (.52), not a near-opaque slab, so the
+     maroon comes through. Hairline border + soft shadow still hold the edge. */
+  --glass:rgba(255,252,252,.52);
+  --glass-2:rgba(255,252,252,.62);
+  --glass-hi:rgba(255,255,255,.55);
+  --card-border:rgba(90,30,28,.12);
+  --rim:rgba(255,255,255,.85);
+  --rim-hair:rgba(90,30,28,.06);
+  --rim-lo:rgba(90,30,28,.04);
+  --sep:rgba(70,28,26,.10);
+  --fieldwell:rgba(120,60,55,.09);
+  --shadow:0 12px 30px -12px rgba(90,32,28,.24),0 3px 9px -3px rgba(90,32,28,.14);
+  --shadow-sm:0 6px 16px -8px rgba(90,32,28,.20);
+  --blur:blur(22px) saturate(150%);
+  --blur-lg:blur(34px) saturate(160%);
 
   /* type/space/radii (unchanged) */
   --t-hero:30px; --t-title:19px; --t-card:15.5px; --t-body:14px; --t-sub:12.5px; --t-cap:11px;
@@ -120,33 +121,33 @@ svg{display:block}
    to dark; the default face of this console is the warm light one above. */
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#131316;
-  --ink:#f2f2f5; --ink-2:rgba(242,242,245,.62); --ink-3:rgba(242,242,245,.40);
-  --accent:#cf6152; --accent-2:#e08373; --accent-ink:#fff;
-  --ok:#4fce8b; --warn:#e0ac54; --bad:#e2705a; --idle:rgba(242,242,245,.28);
-  --m1:rgba(96,96,110,.24); --m2:rgba(70,70,82,.18);
-  --m3:rgba(52,52,62,.22); --m4:rgba(207,97,82,.08); --m-vig:rgba(0,0,0,.40);
-  --glass:rgba(44,44,50,.72); --glass-2:rgba(52,52,58,.66); --glass-hi:rgba(255,255,255,.08);
-  --card-border:rgba(255,255,255,.09);
-  --rim:rgba(255,255,255,.16); --rim-hair:rgba(255,255,255,.06); --rim-lo:rgba(0,0,0,.3);
-  --sep:rgba(255,255,255,.08); --fieldwell:rgba(0,0,0,.26);
-  --shadow:0 14px 32px -12px rgba(0,0,0,.55),0 3px 10px -5px rgba(0,0,0,.4);
-  --shadow-sm:0 8px 20px -10px rgba(0,0,0,.5);
+  --bg:#190c0e;
+  --ink:#f4eceb; --ink-2:rgba(244,236,235,.64); --ink-3:rgba(244,236,235,.42);
+  --accent:#d06a5b; --accent-2:#e28776; --accent-ink:#fff;
+  --ok:#54ce8c; --warn:#e0ac54; --bad:#e8735c; --idle:rgba(244,236,235,.30);
+  --m1:rgba(168,52,44,.42); --m2:rgba(124,36,36,.34);
+  --m3:rgba(92,32,34,.32); --m4:rgba(188,74,60,.30); --m-vig:rgba(0,0,0,.42);
+  --glass:rgba(46,26,28,.44); --glass-2:rgba(56,32,34,.54); --glass-hi:rgba(255,255,255,.08);
+  --card-border:rgba(255,225,220,.10);
+  --rim:rgba(255,255,255,.15); --rim-hair:rgba(255,255,255,.06); --rim-lo:rgba(0,0,0,.32);
+  --sep:rgba(255,235,230,.09); --fieldwell:rgba(0,0,0,.28);
+  --shadow:0 14px 32px -12px rgba(0,0,0,.6),0 3px 10px -5px rgba(0,0,0,.42);
+  --shadow-sm:0 8px 20px -10px rgba(0,0,0,.52);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   color-scheme:dark;
-  --bg:#131316;
-  --ink:#f2f2f5; --ink-2:rgba(242,242,245,.62); --ink-3:rgba(242,242,245,.40);
-  --accent:#cf6152; --accent-2:#e08373; --accent-ink:#fff;
-  --ok:#4fce8b; --warn:#e0ac54; --bad:#e2705a; --idle:rgba(242,242,245,.28);
-  --m1:rgba(96,96,110,.24); --m2:rgba(70,70,82,.18);
-  --m3:rgba(52,52,62,.22); --m4:rgba(207,97,82,.08); --m-vig:rgba(0,0,0,.40);
-  --glass:rgba(44,44,50,.72); --glass-2:rgba(52,52,58,.66); --glass-hi:rgba(255,255,255,.08);
-  --card-border:rgba(255,255,255,.09);
-  --rim:rgba(255,255,255,.16); --rim-hair:rgba(255,255,255,.06); --rim-lo:rgba(0,0,0,.3);
-  --sep:rgba(255,255,255,.08); --fieldwell:rgba(0,0,0,.26);
-  --shadow:0 14px 32px -12px rgba(0,0,0,.55),0 3px 10px -5px rgba(0,0,0,.4);
-  --shadow-sm:0 8px 20px -10px rgba(0,0,0,.5);
+  --bg:#190c0e;
+  --ink:#f4eceb; --ink-2:rgba(244,236,235,.64); --ink-3:rgba(244,236,235,.42);
+  --accent:#d06a5b; --accent-2:#e28776; --accent-ink:#fff;
+  --ok:#54ce8c; --warn:#e0ac54; --bad:#e8735c; --idle:rgba(244,236,235,.30);
+  --m1:rgba(168,52,44,.42); --m2:rgba(124,36,36,.34);
+  --m3:rgba(92,32,34,.32); --m4:rgba(188,74,60,.30); --m-vig:rgba(0,0,0,.42);
+  --glass:rgba(46,26,28,.44); --glass-2:rgba(56,32,34,.54); --glass-hi:rgba(255,255,255,.08);
+  --card-border:rgba(255,225,220,.10);
+  --rim:rgba(255,255,255,.15); --rim-hair:rgba(255,255,255,.06); --rim-lo:rgba(0,0,0,.32);
+  --sep:rgba(255,235,230,.09); --fieldwell:rgba(0,0,0,.28);
+  --shadow:0 14px 32px -12px rgba(0,0,0,.6),0 3px 10px -5px rgba(0,0,0,.42);
+  --shadow-sm:0 8px 20px -10px rgba(0,0,0,.52);
 }}
 :root[data-theme="light"]{color-scheme:light}
 
@@ -276,15 +277,14 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 /* ─── 7. STATUS, TAGS, SIGNAL, METERS ──────────────────────────────────────
    Sentence case everywhere. A state is a coloured dot + a word, or a soft
    tinted capsule — never an all-caps shout. */
+/* No dot. On a Wi-Fi row the signal BARS carry the quality; a wired/offline
+   row shows the word in its tone. Cleaner, and it gives the name back its
+   width. */
 .tag{display:inline-flex;align-items:center;gap:6px;font-size:var(--t-sub);font-weight:600;
-  color:var(--ink-2);white-space:nowrap;text-transform:none}
-.tag::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--idle);flex:none}
-.tag--ok{color:var(--ink)}.tag--ok::before{background:var(--ok);box-shadow:0 0 8px var(--ok)}
-.tag--fair::before{background:var(--ok);opacity:.7}
-.tag--warn{color:var(--ink)}.tag--warn::before{background:var(--warn);box-shadow:0 0 8px var(--warn)}
-.tag--bad{color:var(--ink)}.tag--bad::before{background:var(--bad);box-shadow:0 0 8px var(--bad)}
-.tag--idle::before{background:var(--idle)}
-.tag--flat::before{display:none}
+  white-space:nowrap;text-transform:none;color:var(--ink-2)}
+.tag--ok{color:var(--ok)} .tag--fair{color:var(--ok)}
+.tag--warn{color:var(--warn)} .tag--bad{color:var(--bad)}
+.tag--idle{color:var(--ink-3)}
 
 /* capsule (chips): filter states, selectors, labels */
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:var(--t-cap);font-weight:600;
@@ -688,6 +688,9 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   .row+.row::before{left:calc(var(--s4) + 44px)}
   .row__ico{width:32px;height:32px;border-radius:11px}
   .row__ico svg{width:16px;height:16px}
+  /* never truncate a device name to "…"; let a long one take a second line */
+  .row__nm{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;
+    -webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
   .row__end{gap:10px}
   .row__num{display:none}
   .sig{height:14px}
