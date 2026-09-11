@@ -65,7 +65,7 @@ svg{display:block}
    elevation shadows. Airy and minimal, not dark and neon. Dark theme keeps the
    same warmth — a warm charcoal, never a blue-black. */
 :root{
-  --bg:#efe6e6;
+  --bg:#efece8;
   --ink:#241b1b;
   --ink-2:rgba(36,27,27,.62);
   --ink-3:rgba(36,27,27,.42);
@@ -75,11 +75,11 @@ svg{display:block}
   /* A MAROON GROUND, on purpose — this is what makes the glass READ as glass:
      scroll, and each translucent card shows the maroon bleeding through,
      blurred. Bold where the cards overlap it, calmer in the middle. */
-  --m1:rgba(170,58,48,.38);        /* maroon, top-right */
-  --m2:rgba(128,40,38,.30);        /* deep maroon, right */
-  --m3:rgba(206,132,120,.34);      /* rose, bottom-left */
-  --m4:rgba(152,48,42,.28);        /* maroon, top-left */
-  --m-vig:rgba(110,36,32,.07);
+  --m1:rgba(164,52,44,.34);        /* maroon circle */
+  --m2:rgba(198,120,110,.30);      /* rose circle */
+  --m3:rgba(140,42,40,.32);        /* deep maroon circle */
+  --m4:rgba(178,72,62,.26);        /* soft maroon circle */
+  --m-vig:rgba(110,36,32,.04);
 
   /* THE CARD is genuinely TRANSLUCENT now (.52), not a near-opaque slab, so the
      maroon comes through. Hairline border + soft shadow still hold the edge. */
@@ -121,12 +121,12 @@ svg{display:block}
    to dark; the default face of this console is the warm light one above. */
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#190c0e;
+  --bg:#161016;
   --ink:#f4eceb; --ink-2:rgba(244,236,235,.64); --ink-3:rgba(244,236,235,.42);
   --accent:#d06a5b; --accent-2:#e28776; --accent-ink:#fff;
   --ok:#54ce8c; --warn:#e0ac54; --bad:#e8735c; --idle:rgba(244,236,235,.30);
-  --m1:rgba(168,52,44,.42); --m2:rgba(124,36,36,.34);
-  --m3:rgba(92,32,34,.32); --m4:rgba(188,74,60,.30); --m-vig:rgba(0,0,0,.42);
+  --m1:rgba(184,58,48,.44); --m2:rgba(126,38,40,.38);
+  --m3:rgba(150,48,44,.38); --m4:rgba(200,82,66,.32); --m-vig:rgba(0,0,0,.34);
   --glass:rgba(46,26,28,.44); --glass-2:rgba(56,32,34,.54); --glass-hi:rgba(255,255,255,.08);
   --card-border:rgba(255,225,220,.10);
   --rim:rgba(255,255,255,.15); --rim-hair:rgba(255,255,255,.06); --rim-lo:rgba(0,0,0,.32);
@@ -136,12 +136,12 @@ svg{display:block}
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   color-scheme:dark;
-  --bg:#190c0e;
+  --bg:#161016;
   --ink:#f4eceb; --ink-2:rgba(244,236,235,.64); --ink-3:rgba(244,236,235,.42);
   --accent:#d06a5b; --accent-2:#e28776; --accent-ink:#fff;
   --ok:#54ce8c; --warn:#e0ac54; --bad:#e8735c; --idle:rgba(244,236,235,.30);
-  --m1:rgba(168,52,44,.42); --m2:rgba(124,36,36,.34);
-  --m3:rgba(92,32,34,.32); --m4:rgba(188,74,60,.30); --m-vig:rgba(0,0,0,.42);
+  --m1:rgba(184,58,48,.44); --m2:rgba(126,38,40,.38);
+  --m3:rgba(150,48,44,.38); --m4:rgba(200,82,66,.32); --m-vig:rgba(0,0,0,.34);
   --glass:rgba(46,26,28,.44); --glass-2:rgba(56,32,34,.54); --glass-hi:rgba(255,255,255,.08);
   --card-border:rgba(255,225,220,.10);
   --rim:rgba(255,255,255,.15); --rim-hair:rgba(255,255,255,.06); --rim-lo:rgba(0,0,0,.32);
@@ -153,16 +153,22 @@ svg{display:block}
 
 /* the ground — a soft warm wash, barely drifting. This is what the frosted
    cards pick up; it is calm on purpose, the opposite of a neon mesh. */
-body::before{content:"";position:fixed;inset:-15%;z-index:-2;pointer-events:none;
+/* A PLAIN ground with a handful of maroon CIRCLE motifs — round and uneven,
+   scattered — so the page is not a flat wash but a few orbs. The translucent
+   cards passing over them are where the glass reads: scroll, and a card lights
+   up maroon as an orb slides under it. `circle <size>` draws true discs, not
+   viewport ellipses, so they stay round and distinct. */
+body::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
   background:
-    radial-gradient(46% 50% at 88% 6%,var(--m1),transparent 62%),
-    radial-gradient(40% 44% at 100% 40%,var(--m2),transparent 64%),
-    radial-gradient(56% 54% at 6% 100%,var(--m3),transparent 64%),
-    radial-gradient(38% 38% at 4% 4%,var(--m4),transparent 62%);
-  background-color:var(--bg);
-  animation:drift 40s var(--ease) infinite alternate}
+    radial-gradient(circle 15rem at 86% 9%, var(--m1), transparent 68%),
+    radial-gradient(circle 22rem at 8% 28%, var(--m3), transparent 70%),
+    radial-gradient(circle 12rem at 66% 54%, var(--m2), transparent 68%),
+    radial-gradient(circle 18rem at 24% 88%, var(--m4), transparent 70%),
+    radial-gradient(circle 9rem at 94% 78%, var(--m1), transparent 66%),
+    radial-gradient(circle 11rem at 46% 116%, var(--m3), transparent 68%);
+  animation:drift 44s var(--ease) infinite alternate}
 body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-  background:radial-gradient(130% 100% at 50% 30%,transparent 62%,var(--m-vig) 100%)}
+  background:radial-gradient(130% 100% at 50% 40%,transparent 66%,var(--m-vig) 100%)}
 @keyframes drift{0%{transform:translate3d(0,0,0) scale(1)}
   100%{transform:translate3d(-2%,-1.5%,0) scale(1.05)}}
 @media (prefers-reduced-motion:reduce){body::before{animation:none}}
@@ -697,4 +703,20 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   .panel__h,.panel__b,.tbl__group,.det{padding-left:var(--s4);padding-right:var(--s4)}
   .topo__branch{margin-left:var(--s5)}
   .topo__node{padding:11px 13px}
+}
+
+
+/* ─── 18. WIDE LAYOUT — fill the screen, two columns ───────────────────────
+   On a desktop or an iPad the single tall column left half the screen empty.
+   The page flows into two balanced columns now (the title spans both), so the
+   right half is used. break-inside keeps a card whole; break-after keeps a
+   section heading with the card it introduces. */
+@media (min-width:1120px){
+  .main{margin-left:max(288px,calc(50vw - 632px));margin-right:auto;max-width:1264px;
+    columns:2;column-gap:var(--s6)}
+  .main>.head{column-span:all;margin-bottom:var(--s4)}
+  .main>#alerts,.main>#jobs{column-span:all}
+  .main>*{break-inside:avoid}
+  .sect{break-after:avoid;margin-top:var(--s5)}
+  .sect:first-of-type{margin-top:0}
 }

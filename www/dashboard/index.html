@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/app.css?v=57b476f4">
+<link rel="stylesheet" href="/app.css?v=86aea9ea">
 </head>
 <body>
 <div class="shell">
@@ -147,7 +147,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=dd314494"></script>
+<script src="/os.js?v=ca7a632b"></script>
 <script>
 (function () {
 'use strict';
@@ -1315,7 +1315,9 @@ function rowFor(mac) {
                 subBits.push('wired');
             }
         }
-        if (v.ip) subBits.push(v.ip);
+        /* No IP on the collapsed row — it is one tap away in the detail, and
+           dropping it keeps the identity line to what you scan by: band and
+           generation, or the negotiated wired speed. */
         setTxt(r._sub, subBits.join('  ·  ') || v.mac);
 
         var wifi = v.medium === '5' || v.medium === '2.4';
