@@ -19,6 +19,13 @@
 # A separate --user-data-dir is not optional: Chrome refuses to start headless
 # against a profile an interactive window already holds, and the failure is a
 # silent missing file rather than an error.
+#
+# -W HAS A FLOOR OF ABOUT 500 ON WINDOWS. headless=new drives a real window and
+# Windows will not make one narrower than roughly 500px, so -W 420 lays the page
+# out at ~500 and then crops the image to 420. Everything at the right edge
+# looks clipped and the page looks broken at phone width when it is not — the
+# tell is the fixed bottom tab bar being cut off, which cannot happen if the
+# viewport really were 420. Use -W 520 as the narrowest honest phone check.
 
 param(
   [string]$Router = '192.168.8.1',
