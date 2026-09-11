@@ -94,7 +94,7 @@ rewritten=""
 # would make the hash chase its own tail. Strip both, and the version depends
 # only on content a human actually edited.
 norm() { sed -e 's/?v=[0-9a-f]*//g' -e '/^var CONSOLE_VERSION/d' "$@"; }
-VER=$( { norm os.css os.js; for p in */index.html; do
+VER=$( { norm app.css os.js; for p in */index.html; do
              case "$p" in legacy/*) continue ;; esac; norm "$p"; done
        } | md5sum | cut -c1-10 )
 
@@ -118,7 +118,7 @@ for f in os.js cgi-bin/version-api; do
 done
 
 # ---- 2. now hash the assets, os.js having reached its final content ---------
-CSS=$(hash_of os.css)
+CSS=$(hash_of app.css)
 JS=$(hash_of os.js)
 
 for page in */index.html; do
@@ -128,7 +128,7 @@ for page in */index.html; do
 
     # matches both the bare form and an already-stamped one
     sed -i \
-        -e 's|href="/os\.css\(?v=[0-9a-f]*\)\?"|href="/os.css?v='"$CSS"'"|g' \
+        -e 's|href="/app\.css\(?v=[0-9a-f]*\)\?"|href="/app.css?v='"$CSS"'"|g' \
         -e 's|src="/os\.js\(?v=[0-9a-f]*\)\?"|src="/os.js?v='"$JS"'"|g' \
         "$page"
 
@@ -140,7 +140,7 @@ for page in */index.html; do
     fi
 done
 
-echo "  os.css=$CSS  os.js=$JS  console version=$VER  ($changed file(s) rewritten)"
+echo "  app.css=$CSS  os.js=$JS  console version=$VER  ($changed file(s) rewritten)"
 
 # ---- 3. say out loud what must now ship together -----------------------------
 #
