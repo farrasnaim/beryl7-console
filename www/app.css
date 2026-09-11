@@ -69,15 +69,15 @@ svg{display:block}
   --ink:#2a241f;
   --ink-2:rgba(42,36,31,.60);
   --ink-3:rgba(42,36,31,.40);
-  --accent:#df7c2b; --accent-2:#eba24a; --accent-ink:#fff;
+  --accent:#a03a32; --accent-2:#bb4d40; --accent-ink:#fff;
   --ok:#3f9d6c; --warn:#dd9a34; --bad:#d5573a; --idle:rgba(42,36,31,.28);
 
   /* soft warm wash — peach, amber, a breath of rose. Gentle, not saturated. */
-  --m1:rgba(240,170,110,.50);      /* peach, top-right */
-  --m2:rgba(232,140,70,.30);       /* amber, right */
-  --m3:rgba(246,214,180,.55);      /* cream light, bottom-left */
-  --m4:rgba(226,150,120,.22);      /* warm rose, top-left */
-  --m-vig:rgba(150,110,70,.05);
+  --m1:rgba(200,120,108,.42);      /* soft rose, top-right */
+  --m2:rgba(160,70,60,.20);        /* maroon breath, right */
+  --m3:rgba(242,222,208,.55);      /* warm cream, bottom-left */
+  --m4:rgba(198,120,110,.20);      /* blush, top-left */
+  --m-vig:rgba(130,80,60,.05);
 
   /* the card material: near-white, softly frosted, lifted by a warm shadow */
   --glass:rgba(255,255,255,.66);
@@ -119,10 +119,10 @@ svg{display:block}
   color-scheme:dark;
   --bg:#171310;
   --ink:#f3ede4; --ink-2:rgba(243,237,228,.64); --ink-3:rgba(243,237,228,.42);
-  --accent:#ef9243; --accent-2:#f6b25f; --accent-ink:#241606;
+  --accent:#cf6152; --accent-2:#e08373; --accent-ink:#fff;
   --ok:#54c98d; --warn:#e6b45a; --bad:#e77a5f; --idle:rgba(243,237,228,.30);
-  --m1:rgba(224,124,43,.34); --m2:rgba(200,110,50,.24);
-  --m3:rgba(120,80,45,.30); --m4:rgba(180,90,70,.20); --m-vig:rgba(0,0,0,.34);
+  --m1:rgba(200,88,74,.32); --m2:rgba(150,55,48,.24);
+  --m3:rgba(90,55,52,.30); --m4:rgba(170,80,70,.20); --m-vig:rgba(0,0,0,.34);
   --glass:rgba(46,39,32,.52); --glass-2:rgba(54,46,38,.62); --glass-hi:rgba(255,255,255,.07);
   --rim:rgba(255,255,255,.34); --rim-hair:rgba(255,255,255,.07); --rim-lo:rgba(0,0,0,.28);
   --sep:rgba(255,255,255,.075); --fieldwell:rgba(0,0,0,.24);
@@ -133,10 +133,10 @@ svg{display:block}
   color-scheme:dark;
   --bg:#171310;
   --ink:#f3ede4; --ink-2:rgba(243,237,228,.64); --ink-3:rgba(243,237,228,.42);
-  --accent:#ef9243; --accent-2:#f6b25f; --accent-ink:#241606;
+  --accent:#cf6152; --accent-2:#e08373; --accent-ink:#fff;
   --ok:#54c98d; --warn:#e6b45a; --bad:#e77a5f; --idle:rgba(243,237,228,.30);
-  --m1:rgba(224,124,43,.34); --m2:rgba(200,110,50,.24);
-  --m3:rgba(120,80,45,.30); --m4:rgba(180,90,70,.20); --m-vig:rgba(0,0,0,.34);
+  --m1:rgba(200,88,74,.32); --m2:rgba(150,55,48,.24);
+  --m3:rgba(90,55,52,.30); --m4:rgba(170,80,70,.20); --m-vig:rgba(0,0,0,.34);
   --glass:rgba(46,39,32,.52); --glass-2:rgba(54,46,38,.62); --glass-hi:rgba(255,255,255,.07);
   --rim:rgba(255,255,255,.34); --rim-hair:rgba(255,255,255,.07); --rim-lo:rgba(0,0,0,.28);
   --sep:rgba(255,255,255,.075); --fieldwell:rgba(0,0,0,.24);
@@ -648,3 +648,21 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   padding:9px 32px 9px 13px;border-radius:var(--r-pill);font-size:var(--t-sub)}
 .row--route,.row--pick{gap:var(--s3)}
 @media (max-width:420px){.row--route .select,.row--pick .select{min-width:118px}}
+
+
+/* ─── 16. THEME TOGGLE — one icon, the current mode ────────────────────────
+   No accent picker any more (the accent is a single baked-in maroon), and the
+   theme control is one glyph showing where you ARE: a sun in light, a moon in
+   dark. It flips with the theme, not on hover. */
+.themetoggle .moon{display:none}
+.themetoggle .sun{display:block}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .themetoggle .sun{display:none}
+  :root:not([data-theme="light"]) .themetoggle .moon{display:block}
+}
+:root[data-theme="dark"] .themetoggle .sun{display:none}
+:root[data-theme="dark"] .themetoggle .moon{display:block}
+:root[data-theme="light"] .themetoggle .sun{display:block}
+:root[data-theme="light"] .themetoggle .moon{display:none}
+.themetoggle svg{stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.themetoggle .moon{fill:currentColor;stroke:none}

@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '374af4fc19';
+var CONSOLE_VERSION = 'dd773cad82';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -944,8 +944,7 @@ function buildShell(activeHref) {
 
         var foot = el('div', 'spine__foot');
         foot.appendChild(transportEl());
-        var ab = accentPicker(); ab.classList.add('push');
-        foot.appendChild(ab);
+        foot.appendChild(el('div', 'push'));
         foot.appendChild(themeBtn());
         foot.appendChild(settingsBtn(activeHref));
         sp.appendChild(foot);
@@ -961,7 +960,6 @@ function buildShell(activeHref) {
         var sp2 = el('div'); sp2.className = 'push';
         tl.appendChild(sp2);
         tl.appendChild(transportEl());
-        tl.appendChild(accentPicker());
         tl.appendChild(themeBtn());
         tl.appendChild(settingsBtn(activeHref));
     }
@@ -1091,9 +1089,9 @@ function accentPicker() {
     return wrap;
 }
 function themeBtn() {
-    var b = el('button', 'iconbtn');
+    var b = el('button', 'iconbtn themetoggle');
     b.type = 'button';
-    b.setAttribute('aria-label', 'Toggle light or dark theme');
+    b.setAttribute('aria-label', 'Switch between light and dark');
     b.appendChild(svg('<svg class="moon" viewBox="0 0 20 20"><path d="M17 10.7A7.5 7.5 0 1 1 9.3 3a5.8 5.8 0 0 0 7.7 7.7z"/></svg>'));
     b.appendChild(svg('<svg class="sun" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.4"/><path d="M10 2v2M10 16v2M3.5 3.5l1.4 1.4M15.1 15.1l1.4 1.4M2 10h2M16 10h2M3.5 16.5l1.4-1.4M15.1 4.9l1.4-1.4"/></svg>'));
     b.addEventListener('click', function () {
@@ -1431,21 +1429,11 @@ global.OS = {
 };
 })(window);
 
-/* Apply the stored theme and accent before first paint to avoid a flash. */
+/* Apply the stored theme before first paint to avoid a flash. The accent is a
+   single baked-in maroon now — there is no picker and no data-accent. */
 (function () {
     try {
         var t = localStorage.getItem('beryl-theme');
         if (t) document.documentElement.setAttribute('data-theme', t);
-        /* Maroon is the console's colour, so it is what an unconfigured
-           browser gets. The ATTRIBUTE-ABSENT case is still the green base
-           palette in os.css — "Green" in the picker writes 'mint' and clears
-           the attribute — but absent-from-storage now resolves to maroon
-           rather than falling through to it. */
-        var a = localStorage.getItem('beryl-accent') || 'maroon';
-        /* validate against the known set: a stale or hand-edited value must
-           not leave the page stuck on an attribute no CSS defines */
-        if (a !== 'mint' && ['maroon', 'navy', 'grey'].indexOf(a) >= 0) {
-            document.documentElement.setAttribute('data-accent', a);
-        }
     } catch (e) {}
 })();
