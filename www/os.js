@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '1ae8dc793e';
+var CONSOLE_VERSION = '65edc77de8';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -989,10 +989,23 @@ function buildShell(activeHref) {
     layoutColumns();
     /* Once more after the first data has landed: a skeleton and a filled card
        are not the same height, and the deal below is by height. */
-    setTimeout(layoutColumns, 1200);
+    setTimeout(function () {
+        /* ...but never under a reader who has already started scrolling. A card
+           that moves out from under the finger is worse than a pair of columns
+           that end a little unevenly, so once the page has been scrolled the
+           first deal is the one it keeps. */
+        if ((window.pageYOffset || document.documentElement.scrollTop || 0) > 8) return;
+        layoutColumns();
+    }, 1200);
     if (window.matchMedia) {
-        var rt;
+        var rt, lastW = window.innerWidth;
         window.addEventListener('resize', function () {
+            /* Only a WIDTH change can change the deal. iPadOS and mobile Safari
+               fire resize as the address bar collapses and expands on scroll —
+               a height change — and re-dealing there made the cards hop about
+               under the finger mid-scroll. */
+            if (window.innerWidth === lastW) return;
+            lastW = window.innerWidth;
             clearTimeout(rt); rt = setTimeout(layoutColumns, 180);
         });
     }

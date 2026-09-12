@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <title>Settings — Beryl 7</title>
 <script>(function(){var t=null;try{t=localStorage.getItem('beryl-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
-<link rel="stylesheet" href="/app.css?v=c7a72035">
+<link rel="stylesheet" href="/app.css?v=d8dad24e">
 </head>
 <body>
 <div class="shell">
@@ -107,7 +107,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=dfdca360"></script>
+<script src="/os.js?v=670e146d"></script>
 <script>
 (function () {
 'use strict';
@@ -1587,11 +1587,13 @@ function renderLog() {
            everything else. Typing wireguard, wgroad or wgmgmt isolates them;
            so does any other word, which is why this is a text box and not a
            fourth button naming one subsystem. */
-        var q = el('input', 'input');
+        var q = el('input', 'input logq');
         q.type = 'search';
         q.placeholder = 'Filter, e.g. wireguard';
         q.setAttribute('aria-label', 'Filter the log');
-        q.style.cssText = 'width:170px;min-height:28px;padding:4px 10px;font-size:12px';
+        /* Width lives in .logq, not here: an inline width cannot be overridden
+           by the phone rule that lets this box share a line with the segment. */
+        q.style.cssText = 'min-height:28px;padding:4px 10px;font-size:12px';
         var qt = null;
         q.addEventListener('input', function () {
             /* Debounced: every keystroke would otherwise cost the router a

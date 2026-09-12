@@ -221,6 +221,16 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .panel__aside{margin-left:auto;display:flex;align-items:center;gap:var(--s2);color:var(--ink-2)}
 .panel__b{padding:var(--s3) var(--s5) var(--s4)}
 .panel__b--flush{padding:0}
+/* A header aside carrying a segmented control AND a search box is wider than a
+   phone card; the row stayed on one line and the controls hung over the pane's
+   edge. On a phone the aside drops to its own line and takes the full width. */
+@media (max-width:760px){
+  .panel__h{flex-wrap:wrap;row-gap:var(--s2)}
+  .panel__aside{margin-left:0;width:100%;flex-wrap:wrap;row-gap:var(--s2)}
+  .panel__aside .seg{flex:none;max-width:100%}
+  .panel__aside .input{flex:1 1 150px;width:auto;min-width:0}
+}
+.logq{width:170px}
 
 /* the hairline that divides panels stacked in one pane — inset, faint, iOS */
 .face .panel+.panel{position:relative}
