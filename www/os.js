@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '65c8cd8edd';
+var CONSOLE_VERSION = 'acef32880d';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -979,6 +979,98 @@ function buildShell(activeHref) {
        moment and the frequency this check wants — so it hooks here rather than
        asking five pages to remember to call it. */
     checkStale();
+    layoutColumns();
+    /* Once more after the first data has landed: a skeleton and a filled card
+       are not the same height, and the deal below is by height. */
+    setTimeout(layoutColumns, 1200);
+    if (window.matchMedia) {
+        var rt;
+        window.addEventListener('resize', function () {
+            clearTimeout(rt); rt = setTimeout(layoutColumns, 180);
+        });
+    }
+}
+
+/* ---- WIDE LAYOUT: two columns that actually balance ------------------------
+   CSS multi-column splits a flow by content, and with cards that must not break
+   it leaves one column running far past the other — which is exactly what read
+   as lopsided. This deals whole BLOCKS instead: a section heading plus the card
+   it introduces travel together, and each block goes to whichever column is
+   shorter so far. Below the breakpoint everything is put back in one flow. */
+var WIDE = window.matchMedia ? window.matchMedia('(min-width:1120px)') : null;
+function flattenCols(main) {
+    /* A spanned block sits OUTSIDE .cols, so unwrap those in place first —
+       missing them meant the second pass saw a leftover wrapper instead of the
+       element it wrapped, lost the span, and dealt the hero into a column. */
+    $$('.block--span', main).forEach(function (b) {
+        while (b.firstChild) b.parentNode.insertBefore(b.firstChild, b);
+        b.parentNode.removeChild(b);
+    });
+    var wrap = $('.cols', main);
+    if (!wrap) return false;
+    var frag = document.createDocumentFragment();
+    $$('.block', wrap).forEach(function (b) {
+        while (b.firstChild) frag.appendChild(b.firstChild);
+    });
+    main.insertBefore(frag, wrap);
+    main.removeChild(wrap);
+    return true;
+}
+function layoutColumns() {
+    var main = $('.main');
+    if (!main || !WIDE) return;
+    flattenCols(main);
+    if (!WIDE.matches) return;
+
+    /* Group the flow into blocks. A .sect opens one and the card after it joins,
+       so a heading never parts from what it introduces; a card that has no
+       heading of its own is a block by itself. Pages differ here — the overview
+       leads with headings, VPN is all bare cards — and keying only on .sect put
+       every VPN card in one block, i.e. one column. The masthead and the
+       page-wide alert slots stay outside and span. */
+    var groups = [], cur = null, afterSect = false;
+    [].slice.call(main.children).forEach(function (n) {
+        var c = n.classList;
+        if (c.contains('topline') || c.contains('head') ||
+            n.id === 'alerts' || n.id === 'jobs') { afterSect = false; return; }
+        var isSect = c.contains('sect');
+        var isCard = c.contains('face') || c.contains('face--open');
+        if (isSect || (isCard && !afterSect) || !cur) { cur = []; groups.push(cur); }
+        cur.push(n);
+        afterSect = isSect;
+    });
+    if (groups.length < 2) return;
+
+    var wrap = el('div', 'cols');
+    var a = el('div', 'col'), b = el('div', 'col');
+    wrap.appendChild(a); wrap.appendChild(b);
+    main.appendChild(wrap);
+
+    var ha = 0, hb = 0;
+    groups.forEach(function (g) {
+        var block = el('div', 'block');
+        /* Only the VPN path drawing spans: it is a wide SVG that clips inside
+           half the width. The overview's topology is a vertical stack and reads
+           fine in a column — spanning THAT would leave the right half empty,
+           which is the whole thing we are fixing. */
+        var span = g.some(function (n) {
+            return n.id === 'vpnmap' || (n.querySelector && n.querySelector('#vpnmap'));
+        });
+        g.forEach(function (n) { block.appendChild(n); });
+        if (span) {
+            /* The uncontained hero — the path drawing — spans both columns. It is
+               a wide diagram that clipped inside half the width, and putting it
+               above the columns is also what lets BOTH of them start at the same
+               line, which is most of what reads as symmetric. */
+            block.className = 'block block--span';
+            main.insertBefore(block, wrap);
+            return;
+        }
+        var toA = ha <= hb;
+        (toA ? a : b).appendChild(block);
+        var h = block.offsetHeight || 0;
+        if (toA) ha += h; else hb += h;
+    });
 }
 function transportEl() {
     var t = el('div', 'tp');
@@ -1095,8 +1187,8 @@ function themeBtn() {
     b.appendChild(svg('<svg class="moon" viewBox="0 0 20 20"><path d="M17 10.7A7.5 7.5 0 1 1 9.3 3a5.8 5.8 0 0 0 7.7 7.7z"/></svg>'));
     b.appendChild(svg('<svg class="sun" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.4"/><path d="M10 2v2M10 16v2M3.5 3.5l1.4 1.4M15.1 15.1l1.4 1.4M2 10h2M16 10h2M3.5 16.5l1.4-1.4M15.1 4.9l1.4-1.4"/></svg>'));
     b.addEventListener('click', function () {
-        var cur = document.documentElement.getAttribute('data-theme');
-        if (!cur) cur = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        var cur = document.documentElement.getAttribute('data-theme') === 'dark'
+            ? 'dark' : 'light';
         var next = cur === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', next);
         try { localStorage.setItem('beryl-theme', next); } catch (e) {}
@@ -1429,11 +1521,17 @@ global.OS = {
 };
 })(window);
 
-/* Apply the stored theme before first paint to avoid a flash. The accent is a
-   single baked-in maroon now — there is no picker and no data-accent. */
+/* THEME. data-theme is ALWAYS written, resolved to a real value — never left
+   absent to be inferred later. Leaving it unset meant the choice only survived
+   while the media query happened to agree with it, which is why "light" on a
+   dark phone came back dark on the next reload. Each page also runs this in its
+   <head> so the resolved theme is in place before first paint. */
 (function () {
-    try {
-        var t = localStorage.getItem('beryl-theme');
-        if (t) document.documentElement.setAttribute('data-theme', t);
-    } catch (e) {}
+    var t = null;
+    try { t = localStorage.getItem('beryl-theme'); } catch (e) {}
+    if (t !== 'light' && t !== 'dark') {
+        t = (window.matchMedia &&
+             window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    }
+    document.documentElement.setAttribute('data-theme', t);
 })();

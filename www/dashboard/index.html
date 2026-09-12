@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
-<link rel="stylesheet" href="/app.css?v=86aea9ea">
+<script>(function(){var t=null;try{t=localStorage.getItem('beryl-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
+<link rel="stylesheet" href="/app.css?v=8cac980e">
 </head>
 <body>
 <div class="shell">
@@ -147,7 +148,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=ca7a632b"></script>
+<script src="/os.js?v=24eebf36"></script>
 <script>
 (function () {
 'use strict';
@@ -1342,13 +1343,9 @@ function rowFor(mac) {
         } else {
             r._word.appendChild(OS.stateWord('OFFLINE', 'idle'));
         }
-        /* the entity's footprint: what it has moved today, on every row */
-        if (v.traffic && (v.traffic.dn + v.traffic.up) > 0) {
-            r._word.appendChild(el('div', 'row__cap',
-                OS.bytes(v.traffic.dn + v.traffic.up) + ' today'));
-        } else if (v.links.length && v.idleMs >= 3000) {
-            r._word.appendChild(el('div', 'row__cap', 'idle ' + OS.dur(v.idleMs / 1000)));
-        }
+        /* No per-row byte count: "Traffic today" further down the page already
+           ranks every device by exactly this figure, and carrying it twice made
+           the row taller and the list noisier for no new information. */
 
         r._caret.style.transform = 'rotate(' + (expanded[v.mac] ? '225deg' : '45deg') + ')';
     };

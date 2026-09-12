@@ -221,6 +221,10 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .face .panel+.panel{position:relative}
 .face .panel+.panel::before{content:"";position:absolute;left:var(--s5);right:var(--s5);top:0;
   height:1px;background:var(--sep)}
+/* ...but not when the panel before it is hidden. Several pages keep a panel in
+   the markup and reveal it later; the divider was drawing across the TOP of
+   what is visibly the first card in the box. */
+.face .panel[hidden]+.panel::before{display:none}
 
 /* ─── 5. STAGGERED ENTRANCE ────────────────────────────────────────────────
    Panes settle in on load — a short, eased rise, never a bounce. Visible at
@@ -395,6 +399,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
    Glass pills and wells. Press states scale and brighten; nothing bounces. */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;
   padding:10px 18px;border:0;border-radius:var(--r-pill);cursor:pointer;font-weight:600;
+  white-space:nowrap;min-height:38px;flex:none;
   font-size:var(--t-sub);color:var(--ink);background:var(--glass);
   box-shadow:var(--shadow-sm),inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair);
   backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
@@ -406,7 +411,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   color:var(--accent-ink);box-shadow:var(--shadow-sm),inset 0 1px 0 rgba(255,255,255,.35)}
 .btn--ghost{background:none;box-shadow:none;color:var(--ink-2)}
 .btn--danger{color:var(--bad)}
-.btn--sm{padding:7px 13px;font-size:var(--t-cap)}
+.btn--sm{padding:6px 13px;font-size:var(--t-cap);min-height:30px}
 .btn.is-busy{color:transparent;position:relative;pointer-events:none}
 .btn.is-busy::after{content:"";position:absolute;width:15px;height:15px;border-radius:50%;
   border:2px solid currentColor;border-top-color:transparent;animation:spin .7s linear infinite;color:var(--ink)}
@@ -489,6 +494,25 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .dlg__t{font-size:var(--t-card);font-weight:700}
 .dlg__b{padding:var(--s3) var(--s5);color:var(--ink-2);font-size:var(--t-sub)}
 .dlg__f{padding:var(--s3) var(--s5) var(--s5);display:flex;gap:var(--s2);justify-content:flex-end}
+
+/* THE VPN PATH MAP is an <svg> that also carries class="topo" (it predates the
+   HTML node stack below). Without SVG-specific rules its rects take the default
+   black fill — which is exactly the black boxes that showed under Router and
+   Tunnel. Scoped to svg.topo so the HTML .topo keeps its flex layout. */
+svg.topo{display:block;width:100%;height:auto;padding:0;overflow:visible}
+svg.topo .nodebox{fill:var(--glass);stroke:var(--card-border);stroke-width:1;
+  vector-effect:non-scaling-stroke}
+svg.topo .nodebox.on{stroke:color-mix(in srgb,var(--accent) 50%,transparent)}
+svg.topo .nodebox.bad{stroke:color-mix(in srgb,var(--bad) 50%,transparent)}
+svg.topo .link{fill:none;stroke:var(--ink-3);stroke-width:1.5;vector-effect:non-scaling-stroke}
+svg.topo .link.off{stroke:var(--sep);stroke-dasharray:3 4}
+svg.topo .flow{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 11;
+  vector-effect:non-scaling-stroke}
+svg.topo .t1{fill:var(--ink);font-size:12px;font-weight:600}
+svg.topo .t2{fill:var(--ink-3);font-size:10.5px}
+svg.topo .tn{fill:var(--ink);font-size:13px;font-weight:600}
+svg.topo .cap{fill:var(--ink-3);font-size:10.5px;font-weight:600}
+svg.topo .capon{fill:var(--accent)}
 
 /* ─── 11. TOPOLOGY (glass nodes) & CHARTS ──────────────────────────────────
    Nodes are little glass tiles connected by thin lines. No box drawing, no
@@ -712,11 +736,15 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
    right half is used. break-inside keeps a card whole; break-after keeps a
    section heading with the card it introduces. */
 @media (min-width:1120px){
-  .main{margin-left:max(288px,calc(50vw - 632px));margin-right:auto;max-width:1264px;
-    columns:2;column-gap:var(--s6)}
-  .main>.head{column-span:all;margin-bottom:var(--s4)}
-  .main>#alerts,.main>#jobs{column-span:all}
-  .main>*{break-inside:avoid}
-  .sect{break-after:avoid;margin-top:var(--s5)}
-  .sect:first-of-type{margin-top:0}
+  .main{margin-left:max(288px,calc(50vw - 632px));margin-right:auto;max-width:1264px}
+  /* Two real columns. os.js deals each block (a heading plus the card it
+     introduces) to whichever column is currently shorter, so the two sides end
+     up the same length instead of one running far past the other — which is
+     what CSS multi-column could not do with cards that must not split. */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:0 var(--s6);align-items:start}
+  .col{min-width:0}
+  /* the spanning hero: full width, but the node stack itself stays a sensible
+     measure rather than stretching to the whole page */
+  .block--span .topo{max-width:640px}
+  .col>.block>.sect:first-child{margin-top:0}
 }
