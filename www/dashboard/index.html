@@ -157,7 +157,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=eff73849"></script>
+<script src="/os.js?v=dcacf910"></script>
 <script>
 (function () {
 'use strict';
@@ -1507,7 +1507,9 @@ function detailFor(box, v, d) {
 
         var det = document.createElement('details');
         det.className = 'adv';
-        det.style.cssText = 'border-top:1px solid var(--line);margin-top:var(--s3)';
+        /* No rule above it: the disclosure carries its own recessed fill now,
+           and a hairline on top of that is the second line for one boundary. */
+        det.style.marginTop = 'var(--s3)';
         var akey = v.mac + '|' + l.band;
         det.open = !!advOpen[akey];
         det.addEventListener('toggle', function () { advOpen[akey] = det.open; });

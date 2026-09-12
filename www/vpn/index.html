@@ -105,7 +105,11 @@
         <div class="panel__b" id="roadHead" style="padding-top:var(--s1)"></div>
         <div class="panel__b panel__b--flush" id="roadDevs"></div>
         <div class="panel__b panel__b--flush" id="roadSet"></div>
-        <div id="roadAdv"></div>
+        <!-- A panel body, not a bare div: the disclosure inside it then takes
+             the same inset every other card's content has. As a bare div it
+             stretched the full width of the pane and sat flush on its bottom
+             edge, which is why it read as a slab rather than a control. -->
+        <div class="panel__b" id="roadAdv" style="padding-top:0"></div>
       </section>
     </div>
 
@@ -113,7 +117,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=eff73849"></script>
+<script src="/os.js?v=dcacf910"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
