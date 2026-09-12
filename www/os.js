@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = 'd74da15afb';
+var CONSOLE_VERSION = 'f770637db8';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1018,6 +1018,33 @@ function buildShell(activeHref) {
    it introduces travel together, and each block goes to whichever column is
    shorter so far. Below the breakpoint everything is put back in one flow. */
 var WIDE = window.matchMedia ? window.matchMedia('(min-width:1120px)') : null;
+/* THE PAGE'S SOURCE ORDER, captured once before anything is moved.
+   Flattening used to leave the flow in DEALT order — everything the left column
+   held, then everything the right one did — so the second deal was reading a
+   page whose order the first deal had already rewritten, and cards changed
+   places on their own between the two. Sorting back to source order before each
+   deal makes the deal a pure function of the page, so it lands the same way
+   every time on the same width. */
+var FLOW = null;
+function captureFlow(main) {
+    if (FLOW) return;
+    FLOW = true;
+    [].slice.call(main.children).forEach(function (n, i) { n._flow = i; });
+}
+function reflow(main) {
+    var kids = [].slice.call(main.children);
+    var want = kids.slice().sort(function (a, b) {
+        /* Anything that appeared after the capture — an alert raised mid-session
+           on a page with no #alerts slot — has no index and stays at the end in
+           the order it arrived. */
+        var x = typeof a._flow === 'number' ? a._flow : 1e9;
+        var y = typeof b._flow === 'number' ? b._flow : 1e9;
+        return x - y;
+    });
+    for (var i = 0; i < want.length; i++) {
+        if (kids[i] !== want[i]) { want.forEach(function (n) { main.appendChild(n); }); return; }
+    }
+}
 function flattenCols(main) {
     /* A spanned block sits OUTSIDE .cols, so unwrap those in place first —
        missing them meant the second pass saw a leftover wrapper instead of the
@@ -1034,11 +1061,13 @@ function flattenCols(main) {
     });
     main.insertBefore(frag, wrap);
     main.removeChild(wrap);
+    reflow(main);
     return true;
 }
 function layoutColumns() {
     var main = $('.main');
     if (!main || !WIDE) return;
+    captureFlow(main);   /* before anything moves, and only ever once */
     flattenCols(main);
     if (!WIDE.matches) return;
 
