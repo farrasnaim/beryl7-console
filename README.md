@@ -52,7 +52,7 @@ The UI is frosted glass in the iOS idiom, and all of it lives in one stylesheet,
 - **State is a sentence-case word beside a coloured dot**, never an all-caps shout; `stateWord()` normalises any legacy uppercase a caller still passes.
 - **Typography** is the Apple system stack — San Francisco on the devices this is read on, Segoe on the desktop it is administered from. Nothing is downloaded: a webfont is a request that fails in exactly the hotel where you need the page. Tabular numerals wherever digits align.
 
-`www/os.js` is the shared runtime: navigation, theme persistence, dialogs, the topology renderer, the two-column layout dealer for wide screens, and the polling machinery. `www/os.css` is the previous design system — nothing loads it any more; it is kept because `www/legacy/` records where this came from.
+`www/os.js` is the shared runtime: navigation, theme persistence, dialogs, the topology renderer, the two-column layout dealer for wide screens, and the polling machinery.
 
 ## Architecture
 
@@ -113,9 +113,7 @@ www/
     probe-api                the Overview's ping target, and the saved list
     wireguard-api            WireGuard transport: what each tunnel does on the wire
     version-api              which build the router serves, so a stale page can say so
-  os.css                     v2 design system (superseded by app.css; unloaded)
   theme.css                  v1 design system (superseded — still used by legacy/)
-  fonts/                     IBM Plex, loaded only by os.css — a v2 leftover
   legacy/                    v1 pages (superseded — kept for reference)
 
 usr/share/beryl/
@@ -407,7 +405,7 @@ A stock dual-band OpenWrt router should work as-is. Verify against your own hard
 
 ## Status
 
-Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. The `legacy/` directory and `theme.css` are the first iteration of the UI and `os.css` is the second; both are superseded by `app.css`/`os.js` and kept for reference.
+Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. The `legacy/` directory and `theme.css` are the first iteration of the UI, kept for reference. The second iteration (`os.css` and the IBM Plex files it loaded) is deleted rather than kept: git has it, and an unloaded 176 KB on a router is not reference material.
 
 ## License
 

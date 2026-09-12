@@ -30,7 +30,7 @@ say "Beryl 7 Console -> $TARGET"
 # ---------------------------------------------------------------- pre-flight --
 command -v ssh >/dev/null 2>&1 || { echo "ssh not found in PATH"; exit 1; }
 command -v tar >/dev/null 2>&1 || { echo "tar not found in PATH"; exit 1; }
-[ -f "$SRC/www/os.css" ] || { echo "run this from the repository root"; exit 1; }
+[ -f "$SRC/www/app.css" ] || { echo "run this from the repository root"; exit 1; }
 
 # -n on every ssh that is not being fed a pipe, so ssh cannot consume the
 # script's own stdin.
@@ -312,8 +312,8 @@ echo "  . pingmon, wifiwatch and cpugovernor running"
 #                     nothing TODAY. It is kept because the setting above makes
 #                     it the only place a hand-written dnsmasq directive can go.
 touch /etc/sysupgrade.conf
-for p in /www/app.css /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/vpn \
-         /www/repeater /www/tethering /www/settings /www/fonts \
+for p in /www/app.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/vpn \
+         /www/repeater /www/tethering /www/settings \
          /www/favicon.svg /www/apple-touch-icon.png \
          /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
          /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \

@@ -32,7 +32,6 @@
 /etc/nlbwmon
 /etc/sysctl.d/99-local.conf
 /www/app.css
-/www/os.css
 /www/os.js
 /www/legacy
 /usr/sbin/beryl-vpndns
@@ -63,6 +62,5 @@
 /www/qr-vendor.js
 /etc/hotplug.d/iface/36-wgroad-metered
 /usr/sbin/linkquality-sample
-/www/fonts
 /www/favicon.svg
 /www/apple-touch-icon.png
