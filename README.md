@@ -34,23 +34,25 @@ Read [Security model](#security-model) before putting this on a network you don'
 
 | Page | Path | What it does |
 |---|---|---|
-| **Overview** | `/dashboard/` | Live network topology (uplink → router → tunnels → devices), connected clients with per-device throughput and Wi-Fi signal, radio status, today's traffic, system vitals (load, temperature, fan, memory), and a 1-second throughput + latency chart. Per-device detail view with rates, PHY mode, and block control. |
+| **Overview** | `/dashboard/` | Live network topology (uplink → router → tunnels → devices), connected clients with Wi-Fi signal and link rate, radio status, today's traffic, system vitals (load, temperature, fan, memory), and a 1-second throughput + latency chart. Per-device detail view with rates, PHY mode, and block control. |
 | **VPN** | `/vpn/` | WireGuard tunnels: add from a pasted `.conf`, connect/disconnect, and route individual devices through a tunnel via [pbr](https://github.com/stangri/pbr) policies. Fail-closed by default; an optional watchdog can pause routing when a tunnel dies (see `vpnwatch`). Per-device VPN DNS enforcement so routed devices can't leak DNS to the home uplink (see `beryl-vpndns`). |
 | **Wi-Fi uplink** | `/repeater/` | Repeater mode: scan, join, and forget upstream networks (hotel/cafe Wi-Fi). Shows the uplink's health and hands over between sources by route metric. |
 | **USB uplink** | `/tethering/` | USB tethering: iPhone (ipheth/usbmuxd), Android RNDIS, HiLink dongles, and NCM/QMI/MBIM modems, with APN/PIN configuration where the device needs it. Detects whatever netdev the device presents instead of assuming `eth2`. |
 | **Settings** | `/settings/` | Radio configuration (band, channel, width, PHY mode, transmit power, country) with the valid channel/width combinations derived live from what the hardware reports — you cannot select a combination the radio can't do. Plus SSID settings, hostname, timezone, LAN lease settings, device blocking, and radio restart. Under **System**: a one-click **config backup download** (the same `sysupgrade -b` archive LuCI produces), an on-demand update check via [`owut`](https://openwrt.org/docs/guide-user/installation/attended.sysupgrade) that can then upgrade exactly the packages it listed, and a **live system log** filtered by severity — the honest answer to "why is there no internet" when the only device you have is a phone. Firmware is deliberately not flashed from here. |
 
-Every page works from 360 px phones to desktop, in light and dark (system-following or manually pinned), with four accent themes (mint, maroon, navy, grey).
+Every page works from 360 px phones to desktop, in light and dark - system-following by default, pinned by the toggle in the sidebar.
 
 ## Design
 
-The UI follows a deliberately quiet design language: warm graphite surfaces, a single cool accent, no gradients, no shadows (only focus rings), uppercase reserved for state words. All of it lives in one token system in `www/os.css`:
+The UI is frosted glass in the iOS idiom, and all of it lives in one stylesheet, `www/app.css`:
 
-- **Theming** is a 4-rule matrix per token set — bare default, `prefers-color-scheme` media rule, and `[data-theme="dark"]` / `[data-theme="light"]` overrides — so the manual toggle always beats the system preference in both directions.
-- **Accents** are complete token sets (`--sig`, `--sig-fg`, `--sig-solid`, `--sig-dim`, `--sig-line`), each tuned separately for dark and light grounds. Contrast was computed numerically against alpha-composited backgrounds, not eyeballed.
-- **Typography** is the system font stack. Tabular numerals wherever digits align; monospace only for identifiers (MACs, IPs, interface names).
+- **Depth is never a drop shadow.** Panes are genuinely translucent and blurred (`backdrop-filter: blur(24px) saturate(180%)`); what bounds them is a 1px specular inset edge. The page's own ground — a few soft maroon discs on a neutral field — shows through every pane, which is the whole reason the panes are translucent at all.
+- **One accent, maroon**, for the primary action and live state and nothing else. There is no accent picker: four skins were four things to keep consistent and one more decision to make on a phone in a hotel.
+- **Theming** is a 4-rule matrix per token set — bare default, `prefers-color-scheme` media rule, and `[data-theme="dark"]` / `[data-theme="light"]` overrides — so the manual toggle always beats the system preference in both directions. An inline script resolves the theme before first paint, so there is no flash of the wrong one.
+- **State is a sentence-case word beside a coloured dot**, never an all-caps shout; `stateWord()` normalises any legacy uppercase a caller still passes.
+- **Typography** is the Apple system stack — San Francisco on the devices this is read on, Segoe on the desktop it is administered from. Nothing is downloaded: a webfont is a request that fails in exactly the hotel where you need the page. Tabular numerals wherever digits align.
 
-`www/os.js` is the shared runtime: navigation, theme/accent persistence (pre-paint, so no flash of the wrong theme), dialogs, the SVG topology renderer, and the polling machinery.
+`www/os.js` is the shared runtime: navigation, theme persistence, dialogs, the topology renderer, the two-column layout dealer for wide screens, and the polling machinery. `www/os.css` is the previous design system — nothing loads it any more; it is kept because `www/legacy/` records where this came from.
 
 ## Architecture
 
@@ -62,6 +64,11 @@ browser ── 5s poll ──► /cgi-bin/<page>-api ── JSON state snapshot
 cron (1 min) ──► dashmon   ── telemetry ring buffers in /tmp
              ──► apwatch   ── Wi-Fi AP watchdog (recovers a wedged radio)
              ──► vpnwatch  ── optional VPN fail-open behaviour
+             ──► notifymon ── push a message when something actually changes
+cron (5 min) ──► linkquality-sample ── one loss/latency line for the daily average
+
+procd ──► pingmon   ── 1s probe; its 5-minute ring feeds the charts
+      ──► wifiwatch ── real-time Wi-Fi arrivals and departures
 
 hotplug ──► 30-tethering        ── adopt whatever netdev USB tethering presents
         ──► 31-tethering-clash  ── refuse USB uplinks whose subnet collides
@@ -85,8 +92,12 @@ install.sh                   first-time install / upgrade, idempotent
 backup.sh                    pull a full restore bundle off the router
 restore.sh                   put a bundle back onto a fresh router
 www/
-  os.css                     design system: tokens, themes, accents, components
-  os.js                      shared runtime: nav, theming, dialogs, topology, polling
+  app.css                    the design system: tokens, themes, glass, components
+  os.js                      shared runtime: nav, theming, dialogs, topology,
+                             the wide-screen column dealer, polling
+  favicon.svg                the GL.iNet mark, white on maroon
+  apple-touch-icon.png       the same at 180px, for Safari and home screens
+  qr-vendor.js               QR encoder for the WireGuard peer dialog
   dashboard/index.html       Overview
   vpn/index.html             VPN
   repeater/index.html        Wi-Fi uplink
@@ -100,7 +111,11 @@ www/
     tethering-api            USB device detection, modem config, uplink control
     settings-api             radios, SSIDs, hostname, timezone, DHCP, block list
     probe-api                the Overview's ping target, and the saved list
-  theme.css                  v1 design system (superseded — kept for reference)
+    wireguard-api            WireGuard transport: what each tunnel does on the wire
+    version-api              which build the router serves, so a stale page can say so
+  os.css                     v2 design system (superseded by app.css; unloaded)
+  theme.css                  v1 design system (superseded — still used by legacy/)
+  fonts/                     IBM Plex, loaded only by os.css — a v2 leftover
   legacy/                    v1 pages (superseded — kept for reference)
 
 usr/share/beryl/
@@ -112,25 +127,34 @@ usr/sbin/
   dashmon                    1-minute telemetry collector (cron)
   apwatch                    Wi-Fi AP watchdog (cron)
   vpnwatch                   optional VPN dead-tunnel handling (cron)
+  notifymon                  push notifications when state actually changes (cron)
+  wifiwatch                  real-time Wi-Fi arrivals and departures (procd)
+  linkquality-sample         one loss/latency sample every 5 minutes (cron)
   beryl-vpndns               regenerates per-device VPN DNS nftables rules
   beryl-pbrtbl               reads pbr's fwmark routing tables in one pass
   pingmon                    1s probe; its 5-minute ring feeds the charts
 
 etc/
-  crontabs/root              the three cron entries
+  crontabs/root              the five cron entries
   dashboard/classmap.example device name/class map — copy to /etc/dashboard/classmap
+  hotplug.d/iface/12-console-services  re-register the init scripts after a flash
   hotplug.d/iface/15-travel-dns        captive-portal-safe DNS on travel uplinks
   hotplug.d/iface/31-tethering-clash   reject colliding USB subnets (HiLink!)
   hotplug.d/iface/32-pbr-uplink        repoint pbr when the pinned uplink dies
   hotplug.d/iface/33-uplink-width      narrow AP width to fit the uplink channel
   hotplug.d/iface/34-vpn-resume        resume a paused tunnel when a link returns
+  hotplug.d/iface/35-nlbw-v6prefix     teach nlbwmon the client IPv6 prefix
+  hotplug.d/iface/36-wgroad-metered    drop the road tunnel onto a metered uplink
   hotplug.d/iface/99-repeater-iot      IoT SSID off while repeating
   hotplug.d/net/30-tethering           bind any tethering netdev name
   hotplug.d/net/40-rrm-neighbors       cross-band 802.11k neighbour reports
+  hotplug.d/net/41-packet-steering     packet steering once the netdev exists
+  hotplug.d/net/42-txpower             re-apply transmit power after a radio event
   hotplug.d/usb/40-usbmuxd             disabled stub (see its header for why)
   init.d/cpugovernor         schedutil instead of a pinned 2.0 GHz
   init.d/pingmon             keeps pingmon running (procd, not cron)
   init.d/beryl-vpndns        recompute the VPN rules at boot, before fw4 (S18)
+  init.d/wifiwatch           keeps wifiwatch running (procd)
   sysctl.d/99-local.conf     TCP MTU probing for hotel/tunnel PMTU black holes
 ```
 
@@ -208,19 +232,27 @@ cp -r /tmp/beryl7/etc/hotplug.d /tmp/beryl7/etc/init.d /tmp/beryl7/etc/sysctl.d 
 
 # cgi-lib.sh is sourced, not executed, so it needs no exec bit — but every CGI
 # does, and a CGI without one is a 403 with nothing in the log to explain it.
-chmod 755 /www/cgi-bin/*-api /usr/sbin/dashmon /usr/sbin/apwatch /usr/sbin/vpnwatch \
-          /usr/sbin/beryl-vpndns /usr/sbin/beryl-pbrtbl /usr/sbin/pingmon \
-          /etc/hotplug.d/iface/* /etc/hotplug.d/net/30-tethering \
-          /etc/init.d/cpugovernor /etc/init.d/pingmon
+# Named from the staging tree rather than by hand: a hand-written list is one
+# more thing to forget when a helper is added, and install.sh learned that the
+# hard way (its old chmod list named programs that no longer existed, and
+# busybox chmod exiting 1 aborted every install for two days).
+for f in /tmp/beryl7/www/cgi-bin/*-api /tmp/beryl7/usr/sbin/* \
+         /tmp/beryl7/etc/hotplug.d/*/* /tmp/beryl7/etc/init.d/*; do
+    chmod 755 "/${f#/tmp/beryl7/}"
+done
 
-# dashmon feeds the Overview history panels; the two watchdogs are optional
+# dashmon feeds the Overview history panels; notifymon sends the push messages;
+# the watchdogs and the link-quality sampler are optional
 crontab -l > /tmp/cron; cat /tmp/beryl7/etc/crontabs/root >> /tmp/cron; crontab /tmp/cron
 
 mkdir -p /etc/dashboard
 cp /tmp/beryl7/etc/dashboard/classmap.example /etc/dashboard/classmap
 
-# optional: load-based CPU scaling
-/etc/init.d/cpugovernor enable && /etc/init.d/cpugovernor start
+# the services that should be running before the next reboot
+for s in cpugovernor pingmon wifiwatch beryl-vpndns; do /etc/init.d/$s enable; done
+for s in cpugovernor pingmon wifiwatch; do /etc/init.d/$s start; done
+# NOT beryl-vpndns: it rewrites the live VPN nftables rules, and at boot it
+# runs before fw4 on purpose. Enabling it is enough.
 ```
 
 To survive sysupgrades, append the installed paths to `/etc/sysupgrade.conf` — the installer does this for you, and the full list is in [install.sh](install.sh).
@@ -375,7 +407,7 @@ A stock dual-band OpenWrt router should work as-is. Verify against your own hard
 
 ## Status
 
-Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. The `legacy/` directory and `theme.css` are the first iteration of the UI, superseded by `os.css`/`os.js`, kept for reference.
+Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. The `legacy/` directory and `theme.css` are the first iteration of the UI and `os.css` is the second; both are superseded by `app.css`/`os.js` and kept for reference.
 
 ## License
 
