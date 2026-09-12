@@ -226,9 +226,13 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
    edge. On a phone the aside drops to its own line and takes the full width. */
 @media (max-width:760px){
   .panel__h{flex-wrap:wrap;row-gap:var(--s2)}
-  .panel__aside{margin-left:0;width:100%;flex-wrap:wrap;row-gap:var(--s2)}
-  .panel__aside .seg{flex:none;max-width:100%}
-  .panel__aside .input{flex:1 1 150px;width:auto;min-width:0}
+  .panel__aside{min-width:0;flex-wrap:wrap;row-gap:var(--s2)}
+  /* Only an aside carrying CONTROLS takes a line of its own. Doing it to every
+     aside pushed the one-word state chips — "Up", "On", a device count — onto
+     a second line under their own title, which is worse than what it fixed. */
+  .panel__aside--controls{margin-left:0;width:100%}
+  .panel__aside--controls .seg{flex:none;max-width:100%}
+  .panel__aside--controls .input{flex:1 1 150px;width:auto;min-width:0}
 }
 .logq{width:170px}
 
@@ -635,6 +639,8 @@ svg.topo .capon{fill:var(--accent)}
   .pnode__k{font-size:var(--t-sub);font-weight:600;line-height:1.25;white-space:nowrap}
   .pnode__v{font-size:11px;color:var(--ink-3);line-height:1.2;margin-top:1px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* No reading, no line — never a placeholder standing in for one. */
+  .pnode__v:empty{display:none}
   .pnode--branch{margin-left:16px}
   a.pnode:hover{background:var(--glass-hi)}
   a.pnode.is-active{background:color-mix(in srgb,var(--accent) 15%,transparent)}
@@ -687,13 +693,30 @@ svg.topo .capon{fill:var(--accent)}
 .spec-lab{font-size:var(--t-cap);fill:var(--ink-3)}
 .spec-mhz{font-size:10px;fill:var(--ink-3)}
 
-/* advanced disclosure (settings/vpn) */
-.adv{border-radius:var(--r-inset);overflow:hidden;background:var(--glass-hi);
+/* advanced disclosure (settings/vpn/tethering)
+   It used to be filled with --glass-hi, which is the white specular wash the
+   panes use for their top highlight. Sitting inside a pane that already carries
+   that highlight it read as a bright white slab — worst where the disclosure is
+   the only visible thing in its card. It is a recess now, the same well the
+   inputs sit in, and it carries a chevron: the default marker is hidden, and
+   before this nothing replaced it, so the one control on that row did not look
+   like a control. */
+.adv{border-radius:var(--r-inset);overflow:hidden;background:var(--fieldwell);
   box-shadow:inset 0 0 0 .5px var(--rim-hair);margin-top:var(--s3)}
-.adv>summary{list-style:none;cursor:pointer;padding:13px 16px;font-weight:600;font-size:var(--t-sub)}
+.adv>summary{list-style:none;cursor:pointer;padding:13px 16px;font-weight:600;font-size:var(--t-sub);
+  display:flex;align-items:center;gap:var(--s3);color:var(--ink-2)}
 .adv>summary::-webkit-details-marker{display:none}
-.adv[open]>summary{border-bottom:1px solid var(--sep)}
+.adv>summary::after{content:"";margin-left:auto;width:7px;height:7px;flex:none;
+  border-right:1.6px solid var(--ink-3);border-bottom:1.6px solid var(--ink-3);
+  border-radius:1px;transform:rotate(45deg) translate(-2px,-2px);
+  transition:transform .18s var(--ease)}
+.adv[open]>summary{border-bottom:1px solid var(--sep);color:var(--ink)}
+.adv[open]>summary::after{transform:rotate(-135deg) translate(-2px,-2px)}
 .adv__b{padding:var(--s4) var(--s5)}
+/* A disclosure sitting straight in a pane, rather than inside a panel body, has
+   no padding of its own to inherit — on the USB page it ran edge to edge while
+   every other pane inset its content. */
+.face>.adv{margin:var(--s4) var(--s5)}
 
 /* segmented radio groups reused as glass cards in forms */
 .radioset{display:grid;gap:var(--s2)}

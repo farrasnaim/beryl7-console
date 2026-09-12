@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = 'f770637db8';
+var CONSOLE_VERSION = '7a0c1825ba';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -883,13 +883,16 @@ function firewallAlert(onDone) {
 /* Nav labels are IDENTICAL to the page <h1> and <title> they lead to, and the
    branch descriptors are the same sentences the Internet sources panel uses for
    the same two sources. One thing, one name, wherever it appears. */
-/* ONE RULE, EVERY ITEM, EVERY PAGE: the second line is live state or it is an
-   em dash. It used to be state on the page that could measure it and a static
-   description everywhere else, so the same row meant two different things
-   depending on where you were standing — which is exactly the description/state
-   conflation this console refuses everywhere else. A page that cannot measure a
-   stage leaves the dash; it never fills the space with prose. */
-var DASH = '—';
+/* ONE RULE, EVERY ITEM, EVERY PAGE: the second line is live state, or there is
+   no second line. It used to be state on the page that could measure it and a
+   static description everywhere else, so the same row meant two different
+   things depending on where you were standing — which is exactly the
+   description/state conflation this console refuses everywhere else.
+   The first fix for that filled every unmeasured row with an em dash, and a
+   page that measures nothing — Settings — then showed a column of six dashes,
+   which says nothing and looks broken. A row with no state to report now shows
+   its name alone. Nothing is invented to fill the space, and nothing pretends
+   to be a reading. */
 var STAGES = [
     { id: 'clients',  k: 'Overview',     href: '/dashboard/', icon: 'overview' },
     { id: 'routing',  k: 'VPN',          href: '/vpn/',       icon: 'routing'  },
@@ -942,7 +945,7 @@ function buildShell(activeHref) {
             n.appendChild(el('i', 'pnode__dot'));
             var tx = el('div', 'pnode__txt');
             tx.appendChild(el('div', 'pnode__k', s.k));
-            var v = el('div', 'pnode__v', DASH);
+            var v = el('div', 'pnode__v');   /* empty until a reading lands; CSS hides it */
             tx.appendChild(v);
             n.appendChild(tx);
             spineNodes[s.id] = { node: n, val: v };
