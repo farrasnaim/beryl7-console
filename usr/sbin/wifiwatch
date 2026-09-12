@@ -113,6 +113,25 @@ notify_flag_on "$NOTIFY_WIFI" || exit 0    # see cgi-lib: only an explicit 0 is 
 # knobs were documented, advertised to the owner, and dead. A default that
 # happens to be sensible hides this completely.
 GRACE=${NOTIFY_WIFI_GRACE:-3}
+
+# FLAP SUPPRESSION. A device that drops and rejoins all evening is one fact,
+# not eighty. Measured on this router: a phone went from about one event an
+# hour to fifty-seven in ten minutes, and every one of them was a true
+# departure and a true return - the grace above cannot help, because nothing
+# here is a roam. The alerts were correct and the flood made them useless.
+#
+# So: count a device's announcements in a rolling window, and once it crosses
+# FLAP_MAX say so ONCE and then hold that device quiet for FLAP_QUIET. The
+# device keeps being counted while it is quiet, so a flap that never settles
+# costs two messages an hour instead of two hundred.
+#
+# It is deliberately per-device: a houseful of devices reconnecting after a
+# power cut is a different event from one phone misbehaving, and a global rate
+# limit would hide the first to control the second.
+FLAPF=/tmp/.wififlap
+FLAP_MAX=${NOTIFY_WIFI_FLAP_MAX:-6}
+FLAP_WIN=${NOTIFY_WIFI_FLAP_WIN:-600}
+FLAP_QUIET=${NOTIFY_WIFI_FLAP_QUIET:-1800}
 RETURN_WINDOW=${NOTIFY_WIFI_RETURN:-600}
 WATCH_ALL=${NOTIFY_WIFI_ALL_APS:-0}
 SKIP_NETS=${NOTIFY_WIFI_SKIP:-iot}
@@ -349,6 +368,68 @@ notify() {  # $1 title  $2 body  $3 priority  $4 tags
     } 9>>"$QLOCK" 2>/dev/null
 }
 
+# Announce one device's event, unless that device is flapping. Every join,
+# leave, move and return goes through here so there is exactly one place that
+# decides; notify() itself stays unaware of which device a message is about,
+# which is why the mac is threaded in rather than read back out of the body.
+say() {   # $1 mac  $2 title  $3 body  $4 priority  $5 tags
+    _sm=$1; shift
+    flap_ok "$_sm" || return 0
+    notify "$@"
+}
+
+# 0 = deliver this one, 1 = the device is flapping and has already been
+# reported. The record is "mac count window_start quiet_until", one line per
+# device, rewritten in place - a handful of lines at most, so there is nothing
+# to be gained by being cleverer about it.
+flap_ok() {   # $1 = mac
+    case "$FLAP_MAX" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$FLAP_MAX" -gt 0 ] || return 0
+    _fnow=$(date +%s)
+    _fc=0; _fw=$_fnow; _fq=0
+    if [ -r "$FLAPF" ]; then
+        while read -r _rm _rc _rw _rq; do
+            [ "$_rm" = "$1" ] || continue
+            _fc=$_rc; _fw=$_rw; _fq=$_rq; break
+        done < "$FLAPF"
+    fi
+    case "$_fc$_fw$_fq" in ''|*[!0-9]*) _fc=0; _fw=$_fnow; _fq=0 ;; esac
+
+    # The quiet period is over: start counting again from this event.
+    [ "$_fq" != 0 ] && [ "$_fnow" -ge "$_fq" ] && { _fc=0; _fw=$_fnow; _fq=0; }
+    # Window rolled: whatever it did ten minutes ago is not this burst.
+    [ "$((_fnow - _fw))" -ge "$FLAP_WIN" ] && { _fc=0; _fw=$_fnow; }
+    _fc=$((_fc + 1))
+
+    _fsay=0
+    if [ "$_fq" != 0 ] && [ "$_fnow" -lt "$_fq" ]; then
+        _fret=1                      # still held quiet
+    elif [ "$_fc" -gt "$FLAP_MAX" ]; then
+        _fq=$((_fnow + FLAP_QUIET)); _fret=1; _fsay=1
+    else
+        _fret=0
+    fi
+
+    if [ -r "$FLAPF" ]; then
+        grep -v "^$1 " "$FLAPF" > "$FLAPF.k" 2>/dev/null || : > "$FLAPF.k"
+    else
+        : > "$FLAPF.k"
+    fi
+    printf '%s %s %s %s\n' "$1" "$_fc" "$_fw" "$_fq" >> "$FLAPF.k"
+    mv "$FLAPF.k" "$FLAPF" 2>/dev/null
+
+    # Said once, on the event that crosses the line, and never again until the
+    # quiet period has expired.
+    if [ "$_fsay" = 1 ]; then
+        notify "Wi-Fi keeps dropping" \
+            "$(dev_name "$1") has left and rejoined $_fc times in the last \
+$((FLAP_WIN / 60)) minutes. Further Wi-Fi alerts for it are paused for \
+$((FLAP_QUIET / 60)) minutes." default warning
+        logger -t wifiwatch "flapping: $1 ($_fc in ${FLAP_WIN}s) - quiet for ${FLAP_QUIET}s"
+    fi
+    return $_fret
+}
+
 # Names come from the class map, so the phone and the console agree on what a
 # device is called; the MAC is the honest fallback.
 dev_name() {
@@ -496,7 +577,7 @@ resolve_pending() {
             # here means that event never arrived - a dropped notification, or an
             # association that predates this process. A late crossing beats the
             # silence, which is what this whole path was producing before.
-            notify "$M_WIFI_MOVE_T" \
+            say "$_pm" "$M_WIFI_MOVE_T" \
                  "$(cap_fmt "$M_WIFI_MOVE_B" "$(dev_name "$_pm")" "$_pl" "$_cl")" low iphone
         elif [ "$_here" = 1 ]; then
             :   # back on the same network inside the window - a roam, not news
@@ -524,7 +605,7 @@ resolve_pending() {
                 *%s*%s*%s*) _db=$(cap_fmt "$M_WIFI_LEAVE_B" "$_dn" "$_pl" "$_pb") ;;
                 *)          _db=$(cap_fmt "$M_WIFI_LEAVE_B" "$_dn" "$_pb") ;;
             esac
-            notify "$M_WIFI_LEAVE_T" "$_db" min iphone
+            say "$_pm" "$M_WIFI_LEAVE_T" "$_db" min iphone
             # Remember that we ANNOUNCED this one. If it reappears shortly the
             # departure was premature in hindsight, and the return is worth
             # phrasing as a return - "back after 22s" tells the owner it was a
@@ -640,7 +721,7 @@ while :; do
                     # unbridged AP, and "moved to nowhere" is not a sentence.
                     if [ -n "$net" ] && [ -n "$_pnet" ] && [ "$_pnet" != "-" ] && \
                        [ "$_pnet" != "$net" ]; then
-                        notify "$M_WIFI_MOVE_T" \
+                        say "$mac" "$M_WIFI_MOVE_T" \
                              "$(cap_fmt "$M_WIFI_MOVE_B" "$(dev_name "$mac")" \
                                 "${_plab:-Wi-Fi}" "$label")" low iphone
                     fi
@@ -651,7 +732,7 @@ while :; do
                     # departure will (correctly) stay quiet when it arrives.
                     _onet=${_o%% *}; _olab=${_o#* }
                     if [ -n "$net" ] && [ "$_onet" != "-" ] && [ "$_onet" != "$net" ]; then
-                        notify "$M_WIFI_MOVE_T" \
+                        say "$mac" "$M_WIFI_MOVE_T" \
                              "$(cap_fmt "$M_WIFI_MOVE_B" "$(dev_name "$mac")" "$_olab" "$label")" \
                              low iphone
                     fi
@@ -667,13 +748,13 @@ while :; do
                         if [ -s "$LEFT.k" ]; then mv "$LEFT.k" "$LEFT"; else rm -f "$LEFT.k" "$LEFT"; fi
                     fi
                     if [ -n "$_away" ]; then
-                        notify "$M_WIFI_BACK_T" \
+                        say "$mac" "$M_WIFI_BACK_T" \
                              "$(cap_fmt "$M_WIFI_BACK_B" "$(dev_name "$mac")" "$_away")" low iphone
                     else
                         # the label, not a second ssid_of: same string when the
                         # radio answers, and the network name rather than an
                         # empty gap in the sentence when it does not
-                        notify "$M_WIFI_JOIN_T" \
+                        say "$mac" "$M_WIFI_JOIN_T" \
                              "$(cap_fmt "$M_WIFI_JOIN_B" "$(dev_name "$mac")" "$label" "$band")" \
                              low iphone
                     fi
