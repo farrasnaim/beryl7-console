@@ -27,16 +27,12 @@
     <div id="alerts"></div>
     <div id="jobs"></div>
 
-    <!-- THE HERO: the network, drawn directly on the page. No container —
-         the topology is the product, not a widget inside it. -->
-    <div class="face--open">
-      <div style="overflow-x:auto;scrollbar-width:none">
-        <div id="topo" style="padding:8px 0 14px"></div>
-      </div>
-    </div>
-
-    <!-- Clients before Radios: what is connected is the question this page is
-         opened to answer; the radios are the equipment serving them. -->
+    <!-- DEVICES FIRST, ALWAYS. Who is connected is the question this page gets
+         opened to answer, so it opens on the answer — above the topology, which
+         is the equipment serving them. Being first in the source is also what
+         pins it to the top of the left column in the wide layout: the column
+         dealer hands block one to the left side before any height is measured,
+         so it cannot drift down the page as the cards fill in. -->
     <div class="sect">
       <span class="sect__t">Devices</span>
       <span class="sect__m" id="cliCount"></span>
@@ -49,6 +45,14 @@
             <div class="sk" style="width:61%;margin-top:10px"></div></div>
         </div>
       </section>
+    </div>
+
+    <!-- The network, drawn directly on the page. No container — the topology is
+         the product, not a widget inside it. -->
+    <div class="face--open">
+      <div style="overflow-x:auto;scrollbar-width:none">
+        <div id="topo" style="padding:8px 0 14px"></div>
+      </div>
     </div>
 
     <!-- Diagnostics: quieter, contained, lower on the page.
@@ -148,7 +152,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=670e146d"></script>
+<script src="/os.js?v=ea93d531"></script>
 <script>
 (function () {
 'use strict';
