@@ -125,7 +125,19 @@ rm -f "$MF_LOCAL" "$MF_REMOTE"; MF_LOCAL=""; MF_REMOTE=""
 
 # ------------------------------------------------------------------ install --
 say "Installing"
-ssh -n "$TARGET" 'set -e
+# FED ON STDIN, NOT PASSED AS AN ARGUMENT.
+#
+# This block used to be one single-quoted ssh argument. Dropbear caps the exec
+# command string it will accept, and as the comments here grew the block crossed
+# it: every install died the instant it started with "Connection closed by
+# remote host", and the only place the real reason appeared was the router's own
+# log — `Exit (root): String too long`. Nothing local said anything.
+#
+# A heredoc on stdin has no such limit, and `sh -s` runs it. The block is
+# otherwise unchanged, so the note below about apostrophes no longer applies
+# mechanically — it is left in place because nothing here needs one.
+ssh "$TARGET" 'sh -s' <<'REMOTE_INSTALL'
+set -e
 S=/tmp/beryl7
 
 # NOTE: no apostrophes anywhere in this block, comments included. It lives
@@ -330,7 +342,8 @@ for p in /www/app.css /www/os.css /www/os.js /www/theme.css /www/legacy /www/das
          /etc/adguardhome; do
     grep -qxF "$p" /etc/sysupgrade.conf || echo "$p" >> /etc/sysupgrade.conf
 done
-echo "  . sysupgrade.conf updated"'
+echo "  . sysupgrade.conf updated"
+REMOTE_INSTALL
 
 # --------------------------------------------------------------------- check --
 say "Verifying"
