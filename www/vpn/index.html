@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <title>VPN — Beryl 7</title>
 <script>(function(){var t=null;try{t=localStorage.getItem('beryl-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
-<link rel="stylesheet" href="/app.css?v=a52ad96c">
+<link rel="stylesheet" href="/app.css?v=979707f6">
 </head>
 <body>
 <div class="shell">
@@ -29,7 +29,7 @@
     <!-- The routed path, drawn directly on the page. -->
     <div class="face--open">
       <div style="overflow-x:auto;scrollbar-width:none">
-        <div id="vpnmap" style="padding:4px 0 10px"></div>
+        <div id="vpnmap" style="padding:var(--s1) 0 var(--s3)"></div>
       </div>
     </div>
 
@@ -40,8 +40,8 @@
           <div class="panel__aside"><span class="row__cap" id="tunCount"></span><span class="hslot" id="actSlot"></span></div>
         </div>
         <div class="panel__b panel__b--flush" id="tunnels">
-          <div class="panel__b" style="padding:16px 24px"><div class="sk" style="width:60%"></div>
-            <div class="sk" style="width:44%;margin-top:10px"></div></div>
+          <div class="panel__b"><div class="sk" style="width:60%"></div>
+            <div class="sk" style="width:44%;margin-top:var(--s3)"></div></div>
         </div>
       </section>
     </div>
@@ -62,7 +62,7 @@
     <div class="face">
       <section class="panel">
         <div class="panel__h"><span class="panel__t">If a tunnel goes down</span></div>
-        <div class="panel__b" id="failmode" style="padding-top:4px"></div>
+        <div class="panel__b" id="failmode" style="padding-top:var(--s1)"></div>
       </section>
     </div>
 
@@ -70,13 +70,13 @@
       <section class="panel" id="p-tdns" hidden>
         <div class="panel__h"><span class="panel__t">Resolver path</span>
           <div class="panel__aside" id="tdnsState"></div></div>
-        <div class="panel__b" id="tdns" style="padding-top:4px"></div>
+        <div class="panel__b" id="tdns" style="padding-top:var(--s1)"></div>
       </section>
 
       <section class="panel" id="p-agh" hidden>
         <div class="panel__h"><span class="panel__t">Content filtering</span>
           <div class="panel__aside" id="aghState"></div></div>
-        <div class="panel__b" id="agh" style="padding-top:4px"></div>
+        <div class="panel__b" id="agh" style="padding-top:var(--s1)"></div>
       </section>
     </div>
 
@@ -97,7 +97,7 @@
             <button class="btn btn--primary btn--sm" id="addDev"></button>
           </div>
         </div>
-        <div class="panel__b" id="roadHead" style="padding-top:4px"></div>
+        <div class="panel__b" id="roadHead" style="padding-top:var(--s1)"></div>
         <div class="panel__b panel__b--flush" id="roadDevs"></div>
         <div class="panel__b panel__b--flush" id="roadSet"></div>
         <div id="roadAdv"></div>
@@ -108,7 +108,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=2dc23891"></script>
+<script src="/os.js?v=49cf516a"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {

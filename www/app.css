@@ -282,6 +282,10 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .row__num{font-variant-numeric:tabular-nums;font-size:var(--t-sub);text-align:right;
   color:var(--ink-2);white-space:nowrap}
 .row__cap{color:var(--ink-3);font-size:var(--t-cap)}
+/* The uplink metric: the number IS the row's subject, so unlike the numbers in
+   a device row it survives on a phone — see the phone block, where the word
+   under it goes instead. */
+.row__metric{text-align:right;min-width:56px}
 .row__end{display:flex;align-items:center;gap:var(--s3);justify-content:flex-end}
 .row__status{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
 .row__caret{width:7px;height:7px;flex:none;margin-left:2px;
@@ -718,6 +722,24 @@ svg.topo .capon{fill:var(--accent)}
    every other pane inset its content. */
 .face>.adv{margin:var(--s4) var(--s5)}
 
+/* ─── VIEWPORT-ONLY CONTENT ──────────────────────────────────────────────────
+   Some content belongs to exactly one layout: the failover order sits with the
+   sources list it governs on a wide screen, and moves into Settings on a phone
+   because the uplink pages have no room for it there. Twelve call sites across
+   all five pages say so — and the rules saying what that MEANS lived in os.css,
+   which nothing has loaded since this stylesheet replaced it. Every one of them
+   was therefore inert: the phone showed the desktop half AND its own, and the
+   Settings copy showed on the desktop as well.
+   The breakpoint is 860px, where the spine appears and the tab bar goes, not
+   the 760px used for fine phone tuning: these say "which navigation am I in". */
+.mob-only{display:none}
+@media (max-width:859px){
+  .mob-only{display:block}
+  .desk-only{display:none}
+}
+/* An action docked into a panel header: on the title's line, trailing it. */
+.panel__h .hslot{display:inline-flex;align-items:center;margin-left:var(--s2)}
+
 /* segmented radio groups reused as glass cards in forms */
 .radioset{display:grid;gap:var(--s2)}
 .radiocard{display:flex;gap:12px;align-items:flex-start;padding:14px;border-radius:var(--r-inset);
@@ -781,6 +803,13 @@ svg.topo .capon{fill:var(--accent)}
     -webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
   .row__end{gap:10px}
   .row__num{display:none}
+  /* ...except the uplink metric, which is what orders the list. Hiding the
+     number while keeping the word left every row captioned "metric" with
+     nothing above it. The panel header already says lowest metric wins, so
+     the number carries alone. */
+  .row__metric{min-width:0}
+  .row__metric .row__num{display:block}
+  .row__metric .row__cap{display:none}
   .sig{height:14px}
   .panel__h,.panel__b,.tbl__group,.det{padding-left:var(--s4);padding-right:var(--s4)}
   .topo__branch{margin-left:var(--s5)}

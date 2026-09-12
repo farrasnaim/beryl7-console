@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <title>Settings — Beryl 7</title>
 <script>(function(){var t=null;try{t=localStorage.getItem('beryl-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
-<link rel="stylesheet" href="/app.css?v=a52ad96c">
+<link rel="stylesheet" href="/app.css?v=979707f6">
 </head>
 <body>
 <div class="shell">
@@ -14,7 +14,7 @@
   <main class="main">
     <div class="topline"></div>
 
-    <header class="head head--keep-title">
+    <header class="head">
       <div>
         <h1 class="head__t">Settings</h1>
         <p class="head__s" id="subtitle">The things worth changing. Anything disruptive asks you to confirm first.</p>
@@ -33,7 +33,7 @@
       <div class="grid g2" id="radioGrid">
         <section class="panel">
           <div class="panel__b"><div class="sk" style="width:60%"></div>
-            <div class="sk" style="width:45%;margin-top:10px"></div></div>
+            <div class="sk" style="width:45%;margin-top:var(--s3)"></div></div>
         </section>
       </div>
       <!-- Hidden until the router turns out to have a network beside the main
@@ -67,7 +67,7 @@
            governs, on the two uplink pages. -->
       <section class="panel mob-only">
         <div class="panel__h"><span class="panel__t">Internet sources</span></div>
-        <div class="panel__b" id="b-failover" style="padding-top:4px"></div>
+        <div class="panel__b" id="b-failover" style="padding-top:var(--s1)"></div>
       </section>
     </div>
 
@@ -87,7 +87,7 @@
     <div class="sect"><span class="sect__t">System</span></div>
     <div class="face">
       <section class="panel">
-        <div class="panel__b" id="b-sys" style="padding-top:16px"></div>
+        <div class="panel__b" id="b-sys" style="padding-top:var(--s4)"></div>
       </section>
       <!-- Neither of these is a stage on the packet's path, so neither earns a
            place in the topology rail. They belong to the router as a machine,
@@ -107,7 +107,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=2dc23891"></script>
+<script src="/os.js?v=49cf516a"></script>
 <script>
 (function () {
 'use strict';
@@ -1083,7 +1083,7 @@ function v6Label(m) {
 function renderRaDns(box, v6) {
     var r = v6.radns; if (!r || r.verdict === 'off') return;
     var wrap = el('div');
-    wrap.style.cssText = 'margin-top:18px;padding-top:16px;border-top:1px solid var(--line)';
+    wrap.style.cssText = 'margin-top:18px;padding-top:var(--s4);border-top:1px solid var(--line)';
 
     var head = el('div', 'inline');
     head.style.cssText = 'justify-content:space-between;align-items:baseline;margin-bottom:10px';
@@ -1166,7 +1166,7 @@ function renderIpv6(d) {
     facts.push(v6.can_native ? 'prefix delegated' : 'no prefix delegated');
     if (v6.ula) facts.push('ULA ' + v6.ula);
     var f = el('div', 'hint');
-    f.style.cssText = 'margin-top:10px;color:var(--ink-3)';
+    f.style.cssText = 'margin-top:var(--s3);color:var(--ink-3)';
     f.textContent = facts.join('  ·  ');
     form.appendChild(f);
 
@@ -1417,7 +1417,7 @@ function renderSoft(d) {
     box.appendChild(dl);
 
     if (!s.owut) {
-        aside.appendChild(OS.stateWord('no checker', 'idle'));
+        aside.appendChild(OS.stateWord('No checker', 'idle'));
         var n0 = OS.note('Checking for updates needs the attendedsysupgrade-common package. ' +
             'The version above is still accurate — it is read from the router itself — but ' +
             'nothing here can say whether a newer one exists.', 'warn');
@@ -1427,10 +1427,10 @@ function renderSoft(d) {
     }
 
     if (!c) {
-        aside.appendChild(OS.stateWord('not checked', 'idle'));
+        aside.appendChild(OS.stateWord('Not checked', 'idle'));
     } else {
         var hasUpd = !!(c.to && c.from && c.to !== c.from);
-        aside.appendChild(OS.stateWord(hasUpd ? 'update available' : 'up to date',
+        aside.appendChild(OS.stateWord(hasUpd ? 'Update available' : 'Up to date',
                                        hasUpd ? 'warn' : 'ok'));
 
         /* What an upgrade cannot tell you, said plainly. owut compares package
@@ -1705,7 +1705,7 @@ function paintLog(j) {
     box.appendChild(list);
 
     var foot = el('div', 'inline');
-    foot.style.cssText = 'margin-top:10px;flex-wrap:wrap;gap:8px';
+    foot.style.cssText = 'margin-top:var(--s3);flex-wrap:wrap;gap:8px';
     foot.appendChild(el('span', 'row__cap',
         j.lines.length + ' of ' + (logTotal >= 0 ? logTotal : j.lines.length) +
         ' lines, newest first'));
