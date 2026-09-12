@@ -314,6 +314,7 @@ echo "  . pingmon, wifiwatch and cpugovernor running"
 touch /etc/sysupgrade.conf
 for p in /www/app.css /www/os.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/vpn \
          /www/repeater /www/tethering /www/settings /www/fonts \
+         /www/favicon.svg /www/apple-touch-icon.png \
          /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \
          /www/cgi-bin/repeater-api /www/cgi-bin/tethering-api /www/cgi-bin/settings-api \
          /www/cgi-bin/wireguard-api /www/qr-vendor.js \
