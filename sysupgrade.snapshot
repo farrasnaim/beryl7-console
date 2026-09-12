@@ -31,9 +31,7 @@
 /etc/dashboard/vpn-autopaused
 /etc/nlbwmon
 /etc/sysctl.d/99-local.conf
-/www/apple-touch-icon.png
 /www/app.css
-/www/favicon.svg
 /www/os.css
 /www/os.js
 /www/legacy
@@ -66,3 +64,5 @@
 /etc/hotplug.d/iface/36-wgroad-metered
 /usr/sbin/linkquality-sample
 /www/fonts
+/www/favicon.svg
+/www/apple-touch-icon.png
