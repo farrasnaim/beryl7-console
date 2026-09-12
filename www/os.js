@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = 'acef32880d';
+var CONSOLE_VERSION = '1ae8dc793e';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -883,12 +883,20 @@ function firewallAlert(onDone) {
 /* Nav labels are IDENTICAL to the page <h1> and <title> they lead to, and the
    branch descriptors are the same sentences the Internet sources panel uses for
    the same two sources. One thing, one name, wherever it appears. */
+/* ONE RULE, EVERY ITEM, EVERY PAGE: the second line is live state or it is an
+   em dash. It used to be state on the page that could measure it and a static
+   description everywhere else, so the same row meant two different things
+   depending on where you were standing — which is exactly the description/state
+   conflation this console refuses everywhere else. A page that cannot measure a
+   stage leaves the dash; it never fills the space with prose. */
+var DASH = '—';
 var STAGES = [
-    { id: 'clients',  k: 'Overview',     href: '/dashboard/', icon: 'overview', static: 'Connected devices' },
-    { id: 'routing',  k: 'VPN',          href: '/vpn/',       icon: 'routing',  static: 'Tunnels and routing' },
-    { id: 'source',   k: 'Uplink',       href: null,          icon: 'eth',      static: 'Active source' },
-    { id: 'repeater', k: 'Wi-Fi uplink', href: '/repeater/',  icon: 'wifi',     static: 'Someone else’s Wi-Fi',  branch: true },
-    { id: 'tether',   k: 'USB uplink',   href: '/tethering/', icon: 'usb',      static: 'Phone or modem on USB', branch: true }
+    { id: 'clients',  k: 'Overview',     href: '/dashboard/', icon: 'overview' },
+    { id: 'routing',  k: 'VPN',          href: '/vpn/',       icon: 'routing'  },
+    { id: 'source',   k: 'Uplink',       href: null,          icon: 'eth'      },
+    { id: 'repeater', k: 'Wi-Fi uplink', href: '/repeater/',  icon: 'wifi',  branch: true },
+    { id: 'tether',   k: 'USB uplink',   href: '/tethering/', icon: 'usb',   branch: true },
+    { id: 'settings', k: 'Settings',     href: '/settings/',  icon: 'sliders' }
 ];
 /* The tab bar does NOT follow the packet path the spine follows. On a phone the
    order that matters is how often a thing is opened; the spine keeps topology
@@ -934,7 +942,7 @@ function buildShell(activeHref) {
             n.appendChild(el('i', 'pnode__dot'));
             var tx = el('div', 'pnode__txt');
             tx.appendChild(el('div', 'pnode__k', s.k));
-            var v = el('div', 'pnode__v', s.static);
+            var v = el('div', 'pnode__v', DASH);
             tx.appendChild(v);
             n.appendChild(tx);
             spineNodes[s.id] = { node: n, val: v };
@@ -946,7 +954,6 @@ function buildShell(activeHref) {
         foot.appendChild(transportEl());
         foot.appendChild(el('div', 'push'));
         foot.appendChild(themeBtn());
-        foot.appendChild(settingsBtn(activeHref));
         sp.appendChild(foot);
     }
 

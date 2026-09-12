@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <title>Wi-Fi uplink — Beryl 7</title>
 <script>(function(){var t=null;try{t=localStorage.getItem('beryl-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
-<link rel="stylesheet" href="/app.css?v=8cac980e">
+<link rel="stylesheet" href="/app.css?v=c7a72035">
 </head>
 <body>
 <div class="shell">
@@ -80,7 +80,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=24eebf36"></script>
+<script src="/os.js?v=dfdca360"></script>
 <script>
 (function () {
 'use strict';
@@ -543,7 +543,7 @@ function renderKnown(d) {
         txt.appendChild(el('div', 'row__sub', 'Rejoining this network will not ask for the password.'));
         id.appendChild(txt);
         r.appendChild(id);
-        var b = el('button', 'btn btn--ghost btn--sm', 'Forget');
+        var b = el('button', 'btn btn--sm btn--danger', 'Forget');
         b.addEventListener('click', function () {
             OS.dialog({ title: 'Forget “' + s + '”?',
                         body: 'The saved password is deleted from the router. The network stays ' +

@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <title>VPN — Beryl 7</title>
 <script>(function(){var t=null;try{t=localStorage.getItem('beryl-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
-<link rel="stylesheet" href="/app.css?v=8cac980e">
+<link rel="stylesheet" href="/app.css?v=c7a72035">
 </head>
 <body>
 <div class="shell">
@@ -108,7 +108,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=24eebf36"></script>
+<script src="/os.js?v=dfdca360"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
@@ -194,221 +194,79 @@ function renderMapV(d) {
         box.appendChild(e);
         return;
     }
-    var sv = OS.sv, svtext = OS.svtext;
-    var W = 360, LX = 34, NW = W - LX - 14, cx = LX + 20;
-    var H = 0;
-    used.forEach(function (t) { H += byIface[t.iface].length * 20 + 14 + 34 + 14 + 44 + 14 + 30 + 22; });
-    var s2 = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, 'class': 'topo',
-                         preserveAspectRatio: 'xMidYMin meet' });
-    s2.style.width = '100%'; s2.style.height = 'auto';
-    var y = 4;
-    used.forEach(function (t) {
-        var macs = byIface[t.iface];
-        var up = !t.disabled && t.up && t.handshake && (now - t.handshake) <= 200;
-        var cls = up ? 'on' : 'off';
-        /* The trunk has to start at the FIRST device's stub. It used to be
-           derived as y-14 after the loop, which lands on the LAST stub, so
-           every device above it hung unconnected — correct only while a tunnel
-           carried exactly one device. */
-        var trunkTop = y + 6;
-        macs.forEach(function (m) {
-            s2.appendChild(sv('path', { 'class': 'link ' + cls,
-                d: 'M' + cx + ' ' + (y + 6) + ' H' + (cx + 16) }));
-            s2.appendChild(svtext(cx + 24, y + 10, nameOf(m), 't1'));
-            y += 20;
+    var lanes = used.map(function (t) { return { t: t, macs: byIface[t.iface] }; });
+    /* THE PATH, in the same tiles the Overview topology uses. What stood here was
+       the last wireframe on the console: empty boxes, dotted connectors and 6pt
+       labels sprawled across 940px of mostly nothing. Every tile is also a way
+       into the card below that governs it. */
+    function jump(sel) {
+        return function () {
+            var t = $(sel);
+            if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+    }
+    function node(ic, k, v, cls, go) {
+        var n = el('div', 'topo__node' + (cls ? ' topo__node--' + cls : ''));
+        var ib = el('div', 'topo__ico'); ib.appendChild(OS.icon(ic)); n.appendChild(ib);
+        var b = el('div'); b.style.minWidth = '0';
+        b.appendChild(el('div', 'topo__k', k));
+        b.appendChild(el('div', 'topo__v', v));
+        n.appendChild(b);
+        if (go) {
+            n.classList.add('topo__node--link');
+            n.setAttribute('role', 'button');
+            n.setAttribute('tabindex', '0');
+            n.addEventListener('click', go);
+            n.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+            });
+        }
+        return n;
+    }
+    function laneUp(t) {
+        return !t.disabled && t.up && t.handshake && (now - t.handshake) <= 200;
+    }
+
+    var routed = 0;
+    lanes.forEach(function (L) { routed += L.macs.length; });
+    var anyUp = lanes.some(function (L) { return laneUp(L.t); });
+
+    var map = el('div', 'topo');
+    map.appendChild(node('dev', 'Routed devices',
+        routed + (routed === 1 ? ' device' : ' devices'), 'live', jump('#devices')));
+    map.appendChild(el('div', 'topo__link'));
+    map.appendChild(node('router', 'Router', 'This router', 'live'));
+    map.appendChild(el('div', 'topo__link'));
+
+    var br = el('div', 'topo__branch');
+    lanes.forEach(function (L) {
+        var up = laneUp(L.t);
+        var leaf = el('div', 'topo__leaf topo__leaf--link' + (up ? '' : ' topo__leaf--off'));
+        leaf.setAttribute('role', 'button');
+        leaf.setAttribute('tabindex', '0');
+        leaf.appendChild(el('span', null, L.t.label || L.t.name));
+        leaf.appendChild(el('span', 'n', up ? 'handshake ' + OS.ago(L.t.handshake, now)
+                                            : (L.t.disabled ? 'off' : 'no handshake')));
+        var go = jump('#tunnels');
+        leaf.addEventListener('click', go);
+        leaf.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
         });
-        /* The flow overlay is drawn in the SAME segments as the links, never as
-           one long run. The node boxes sit at x=LX with the trunk at cx=LX+20,
-           i.e. the line passes *inside* them horizontally, and .nodebox.on is
-           filled with --sig-dim at 15% alpha — so a flow path spanning the
-           whole column showed through both boxes and crossed the "Beryl 7" and
-           tunnel-name text. */
-        y += 6;
-        s2.appendChild(sv('path', { 'class': 'link ' + cls,
-            d: 'M' + cx + ' ' + trunkTop + ' V' + y }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow',
-            d: 'M' + cx + ' ' + trunkTop + ' V' + y }));
-        s2.appendChild(sv('rect', { 'class': 'nodebox on', x: LX, y: y, width: 110, height: 30, rx: 2 }));
-        s2.appendChild(svtext(LX + 12, y + 19, 'Beryl 7', 't1'));
-        y += 30;
-        s2.appendChild(sv('path', { 'class': 'link ' + cls, d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow', d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
-        y += 14;
-        s2.appendChild(sv('rect', { 'class': 'nodebox ' + (up ? 'on' : 'bad'),
-            x: LX, y: y, width: NW, height: 44, rx: 2 }));
-        s2.appendChild(svtext(LX + 12, y + 18, t.label || t.name, 't1'));
-        s2.appendChild(svtext(LX + 12, y + 34,
-            up ? 'handshake ' + OS.ago(t.handshake, now)
-               : (t.disabled ? 'off' : 'no handshake'), 't2'));
-        y += 44;
-        s2.appendChild(sv('path', { 'class': 'link ' + cls, d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow', d: 'M' + cx + ' ' + y + ' V' + (y + 14) }));
-        y += 14;
-        var ep = (t.endpoint || '').split(':')[0];
-        s2.appendChild(svtext(LX, y + 12, ep || 'endpoint', 't1'));
-        s2.appendChild(svtext(LX, y + 27, up ? 'to the internet' : 'unreachable', 't2'));
-        y += 30 + 22;
+        br.appendChild(leaf);
     });
-    box.appendChild(s2);
+    map.appendChild(br);
+    map.appendChild(el('div', 'topo__link'));
+    map.appendChild(node('globe', 'Exit', anyUp ? 'To the internet' : 'Unreachable',
+        anyUp ? 'live' : 'bad'));
+    box.appendChild(map);
 }
 
 /* ------------------------------------------------------------ routed map -- */
-function renderMap(d) {
-    if (MQMAP.matches) { renderMapV(d); return; }
-    var box = $('#vpnmap'); clear(box);
-    var now = d.ts || Math.floor(Date.now() / 1e3);
-    var pol = (d.policies || []).filter(function (p) { return p.enabled; });
-    var byIface = {};
-    pol.forEach(function (p) {
-        var m = p.mac.toUpperCase();
-        if (!presentOf(m)) return;          /* away: it belongs to the list, not the map */
-        (byIface[p.iface] = byIface[p.iface] || []).push(m);
-    });
-    var used = (d.tunnels || []).filter(function (t) { return byIface[t.iface]; })
-        .sort(function (a, b) { return (a.label || a.name).localeCompare(b.label || b.name); });
-
-    if (!used.length) {
-        /* "nothing is routed" and "everything routed is away" are different
-           situations and the second one is not a prompt to go and configure
-           something — it is already configured. */
-        var anyPol = pol.length > 0;
-        var e = anyPol
-            ? OS.emptyState('Nothing routed is connected right now',
-                pol.length + (pol.length === 1 ? ' device is' : ' devices are') +
-                ' set up to use a tunnel, and none of them is on the network. ' +
-                'The path appears here as soon as one comes back.', 'routing')
-            : OS.emptyState('Nothing is routed through a tunnel',
-                'Every device is using the normal uplink. Pick a tunnel for a device below and ' +
-                'its path is drawn here.', 'routing');
-        e.style.padding = '8px 0 16px';
-        box.appendChild(e);
-        return;
-    }
-
-    var sv = OS.sv, svtext = OS.svtext;
-    var W = 940, rowH = 48;
-    var lanes = used.map(function (t) { return { t: t, macs: byIface[t.iface] }; });
-    var H = 26 + lanes.reduce(function (a, L) {
-        return a + Math.max(rowH, L.macs.length * 22 + 28); }, 0);
-    var s2 = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, 'class': 'topo',
-                         preserveAspectRatio: 'xMinYMid meet' });
-    s2.style.height = H + 'px'; s2.style.minWidth = '620px';
-
-    var y = 20;
-    var colDev = 16, colRouter = 296, colTun = 462, colNet = 756;
-    s2.appendChild(svtext(colDev, 10, 'Device', 'cap'));
-    s2.appendChild(svtext(colRouter, 10, 'Router', 'cap'));
-    s2.appendChild(svtext(colTun, 10, 'Tunnel', 'cap'));
-    s2.appendChild(svtext(colNet + 8, 10, 'Exit', 'cap'));
-
-    lanes.forEach(function (L) {
-        var t = L.t;
-        var up = !t.disabled && t.up && t.handshake && (now - t.handshake) <= 200;
-        /* +28, not +26. The lane centre is where the router box sits and where
-           the line into it is drawn; the device rows are at 14 + i*22. With
-           +26 the centre lands exactly 1px off a row for every even device
-           count — two horizontals a pixel apart both meeting the bus, which
-           renders as a thick smudged junction rather than a join. +28 puts the
-           centre either exactly ON a row (even counts, so the row and the
-           box-entry line are one straight line) or a clean 11px between rows
-           (odd counts). */
-        var laneH = Math.max(rowH, L.macs.length * 22 + 28);
-        var mid = y + laneH / 2;
-        var cls = up ? 'on' : 'off';
-
-        /* Trunk and spur. Each device runs to a shared vertical bus held OFF
-           the box, then one line carries into the router at the lane's centre:
-
-               Tablet    ----+
-                             |---[ Beryl 7 ]
-               Phone     ----+
-
-           The bus is at colRouter-14, not on colRouter itself. Drawn on the
-           edge it merged with the box border and the device rows appeared to
-           graze the top-left corner rather than connect to anything. Spanning
-           the rows AND mid means it joins correctly for any device count,
-           including one (where the row and the centre differ by 10px). */
-        var busX = colRouter - 14;
-        /* Centre the block of device rows on the lane, so the router box ends
-           up BETWEEN the names rather than level with the last one. Pinning
-           the rows to a fixed y+14 while the box tracked the lane centre is
-           what made the box look like it had sagged once a tunnel carried two
-           devices. Both now share one axis: rows centred on mid, box centred
-           on mid. */
-        var rowTop = y + (laneH - (L.macs.length - 1) * 22) / 2;
-        L.macs.forEach(function (m, i) {
-            var ty = rowTop + i * 22;
-            s2.appendChild(svtext(colDev, ty + 4, nameOf(m), 't1'));
-            s2.appendChild(sv('path', { 'class': 'link ' + cls,
-                d: 'M' + (colDev + 236) + ' ' + ty + ' H' + busX }));
-            if (up) s2.appendChild(sv('path', { 'class': 'flow',
-                d: 'M' + (colDev + 236) + ' ' + ty + ' H' + busX }));
-        });
-
-        var busTop = Math.min(rowTop, mid);
-        var busBot = Math.max(rowTop + (L.macs.length - 1) * 22, mid);
-        if (busBot > busTop) {
-            s2.appendChild(sv('path', { 'class': 'link ' + cls,
-                d: 'M' + busX + ' ' + busTop + ' V' + busBot }));
-            if (up) s2.appendChild(sv('path', { 'class': 'flow',
-                d: 'M' + busX + ' ' + busTop + ' V' + busBot }));
-        }
-        s2.appendChild(sv('path', { 'class': 'link ' + cls,
-            d: 'M' + busX + ' ' + mid + ' H' + colRouter }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow',
-            d: 'M' + busX + ' ' + mid + ' H' + colRouter }));
-
-        s2.appendChild(sv('rect', { 'class': 'nodebox on', x: colRouter, y: mid - 14,
-            width: 92, height: 28, rx: 2 }));
-        s2.appendChild(svtext(colRouter + 10, mid + 4, 'Beryl 7', 't1'));
-        s2.appendChild(sv('path', { 'class': 'link ' + cls,
-            d: 'M' + (colRouter + 92) + ' ' + mid + ' H' + colTun }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow',
-            d: 'M' + (colRouter + 92) + ' ' + mid + ' H' + colTun }));
-
-        s2.appendChild(sv('rect', { 'class': 'nodebox ' + (up ? 'on' : 'bad'),
-            x: colTun, y: mid - 20, width: 218, height: 40, rx: 2 }));
-        s2.appendChild(svtext(colTun + 12, mid - 2, t.label || t.name, 't1'));
-        s2.appendChild(svtext(colTun + 12, mid + 13,
-            up ? 'handshake ' + OS.ago(t.handshake, now)
-               : (t.disabled ? 'off' : 'no handshake'), 't2'));
-
-        s2.appendChild(sv('path', { 'class': 'link ' + cls,
-            d: 'M' + (colTun + 218) + ' ' + mid + ' H' + colNet }));
-        if (up) s2.appendChild(sv('path', { 'class': 'flow',
-            d: 'M' + (colTun + 218) + ' ' + mid + ' H' + colNet }));
-
-        var ep = (t.endpoint || '').split(':')[0];
-        s2.appendChild(svtext(colNet + 8, mid - 2, ep || 'endpoint', 't1'));
-        s2.appendChild(svtext(colNet + 8, mid + 13,
-            up ? 'to the internet' : 'unreachable', 't2'));
-        y += laneH;
-    });
-    box.appendChild(s2);
-
-    /* Second pass, after the SVG is in the document so text can be measured:
-       pull the device stubs left until they start just past the longest name.
-       The device column is a fixed 236px, but the names are nowhere near that
-       wide — measured here, the longest ends at 134, leaving 118px of dead air
-       with a short dash floating in the middle of it. A constant would work
-       until a device gets renamed to something longer, so it is measured.
-       Clamped so a very long name cannot push the stub into the bus. */
-    var maxEnd = 0;
-    Array.prototype.forEach.call(s2.querySelectorAll('text.t1'), function (t) {
-        if (+t.getAttribute('x') === colDev) {
-            maxEnd = Math.max(maxEnd, colDev + t.getComputedTextLength());
-        }
-    });
-    if (maxEnd > 0) {
-        var startX = Math.min(Math.ceil(maxEnd) + 14, colRouter - 14 - 24);
-        Array.prototype.forEach.call(s2.querySelectorAll('path'), function (p) {
-            var m = (p.getAttribute('d') || '').match(/^M([\d.]+) ([\d.]+) H([\d.]+)$/);
-            if (m && +m[1] === colDev + 236) {
-                p.setAttribute('d', 'M' + startX + ' ' + m[2] + ' H' + m[3]);
-            }
-        });
-    }
-}
+/* ONE DRAWING AT EVERY WIDTH. There used to be a second, horizontal SVG version
+   for wide screens — the box-and-dotted-line wireframe. The tile stack reads the
+   same on a phone and on a desktop, so the SVG one is gone rather than kept in
+   parallel and left to drift. */
+function renderMap(d) { return renderMapV(d); }
 
 /* --------------------------------------------------------------- tunnels - */
 function handshakeAge(t, now) {
@@ -816,15 +674,15 @@ function renderFailmode(d) {
     var mode = d.failmode === 'open' ? 'open' : 'closed';
 
     var opts = [
-        ['closed', 'Block the device',
-         'Nothing leaks. A device pinned to a dead tunnel simply has no internet until the tunnel ' +
-         'recovers. This is the safe default.'],
+        ['closed', 'Block the device', 'Stays private',
+         'Nothing leaks. A device pinned to a dead tunnel simply has no internet until the ' +
+         'tunnel recovers.'],
         /* "restores it automatically" reads as "restores it promptly", and the
            owner of this router read it that way: he watched a device sit on the
            normal uplink for a minute after the uplink was already working, and
            re-enabled it by hand assuming something had broken. He had chosen
            this mode knowingly — what was missing was the timing. Say it. */
-        ['open', 'Keep it online without the tunnel',
+        ['open', 'Keep it online without the tunnel', 'Not private while down',
          'If the tunnel stops answering for three minutes, the router temporarily sends the device ' +
          'back to the normal uplink so it keeps working, then puts it back on the tunnel within ' +
          'a few seconds of the tunnel answering again. Traffic is not private in between — that ' +
@@ -832,18 +690,22 @@ function renderFailmode(d) {
     ];
     opts.forEach(function (o) {
         var lab = el('label');
-        lab.style.cssText = 'display:flex;gap:12px;align-items:flex-start;padding:12px;' +
-            'border:1px solid ' + (mode === o[0] ? 'var(--ac-line)' : 'var(--line-2)') + ';' +
-            'background:' + (mode === o[0] ? 'var(--ac-dim)' : 'transparent') + ';' +
-            'border-radius:var(--r);cursor:pointer;margin-bottom:8px';
+        var on = mode === o[0];
+        lab.className = 'radiocard' + (on ? ' radiocard--on' : '');
         var i = el('input'); i.type = 'radio'; i.name = 'fm'; i.value = o[0];
         i.checked = mode === o[0];
         i.style.cssText = 'margin:2px 0 0;flex:none;width:16px;height:16px;accent-color:var(--ac)';
         lab.appendChild(i);
         var t = el('div');
-        var b = el('div', null, o[1]); b.style.cssText = 'font-size:13px;font-weight:600;margin-bottom:3px';
+        var b = el('div', 'radiocard__t');
+        b.appendChild(document.createTextNode(o[1]));
+        /* The risk is stated on BOTH options and does not move with the choice:
+           "this is the safe default" was printed on an option that was not
+           selected, which read as a claim about the current state. */
+        b.appendChild(el('span', 'chip' + (o[0] === 'open' ? ' chip--warn' : ''), o[2]));
+        if (on) b.appendChild(el('span', 'radiocard__now', 'Selected'));
         t.appendChild(b);
-        var hh = el('div', 'hint', o[2]);
+        var hh = el('div', 'hint', o[3]);
         /* the selected card sits on --ac-dim, which lifts the ground enough that
            --ink-3 drops to 3.5:1 — this line is prose, so it takes --ink-2. */
         hh.style.cssText = 'margin-top:0;color:var(--ink-2)';

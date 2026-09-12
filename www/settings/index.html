@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <title>Settings — Beryl 7</title>
 <script>(function(){var t=null;try{t=localStorage.getItem('beryl-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
-<link rel="stylesheet" href="/app.css?v=8cac980e">
+<link rel="stylesheet" href="/app.css?v=c7a72035">
 </head>
 <body>
 <div class="shell">
@@ -107,7 +107,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=24eebf36"></script>
+<script src="/os.js?v=dfdca360"></script>
 <script>
 (function () {
 'use strict';
@@ -122,7 +122,18 @@ OS.buildShell('/settings/');
 
 var last = null;
 var dirty = {};          /* panel id -> true while the form differs from the router */
+var applyBtns = {};      /* panel id -> its Apply, so it can be disabled again */
 
+/* Apply is dead until its own section is actually modified. Five identical
+   live Apply buttons down a page say nothing about which one you need; a
+   disabled one that wakes up says exactly which section you changed. */
+function setApplyState(id) {
+    var b = applyBtns[id];
+    if (!b) return;
+    var on = !!dirty[id];
+    b.disabled = !on;
+    b.className = on ? 'btn btn--primary btn--sm' : 'btn btn--sm';
+}
 function markDirty(id, on) {
     dirty[id] = !!on;
     var st = $('#st-' + id);
@@ -130,12 +141,32 @@ function markDirty(id, on) {
         var cap = $('.unsaved', st);
         if (on && !cap) {
             var c = el('span', 'row__cap unsaved', 'unsaved changes');
-            c.style.color = 'var(--caution-fg)';
+            c.style.color = 'var(--warn)';
             st.insertBefore(c, st.firstChild);
         } else if (!on && cap) cap.parentNode.removeChild(cap);
     }
+    setApplyState(id);
+    countDirty();
 }
 function anyDirty() { for (var k in dirty) if (dirty[k]) return true; return false; }
+
+/* A running count that follows you down the page, because the section you
+   changed is usually three screens above where you are when you forget it. */
+var dirtyPill = null;
+function countDirty() {
+    var n = 0, k;
+    for (k in dirty) if (dirty[k]) n++;
+    if (!dirtyPill) {
+        dirtyPill = el('div', 'unsavedbar');
+        dirtyPill.hidden = true;
+        document.body.appendChild(dirtyPill);
+    }
+    dirtyPill.hidden = n === 0;
+    if (n) {
+        setTxt(dirtyPill, n === 1 ? '1 section has unsaved changes'
+                                  : n + ' sections have unsaved changes');
+    }
+}
 window.addEventListener('beforeunload', function (e) {
     if (anyDirty()) { e.preventDefault(); e.returnValue = ''; }
 });
@@ -166,17 +197,17 @@ function checkRow(labelTxt, checked) {
 function applyRow() {
     var row = el('div', 'inline'); row.style.marginTop = '4px';
     var ap = el('button', 'btn btn--sm', 'Apply'); ap.type = 'button';
+    ap.disabled = true;
     var rs = el('button', 'btn btn--ghost btn--sm', 'Reset'); rs.type = 'button';
     row.appendChild(ap); row.appendChild(rs);
     return { row: row, apply: ap, reset: rs };
 }
 /* dirty wiring: any input change flips the panel dirty and promotes Apply */
 function watch(panelId, root, applyBtn) {
+    applyBtns[panelId] = applyBtn;
+    setApplyState(panelId);
     ['input', 'change'].forEach(function (ev) {
-        root.addEventListener(ev, function () {
-            markDirty(panelId, true);
-            applyBtn.className = 'btn btn--primary btn--sm';
-        });
+        root.addEventListener(ev, function () { markDirty(panelId, true); });
     });
 }
 function nowLine(parts) {
@@ -362,7 +393,7 @@ function renderRadio(r) {
     var ar = applyRow();
     /* recovery, not configuration: kick the band without touching the form */
     var band = bandLabel(r.band);
-    var rst = el('button', 'btn btn--ghost btn--sm', 'Restart radio');
+    var rst = el('button', 'btn btn--sm btn--danger', 'Restart radio');
     rst.type = 'button';
     rst.style.marginLeft = 'auto';
     rst.addEventListener('click', function () {
@@ -425,8 +456,14 @@ function renderRadio(r) {
 function equaliseNoteSlots() {
     var slots = OS.$$('#radioGrid .noteslot');
     if (!slots.length) return;
-    slots.forEach(function (s) { s.style.height = ''; });
+    slots.forEach(function (s) { s.style.height = ''; s.style.paddingBottom = ''; });
     if (MQF.matches) return;                       /* stacked: nothing to align */
+    /* Also stacked whenever the radios share a left edge — which they now do
+       inside a two-column page, where .g2 is forced to one track. Padding them
+       to a common depth there would just open a hole above the second radio. */
+    var xs = slots.map(function (s) { return Math.round(s.getBoundingClientRect().left); });
+    var same = xs.every(function (x) { return x === xs[0]; });
+    if (same) return;
 
     /* Pad each slot so its BOTTOM edge sits the same distance below its panel's
        top — not so the slots are merely the same height. The form starts right
@@ -559,15 +596,23 @@ function buildSecondaryPanel(sec) {
            phone is exactly where that one gets read. "Explanatory" is a
            judgement per note, not something the tone can be trusted to encode -
            hiding by tone would have taken that one with it. */
-        var leg = OS.note('Old devices can join this one. It advertises WPA2-PSK alone, ' +
-            'with no protected management frames and no fast roaming \u2014 the plainest ' +
-            'handshake still worth having. The main network advertises WPA3, PMF and 802.11r ' +
-            'beside WPA2, and supplicants older than roughly 2012 refuse that beacon outright ' +
-            'rather than skip the parts they do not recognise. Speed is not the trade: the ' +
-            'cipher is the same AES-CCMP, and the radio still offers every generation it has.',
-            'ok');
+        /* This panel renders once per secondary network, so the full paragraph
+           appeared twice verbatim on one page. The claim is one line now and the
+           reasoning sits behind a disclosure — still there for whoever wants it,
+           no longer ninety words of wall repeated per card. */
+        var leg = OS.note('Older devices can join this one: it advertises WPA2-PSK alone.', 'ok');
         leg.classList.add('desk-only');
         box.appendChild(leg);
+        var why = el('details', 'adv desk-only');
+        why.appendChild(el('summary', null, 'Why an old device refuses the main network'));
+        var wb = el('div', 'adv__b');
+        wb.appendChild(el('div', 'hint',
+            'The main network advertises WPA3, PMF and 802.11r beside WPA2, and supplicants ' +
+            'older than roughly 2012 refuse that beacon outright rather than skip the parts ' +
+            'they do not recognise. Speed is not the trade: the cipher is the same AES-CCMP, ' +
+            'and the radio still offers every generation it has.'));
+        why.appendChild(wb);
+        box.appendChild(why);
     }
 
     var form = el('div');
@@ -862,7 +907,7 @@ function renderPing(targets, meta) {
             if (meta && meta.sel === 'custom' && meta.target === t.ip) {
                 r.appendChild(OS.stateWord('LIVE', 'ok'));
             }
-            var b = el('button', 'btn btn--sm', 'Remove'); b.type = 'button';
+            var b = el('button', 'btn btn--sm btn--danger', 'Remove'); b.type = 'button';
             b.addEventListener('click', function () {
                 pingPost({ action: 'del', ip: t.ip }, b).then(function (j) {
                     if (j) renderPing(j.targets || [], meta);
@@ -1150,11 +1195,11 @@ function renderIpv6(d) {
    only to someone looking. Everything that cost real time this month happened
    silently and was found days later. This panel configures the push side.
 
-   The address is shown in full rather than masked: it is what you type into
-   the phone app to subscribe, so hiding it would make the feature unusable to
-   set up. It is a shared secret all the same - anyone who learns the topic can
-   read these notifications - which is why only interface and service STATES
-   are ever sent. */
+   The address is a shared secret - anyone who learns the topic can read these
+   notifications - so it is MASKED by default, with Show and Copy beside it. It
+   is also what you type into the phone app to subscribe, which is why it is
+   masked rather than withheld: one tap reveals it, and Copy never reveals it at
+   all. Only interface and service STATES are ever sent. */
 function renderNotify(d) {
     if (dirty.notify) return;
     var n = d.notify; if (!n) return;
@@ -1188,10 +1233,36 @@ function renderNotify(d) {
     form.appendChild(chk.row);
 
     var u = el('input', 'input');
+    u.type = 'password';
     u.value = n.url || '';
     u.placeholder = 'https://ntfy.sh/your-private-topic';
     u.autocomplete = 'off'; u.spellcheck = false;
-    form.appendChild(field('Where to send it', u,
+    u.style.flex = '1 1 220px';
+    var secretRow = el('div', 'inline');
+    secretRow.appendChild(u);
+    var reveal = el('button', 'btn btn--ghost btn--sm', 'Show'); reveal.type = 'button';
+    reveal.addEventListener('click', function () {
+        var masked = u.type === 'password';
+        u.type = masked ? 'text' : 'password';
+        setTxt(reveal, masked ? 'Hide' : 'Show');
+    });
+    secretRow.appendChild(reveal);
+    var copyB = el('button', 'btn btn--ghost btn--sm', 'Copy'); copyB.type = 'button';
+    copyB.addEventListener('click', function () {
+        /* Served over plain http, where navigator.clipboard does not exist, so
+           the selection path is the one that actually runs here. */
+        var ok = false;
+        try {
+            var was = u.type; u.type = 'text';
+            u.select(); u.setSelectionRange(0, 99999);
+            ok = document.execCommand('copy');
+            u.type = was; u.blur();
+        } catch (e) { ok = false; }
+        OS.toast(ok ? 'Address copied.' : 'Could not copy - tap Show and copy it by hand.',
+                 ok ? 'ok' : 'warn');
+    });
+    secretRow.appendChild(copyB);
+    form.appendChild(field('Where to send it', secretRow,
         'Install the ntfy app, subscribe to the topic at the end of this address, and it ' +
         'arrives on your phone. Treat the address as a password: anyone who knows it can read ' +
         'these messages.'));

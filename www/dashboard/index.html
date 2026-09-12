@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <title>Overview — Beryl 7</title>
 <script>(function(){var t=null;try{t=localStorage.getItem('beryl-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
-<link rel="stylesheet" href="/app.css?v=8cac980e">
+<link rel="stylesheet" href="/app.css?v=c7a72035">
 </head>
 <body>
 <div class="shell">
@@ -68,7 +68,7 @@
           </div>
           <div class="panel__b">
             <div id="ribbon"></div>
-            <div class="cap"><span id="ribL"></span><span>UL above · DL below</span><span id="ribR"></span></div>
+            <div class="cap"><span id="ribL"></span><span></span><span id="ribR"></span></div>
 
             <!-- Ping, loss and jitter are three readings of ONE measurement:
                  pingmon's 1-second probe, five minutes of which the router
@@ -148,7 +148,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=24eebf36"></script>
+<script src="/os.js?v=dfdca360"></script>
 <script>
 (function () {
 'use strict';
@@ -513,6 +513,7 @@ function pushSample(dn, up) {
     drawRibbon();
 }
 
+var cardPeak = 0;   /* the window's real peak, in bytes/s, for the shared unit */
 /* Eased vertical scales for the two charts.
    Both used to re-derive their scale from whatever happened to be in the ring,
    so a spike ageing out re-scaled the entire trace in a single frame — read as
@@ -546,20 +547,41 @@ function drawRibbon() {
         /* the LABEL reports the real peak in the window, never the eased
            drawing scale — the caption is a reading, only the geometry is
            smoothed */
-        var pk = OS.brate(rawPeak);
+        cardPeak = rawPeak;
         /* the left edge is the OLDEST sample, so label the span the chart
            actually covers — which also makes the 1s/5s switch self-evident */
         setTxt($('#ribL'), 'last ' + OS.dur((ring.t[n - 1] - ring.t[0]) / 1000));
-        setTxt($('#ribR'), 'peak ' + pk[0] + ' ' + pk[1]);
+        /* the figure itself is written below, once the shared unit is known */
     } else {
         var ph = el('div'); ph.style.cssText = 'height:84px;display:grid;place-items:center';
         ph.appendChild(el('div', 'dim', 'collecting…'));
         ph.firstChild.style.fontSize = '11px';
         rb.appendChild(ph);
+        cardPeak = 0;
         setTxt($('#ribL'), ''); setTxt($('#ribR'), '');
     }
-    var cur = OS.brate(n ? ring.dn[n - 1] : 0), cu = OS.brate(n ? ring.up[n - 1] : 0);
-    setTxt($('#tpNow'), '↓ ' + cur[0] + ' ' + cur[1] + '   ↑ ' + cu[0] + ' ' + cu[1]);
+    /* ONE UNIT FOR THE WHOLE CARD. Down, up and peak each used to pick their own
+       scale, so the card could read "741 kb/s" next to "peak 2.0 Mb/s" and quietly
+       invite you to compare two different rulers. The largest of the three chooses
+       the unit; the other two are then stated in it. */
+    var dnB = n ? ring.dn[n - 1] : 0, upB = n ? ring.up[n - 1] : 0;
+    var unit = OS.brate(Math.max(dnB, upB, cardPeak))[1];
+    var tn = $('#tpNow');
+    if (tn) {
+        clear(tn);
+        var dnS = el('span', 'tp-dn', '↓ ' + inUnit(dnB, unit));
+        var upS = el('span', 'tp-up', '↑ ' + inUnit(upB, unit));
+        upS.style.marginLeft = '12px';
+        tn.appendChild(dnS); tn.appendChild(upS);
+    }
+    if (cardPeak) setTxt($('#ribR'), 'peak ' + inUnit(cardPeak, unit));
+}
+/* express a byte/s figure in a unit chosen elsewhere, so a card can hold one ruler */
+function inUnit(Bps, unit) {
+    var bits = (+Bps || 0) * 8;
+    var div = unit === 'Gb/s' ? 1e9 : unit === 'Mb/s' ? 1e6 : unit === 'kb/s' ? 1e3 : 1;
+    var v = bits / div;
+    return (v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + ' ' + unit;
 }
 
 /* ----------------------------------------- ping · packet loss · jitter --
