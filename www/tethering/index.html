@@ -11,7 +11,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/apple-touch-icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="stylesheet" href="/app.css?v=08410dce">
+<link rel="stylesheet" href="/app.css?v=6b6e0477">
 </head>
 <body>
 <div class="shell">
@@ -34,7 +34,7 @@
     <div class="face">
       <section class="panel">
         <div class="panel__h">
-          <span class="panel__t">USB device</span>
+          <h2 class="panel__t">USB device</h2>
           <div class="panel__aside"><span id="devChip"></span><span class="hslot" id="actSlot"></span></div>
         </div>
         <div class="panel__b" id="device">
@@ -49,7 +49,7 @@
     <div class="face">
       <section class="panel">
         <div class="panel__h">
-          <span class="panel__t">Internet sources</span>
+          <h2 class="panel__t">Internet sources</h2>
           <div class="panel__aside"><span class="row__cap">lowest metric wins</span></div>
         </div>
         <div class="panel__b panel__b--flush" id="sources"></div>
@@ -60,7 +60,7 @@
     <div class="face">
       <section class="panel" id="modemPanel" hidden>
         <div class="panel__h">
-          <span class="panel__t">Modem profile</span>
+          <h2 class="panel__t">Modem profile</h2>
           <div class="panel__aside" id="modemChip"></div>
         </div>
         <div class="panel__b" id="modem"></div>
@@ -77,7 +77,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=7d209e97"></script>
+<script src="/os.js?v=c5140e86"></script>
 <script>
 (function () {
 'use strict';
@@ -222,8 +222,8 @@ function renderModem(d) {
     var g = el('div', 'grid g2');
     function field(label, key, val, ph, type) {
         var f = el('div', 'field');
-        f.appendChild(el('label', 'label', label));
-        var inp = el('input', 'input');
+        var lab = el('label', 'label', label); f.appendChild(lab);
+        var inp = el('input', 'input'); OS.bindLabel(lab, inp);
         inp.type = type || 'text';
         inp.value = val || '';
         if (ph) inp.placeholder = ph;
@@ -233,8 +233,8 @@ function renderModem(d) {
         return inp;
     }
     var fProto = el('div', 'field');
-    fProto.appendChild(el('label', 'label', 'Protocol'));
-    var sel = el('select', 'select'); sel.setAttribute('data-k', 'proto');
+    var lProto = el('label', 'label', 'Protocol'); fProto.appendChild(lProto);
+    var sel = el('select', 'select'); sel.setAttribute('data-k', 'proto'); OS.bindLabel(lProto, sel);
     ['dhcp', 'qmi', 'mbim', 'ncm', '3g'].forEach(function (o) {
         var op = el('option', null, o === 'dhcp' ? 'dhcp (plain USB network)' : o);
         op.value = o;
@@ -247,8 +247,8 @@ function renderModem(d) {
     field('Control device', 'device', p.device, m.suggest_device || '/dev/cdc-wdm0');
     field('APN', 'apn', p.apn, 'internet');
     var fAuth = el('div', 'field');
-    fAuth.appendChild(el('label', 'label', 'Authentication'));
-    var sa = el('select', 'select'); sa.setAttribute('data-k', 'auth');
+    var lAuth = el('label', 'label', 'Authentication'); fAuth.appendChild(lAuth);
+    var sa = el('select', 'select'); sa.setAttribute('data-k', 'auth'); OS.bindLabel(lAuth, sa);
     [['', 'none'], ['pap', 'PAP'], ['chap', 'CHAP'], ['both', 'PAP or CHAP']].forEach(function (o) {
         var op = el('option', null, o[1]); op.value = o[0];
         if ((p.auth || '') === o[0]) op.selected = true;

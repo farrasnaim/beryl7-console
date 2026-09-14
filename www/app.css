@@ -42,20 +42,22 @@
   --r-card:26px; --r-inset:18px; --r-tile:14px; --r-pill:999px;
 
   --ease:cubic-bezier(.32,.72,0,1);
-  --spring:cubic-bezier(.5,1.4,.4,1);
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;font-family:var(--sys);font-size:var(--t-body);line-height:1.5;
   color:var(--ink);background:var(--bg);letter-spacing:-.01em;
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
-  min-height:100vh;overflow-x:hidden}
+  min-height:100vh;min-height:100svh;overflow-x:hidden}
 h1,h2,h3,p{margin:0}
 button{font:inherit;color:inherit}
 a{color:inherit;text-decoration:none}
 svg{display:block}
 .n{font-variant-numeric:tabular-nums;letter-spacing:0}
 ::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+/* The parts the browser draws: caret and scrollbars take the palette too. */
+html{caret-color:var(--accent);scrollbar-width:thin;
+  scrollbar-color:color-mix(in srgb,var(--ink) 28%,transparent) transparent}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 [hidden]{display:none!important}
 
@@ -68,9 +70,15 @@ svg{display:block}
   --bg:#e9ebee;
   --ink:#16161b;
   --ink-2:rgba(22,22,27,.74);
-  --ink-3:rgba(22,22,27,.56);
+  --ink-3:rgba(22,22,27,.64);
   --accent:#a0362d; --accent-2:#bb4a3d; --accent-ink:#fff;
-  --ok:#2fa15f; --warn:#c98a2e; --bad:#c8433a; --idle:rgba(36,27,27,.26);
+  /* TUNED AGAINST THE COMPOSITED CARD, not the raw page. A pane at .28 alpha
+     lightens whatever sits under the text, and the first palette was checked
+     against --bg alone: green read 2.5:1 and amber 2.3:1 on the surface they
+     actually appear on. These clear 4.5:1 on that surface (#e9dfe1): green
+     5.07, amber 4.76, red 5.13 — and the red is a crimson rather than a
+     brick so it cannot be mistaken for the maroon accent beside it. */
+  --ok:#176a41; --warn:#865708; --bad:#b02430; --idle:rgba(36,27,27,.26);
 
   /* A MAROON GROUND, on purpose — this is what makes the glass READ as glass:
      scroll, and each translucent card shows the maroon bleeding through,
@@ -94,6 +102,8 @@ svg{display:block}
   --fieldwell:rgba(28,24,34,.07);
   --blur:blur(26px) saturate(180%);
   --blur-lg:blur(38px) saturate(190%);
+  /* the <select> chevron: a data URI cannot read a token, so it is one */
+  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%2316161b' stroke-opacity='.6' stroke-width='1.8'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
 
   /* type/space/radii (unchanged) */
   --t-hero:30px; --t-title:19px; --t-card:15.5px; --t-body:14px; --t-sub:12.5px; --t-cap:11px;
@@ -101,7 +111,7 @@ svg{display:block}
   --r-card:20px; --r-inset:14px; --r-tile:12px; --r-pill:999px;
   --sys:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-  --ease:cubic-bezier(.32,.72,0,1); --spring:cubic-bezier(.5,1.4,.4,1);
+  --ease:cubic-bezier(.32,.72,0,1);
 
   /* compatibility aliases for the old token names still used inline */
   --ink-4:var(--ink-3); --line:var(--sep); --line-2:var(--sep); --rule:var(--sep);
@@ -129,6 +139,7 @@ svg{display:block}
   --card-border:rgba(255,255,255,.14);
   --rim:rgba(255,255,255,.26); --rim-hair:rgba(255,255,255,.10); --rim-lo:rgba(0,0,0,.22);
   --sep:rgba(255,255,255,.11); --fieldwell:rgba(0,0,0,.26);
+  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23f6f4f5' stroke-opacity='.7' stroke-width='1.8'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   color-scheme:dark;
@@ -142,6 +153,7 @@ svg{display:block}
   --card-border:rgba(255,255,255,.14);
   --rim:rgba(255,255,255,.26); --rim-hair:rgba(255,255,255,.10); --rim-lo:rgba(0,0,0,.22);
   --sep:rgba(255,255,255,.11); --fieldwell:rgba(0,0,0,.26);
+  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23f6f4f5' stroke-opacity='.7' stroke-width='1.8'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
 }}
 :root[data-theme="light"]{color-scheme:light}
 
@@ -171,7 +183,7 @@ body::before{content:"";position:fixed;inset:-12%;z-index:-2;pointer-events:none
     linear-gradient(110deg, transparent 58%, var(--m2) 74%, transparent 90%),
     radial-gradient(80% 50% at 94% 0%, var(--m4), transparent 72%);
   animation:drift 44s var(--ease) infinite alternate}
-@media (max-width:760px){
+@media (max-width:859px){
   /* Steeper on a phone: a band crossing a narrow column at a shallow angle is
      a horizontal stripe, which reads as a seam between cards rather than light. */
   body::before{background:
@@ -184,12 +196,18 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 @keyframes drift{0%{transform:translate3d(0,0,0) scale(1)}
   100%{transform:translate3d(-2%,-1.5%,0) scale(1.05)}}
 @media (prefers-reduced-motion:reduce){body::before{animation:none}}
+/* On a phone the ground does not drift. Ten panes blur whatever is behind
+   them, and a layer that moves every frame underneath makes each one
+   re-sample every frame — a continuous GPU cost for a 2% translate over 44s
+   that nobody perceives while scrolling a device list. The bands stay; only
+   the motion goes. Not measured on the device: inferred from the mechanism. */
+@media (max-width:859px){body::before{animation:none}}
 
 /* ─── 3. SHELL / LAYOUT ────────────────────────────────────────────────────
    Phone first: one column, content that scrolls under a floating tab bar and a
    floating top bar. Desktop promotes the nav to a floating side rail and caps
    the reading width. */
-.shell{min-height:100vh}
+.shell{min-height:100vh;min-height:100svh}
 .main{max-width:720px;margin:0 auto;padding:0 var(--s4) calc(124px + env(safe-area-inset-bottom))}
 .head{padding:var(--s6) 2px var(--s4)}
 .head__t{font-size:var(--t-hero);font-weight:800;letter-spacing:-.03em;line-height:1.05}
@@ -233,7 +251,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 /* A header aside carrying a segmented control AND a search box is wider than a
    phone card; the row stayed on one line and the controls hung over the pane's
    edge. On a phone the aside drops to its own line and takes the full width. */
-@media (max-width:760px){
+@media (max-width:859px){
   .panel__h{flex-wrap:wrap;row-gap:var(--s2)}
   .panel__aside{min-width:0;flex-wrap:wrap;row-gap:var(--s2)}
   /* Only an aside carrying CONTROLS takes a line of its own. Doing it to every
@@ -260,6 +278,12 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 @media (prefers-reduced-motion:no-preference){
   .face,.sect{animation:rise .5s var(--ease) both}
   .sect+.face{animation-delay:.02s}
+  /* The two things that move forever: a loading placeholder's sheen and the
+     live LED's breath. Both are gated here with the entrance, so a reader who
+     asked for less motion gets a still placeholder and a steady dot — the
+     state is still there, only the animation is not. */
+  .sk{animation:sheen 1.4s linear infinite}
+  .tp[data-tp="live"] .tp__led{animation:pulse 2.4s var(--ease) infinite}
 }
 @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 
@@ -360,9 +384,12 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
    two-thirds thermal bar coloured "good" says two opposite things at once.
    Normal is neutral ink; amber and red mean a threshold was actually crossed,
    so colour appearing at all is itself the information. */
-.meter i{display:block;height:100%;border-radius:var(--r-pill);width:0;
-  background:var(--ink-3);
-  transition:width .5s var(--ease),background .3s var(--ease)}
+/* The fill is full-width and SCALED, so the transition never touches
+   layout; the pill's end cap distorts by a fraction of a pixel at 4px tall,
+   which is invisible, where a width transition re-lays the row every frame. */
+.meter i{display:block;height:100%;border-radius:var(--r-pill);width:100%;
+  transform:scaleX(0);transform-origin:left center;background:var(--ink-3);
+  transition:transform .5s var(--ease),background .3s var(--ease)}
 .meter[data-tone="ok"] i{background:var(--ink-3)}
 .meter[data-tone="warn"] i{background:linear-gradient(90deg,color-mix(in srgb,var(--warn) 70%,#fff),var(--warn))}
 .meter[data-tone="bad"] i{background:linear-gradient(90deg,color-mix(in srgb,var(--bad) 70%,#fff),var(--bad))}
@@ -424,7 +451,10 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .tp{display:inline-flex;align-items:center;gap:6px;font-size:var(--t-cap);color:var(--ink-3);
   padding:5px 10px;border-radius:var(--r-pill);background:var(--glass-hi)}
 .tp__led{width:7px;height:7px;border-radius:50%;background:var(--idle)}
-.tp[data-tp="live"] .tp__led{background:var(--ok);box-shadow:0 0 8px var(--ok);animation:pulse 2.4s var(--ease) infinite}
+/* A ring, not a glow: a zero-offset coloured halo is decoration, a hard 3px
+   ring at 22% is a state. The pulse lives in the motion block below. */
+.tp[data-tp="live"] .tp__led{background:var(--ok);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
 .tp[data-tp="stale"] .tp__led,.tp[data-tp="down"] .tp__led{background:var(--warn)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .iconbtn{width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:var(--r-pill);
@@ -459,6 +489,14 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .btn--danger:hover:not(:disabled){background:color-mix(in srgb,var(--bad) 10%,transparent);
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--bad) 72%,transparent)}
 .btn--sm{padding:6px 13px;font-size:var(--t-cap);min-height:30px}
+/* A 30px pill is the right SIZE for an inline action and the wrong HIT AREA
+   for a thumb. The visible pill stays; an invisible box grows it to 44px on
+   every side. ::before, because ::after is the busy spinner. */
+.btn--sm,.iconbtn{position:relative}
+.btn--sm::before,.iconbtn::before{content:"";position:absolute;inset:-7px -4px;border-radius:inherit}
+.iconbtn::before{inset:-5px}
+/* segments sit 2px apart: grow them up and down only, or the boxes overlap */
+.seg .btn::before{inset:-7px 0}
 .btn.is-busy{color:transparent;position:relative;pointer-events:none}
 .btn.is-busy::after{content:"";position:absolute;width:15px;height:15px;border-radius:50%;
   border:2px solid currentColor;border-top-color:transparent;animation:spin .7s linear infinite;color:var(--ink)}
@@ -477,7 +515,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .input:focus,.select:focus,.ta:focus{outline:none;
   box-shadow:inset 0 0 0 1px var(--accent),0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
 .select{appearance:none;-webkit-appearance:none;padding-right:34px;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23888' stroke-width='1.8'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-image:var(--chev);
   background-repeat:no-repeat;background-position:right 14px center}
 .input--inline,.select--inline{width:auto;padding:7px 12px;border-radius:var(--r-pill)}
 .select--inline{padding-right:30px}
@@ -492,7 +530,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:var(--fieldwell);box-shadow:inset 0 0 0 .5px var(--rim-hair);cursor:pointer;
   transition:background .25s var(--ease)}
 .sw-toggle::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;
-  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .25s var(--spring)}
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .25s var(--ease)}
 .sw-toggle[aria-checked="true"]{background:var(--accent)}
 .sw-toggle[aria-checked="true"]::after{transform:translateX(20px)}
 
@@ -518,7 +556,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 
 .sk{height:13px;border-radius:7px;background:linear-gradient(90deg,var(--glass-hi),
   color-mix(in srgb,var(--glass-hi) 40%,transparent),var(--glass-hi));
-  background-size:200% 100%;animation:sheen 1.4s linear infinite}
+  background-size:200% 100%}
 @keyframes sheen{to{background-position:-200% 0}}
 
 .toasts{position:fixed;left:50%;transform:translateX(-50%);z-index:100;
@@ -528,7 +566,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:var(--glass-2);backdrop-filter:var(--blur-lg);
   -webkit-backdrop-filter:var(--blur-lg);pointer-events:auto;
   box-shadow:inset 0 1px 0 var(--rim),inset 0 0 0 .5px var(--rim-hair);
-  font-size:var(--t-sub);animation:rise .3s var(--spring) both}
+  font-size:var(--t-sub);animation:rise .3s var(--ease) both}
 .toast svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9}
 .toast--ok svg{color:var(--ok)}.toast--bad svg{color:var(--bad)}.toast--warn svg{color:var(--warn)}
 
@@ -536,7 +574,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   padding:var(--s4);background:color-mix(in srgb,var(--bg) 50%,transparent);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 .veil.on{display:flex}
-.dlg{width:min(440px,100%);padding:0;overflow:hidden;animation:rise .3s var(--spring) both}
+.dlg{width:min(440px,100%);padding:0;overflow:hidden;animation:rise .3s var(--ease) both}
 .dlg__h{padding:var(--s5) var(--s5) var(--s2)}
 .dlg__t{font-size:var(--t-card);font-weight:700}
 .dlg__b{padding:var(--s3) var(--s5);color:var(--ink-2);font-size:var(--t-sub)}
@@ -806,7 +844,7 @@ svg.topo .capon{fill:var(--accent)}
    "iPh…". The bars already show signal at a glance and the exact dBm lives in
    the expanded detail, so the numeric dBm drops here and the name gets the
    width back. Sizes come down a notch across the board. */
-@media (max-width:640px){
+@media (max-width:859px){
   .main{padding-left:var(--s3);padding-right:var(--s3)}
   .head{padding:var(--s5) 2px var(--s3)}
   .head__t{font-size:26px}
@@ -833,6 +871,13 @@ svg.topo .capon{fill:var(--accent)}
   .topo__node{padding:11px 13px}
 }
 
+
+/* BREAKPOINTS, and why there are two. Below 860px the spine is gone and the
+   tab bar is in: that IS the phone layout, whatever the device calls itself,
+   so every phone rule keys on 859. At 1120 the content goes two-wide. The
+   420px rule for the routing selects is the one sub-phone exception, for the
+   narrowest handsets. There used to be 640 and 760 as well, which meant three
+   different opinions about where a phone ends. */
 
 /* ─── 18. WIDE LAYOUT — fill the screen, two columns ───────────────────────
    On a desktop or an iPad the single tall column left half the screen empty.
@@ -887,4 +932,14 @@ svg.topo .capon{fill:var(--accent)}
 .topo__node--link,.topo__leaf--link{cursor:pointer;
   transition:background .18s var(--ease)}
 .topo__node--link:hover,.topo__leaf--link:hover{background:var(--glass-2)}
-.topo__node--link:focus-visible,.topo__leaf--link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* ONE FOCUS RING. Every element a keyboard can land on draws the same one:
+   accent, 2px, standing 2px off the edge so it never fights an inset rim. The
+   text fields keep their own (a filled inset ring reads better inside a well);
+   everything else that had been leaving the browser's default is here. */
+.topo__node--link:focus-visible,.topo__leaf--link:focus-visible,
+.btn:focus-visible,.iconbtn:focus-visible,.mtab:focus-visible,a.pnode:focus-visible,
+.row[role="button"]:focus-visible,.tbl__group[role="button"]:focus-visible,
+.sw-toggle:focus-visible,.adv>summary:focus-visible,.radiocard:focus-within,
+input[type="checkbox"]:focus-visible,input[type="radio"]:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px}
+.row[role="button"]:focus-visible{outline-offset:-3px;border-radius:var(--r-inset)}

@@ -13,6 +13,21 @@
 'use strict';
 
 /* ------------------------------------------------------------------ DOM --- */
+/* LABEL A CONTROL. A <label> beside an input is a caption to a screen reader,
+   not a name — nothing associates them unless the label wraps the control or
+   names it by id. Every field builder in the console had the caption and not
+   the name. This gives the control an id if it has none and points the label
+   at it; a wrapper (a row holding an input and a button) is searched for the
+   control inside it. */
+var fieldSeq = 0;
+function bindLabel(lab, ctl) {
+    if (!lab || !ctl) return;
+    var t = (ctl.matches && ctl.matches('input,select,textarea')) ? ctl
+          : (ctl.querySelector ? ctl.querySelector('input,select,textarea') : null);
+    if (!t) return;
+    if (!t.id) t.id = 'f' + (++fieldSeq);
+    lab.htmlFor = t.id;
+}
 function el(tag, cls, txt) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -259,7 +274,7 @@ function meter(frac, tone, small) {
 function meterSet(m, frac, tone) {
     if (tone) m.setAttribute('data-tone', tone); else m.removeAttribute('data-tone');
     var f = Math.max(0, Math.min(1, frac || 0));
-    (m.firstChild || m.appendChild(el('i'))).style.width = (f * 100).toFixed(1) + '%';
+    (m.firstChild || m.appendChild(el('i'))).style.transform = 'scaleX(' + f.toFixed(3) + ')';
 }
 function readout(k, v, u, meta, state, small) {
     var r = el('div', 'ro' + (small ? ' ro--sm' : ''));
@@ -541,8 +556,10 @@ function dialog(opts) {
         if (opts.field) {
             var f = el('div', 'field');
             f.style.marginTop = opts.body ? '16px' : '0';
-            f.appendChild(el('label', 'label', opts.field.label));
+            var flab = el('label', 'label', opts.field.label);
+            f.appendChild(flab);
             input = el('input', 'input');
+            bindLabel(flab, input);
             input.type = opts.field.type || 'text';
             if (opts.field.placeholder) input.placeholder = opts.field.placeholder;
             if (opts.field.value) input.value = opts.field.value;
@@ -758,7 +775,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '70f54ceda1';
+var CONSOLE_VERSION = '95315c601e';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1472,7 +1489,7 @@ function scale(val, min, max, ticks, tone, small) {
 function scaleSet(s, val, tone) {
     if (tone) s.setAttribute('data-tone', tone); else s.removeAttribute('data-tone');
     var f = Math.max(0, Math.min(1, (val - s._min) / (s._max - s._min)));
-    s.firstChild.style.width = (f * 100).toFixed(1) + '%';
+    s.firstChild.style.transform = 'scaleX(' + f.toFixed(3) + ')';   /* same fill as meterSet */
 }
 /* RSSI is the number everyone misreads, so it gets a named helper with the
    quality boundaries drawn on the rule itself. */
@@ -1610,7 +1627,7 @@ global.OS = {
     emptyState: emptyState, note: note,
     spark: spark, ribbon: ribbon,
     sourcesList: sourcesList, failoverControl: failoverControl,
-    sv: sv, svtext: svtext, gem: gem, quality: quality, stateWord: stateWord,
+    sv: sv, svtext: svtext, gem: gem, quality: quality, stateWord: stateWord, bindLabel: bindLabel,
     scale: scale, scaleSet: scaleSet, rssiScale: rssiScale, rssiScaleSet: rssiScaleSet,
     spectrum: spectrum, topology: topology,
     toast: toast, dialog: dialog, askConfirm: askConfirm, firewallAlert: firewallAlert,

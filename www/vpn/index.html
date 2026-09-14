@@ -11,7 +11,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/apple-touch-icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="stylesheet" href="/app.css?v=08410dce">
+<link rel="stylesheet" href="/app.css?v=6b6e0477">
 </head>
 <body>
 <div class="shell">
@@ -41,7 +41,7 @@
     <div class="face">
       <section class="panel">
         <div class="panel__h">
-          <span class="panel__t">Tunnels</span>
+          <h2 class="panel__t">Tunnels</h2>
           <div class="panel__aside"><span class="row__cap" id="tunCount"></span><span class="hslot" id="actSlot"></span></div>
         </div>
         <div class="panel__b panel__b--flush" id="tunnels">
@@ -54,7 +54,7 @@
     <div class="face">
       <section class="panel">
         <div class="panel__h">
-          <span class="panel__t">Device routing</span>
+          <h2 class="panel__t">Device routing</h2>
           <div class="panel__aside">
             <span class="row__cap" id="polCount"></span>
             <button class="btn btn--ghost btn--sm" id="rescanDev" title="Scan for devices" aria-label="Scan for devices"></button>
@@ -66,20 +66,20 @@
 
     <div class="face">
       <section class="panel">
-        <div class="panel__h"><span class="panel__t">If a tunnel goes down</span></div>
+        <div class="panel__h"><h2 class="panel__t">If a tunnel goes down</h2></div>
         <div class="panel__b" id="failmode" style="padding-top:var(--s1)"></div>
       </section>
     </div>
 
     <div class="face">
       <section class="panel" id="p-tdns" hidden>
-        <div class="panel__h"><span class="panel__t">Resolver path</span>
+        <div class="panel__h"><h2 class="panel__t">Resolver path</h2>
           <div class="panel__aside" id="tdnsState"></div></div>
         <div class="panel__b" id="tdns" style="padding-top:var(--s1)"></div>
       </section>
 
       <section class="panel" id="p-agh" hidden>
-        <div class="panel__h"><span class="panel__t">Content filtering</span>
+        <div class="panel__h"><h2 class="panel__t">Content filtering</h2>
           <div class="panel__aside" id="aghState"></div></div>
         <div class="panel__b" id="agh" style="padding-top:var(--s1)"></div>
       </section>
@@ -96,7 +96,7 @@
     <div class="face">
       <section class="panel" id="p-wg" hidden>
         <div class="panel__h">
-          <span class="panel__t">WireGuard</span>
+          <h2 class="panel__t">WireGuard</h2>
           <div class="panel__aside">
             <span class="row__cap" id="roadCount"></span>
             <button class="btn btn--primary btn--sm" id="addDev"></button>
@@ -117,7 +117,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=7d209e97"></script>
+<script src="/os.js?v=c5140e86"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
@@ -766,16 +766,16 @@ function renderFailmode(d) {
 $('#addBtn').addEventListener('click', function () {
     var wrap = el('div');
     var f1 = el('div', 'field');
-    f1.appendChild(el('label', 'label', 'Name'));
-    var i1 = el('input', 'input');
+    var l1 = el('label', 'label', 'Name'); f1.appendChild(l1);
+    var i1 = el('input', 'input'); OS.bindLabel(l1, i1);
     i1.placeholder = 'UK London 640';
     f1.appendChild(i1);
     f1.appendChild(el('div', 'hint', 'Optional — leave it blank and the name is taken from the ' +
         '.conf file, or from the filename when you upload one.'));
     wrap.appendChild(f1);
     var f2 = el('div', 'field');
-    f2.appendChild(el('label', 'label', 'WireGuard configuration'));
-    var ta = el('textarea', 'ta');
+    var l2 = el('label', 'label', 'WireGuard configuration'); f2.appendChild(l2);
+    var ta = el('textarea', 'ta'); OS.bindLabel(l2, ta);
     ta.placeholder = '[Interface]\nPrivateKey = …\nAddress = 10.2.0.2/32\nDNS = 10.2.0.1\n\n[Peer]\nPublicKey = …\nEndpoint = 1.2.3.4:51820\nAllowedIPs = 0.0.0.0/0, ::/0';
     ta.spellcheck = false;
     f2.appendChild(ta);

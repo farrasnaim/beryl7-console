@@ -11,7 +11,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/apple-touch-icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="stylesheet" href="/app.css?v=08410dce">
+<link rel="stylesheet" href="/app.css?v=6b6e0477">
 </head>
 <body>
 <div class="shell">
@@ -28,7 +28,7 @@
 
     <!-- WIRELESS: the two radios side by side, each a self-contained form. -->
     <div class="sect">
-      <span class="sect__t">Wireless</span>
+      <h2 class="sect__t">Wireless</h2>
       <span class="sect__m" id="wifiMeta"></span>
     </div>
     <div class="face">
@@ -45,33 +45,33 @@
            one; most do not. -->
       <div id="p-secondary"></div>
       <section class="panel" style="border-top:1px solid var(--line)">
-        <div class="panel__h"><span class="panel__t">Blocked devices</span>
+        <div class="panel__h"><h3 class="panel__t">Blocked devices</h3>
           <div class="panel__aside"><span class="row__cap" id="st-acl"></span></div></div>
         <div class="panel__b" id="b-acl"></div>
       </section>
     </div>
 
-    <div class="sect"><span class="sect__t">Network</span></div>
+    <div class="sect"><h2 class="sect__t">Network</h2></div>
     <div class="face">
       <section class="panel">
-        <div class="panel__h"><span class="panel__t">LAN and DHCP</span>
+        <div class="panel__h"><h3 class="panel__t">LAN and DHCP</h3>
           <div class="panel__aside" id="st-lan"></div></div>
         <div class="panel__b" id="b-lan"></div>
       </section>
       <section class="panel" style="border-top:1px solid var(--line)">
-        <div class="panel__h"><span class="panel__t">IPv6</span>
+        <div class="panel__h"><h3 class="panel__t">IPv6</h3>
           <div class="panel__aside" id="st-ipv6"></div></div>
         <div class="panel__b" id="b-ipv6"></div>
       </section>
       <section class="panel" style="border-top:1px solid var(--line)">
-        <div class="panel__h"><span class="panel__t">Push notifications</span>
+        <div class="panel__h"><h3 class="panel__t">Push notifications</h3>
           <div class="panel__aside" id="st-notify"></div></div>
         <div class="panel__b" id="b-notify"></div>
       </section>
       <!-- Phone only: on a wide screen this lives with the sources list it
            governs, on the two uplink pages. -->
       <section class="panel mob-only">
-        <div class="panel__h"><span class="panel__t">Internet sources</span></div>
+        <div class="panel__h"><h3 class="panel__t">Internet sources</h3></div>
         <div class="panel__b" id="b-failover" style="padding-top:var(--s1)"></div>
       </section>
     </div>
@@ -80,16 +80,16 @@
          pick one; this is where the list it picks from is kept. Deliberately
          its own section rather than a corner of Network — Network is what the
          router IS, this is what it MEASURES. -->
-    <div class="sect" id="ping"><span class="sect__t">Ping</span></div>
+    <div class="sect" id="ping"><h2 class="sect__t">Ping</h2></div>
     <div class="face">
       <section class="panel">
-        <div class="panel__h"><span class="panel__t">Saved targets</span>
+        <div class="panel__h"><h3 class="panel__t">Saved targets</h3>
           <div class="panel__aside"><span class="row__cap" id="st-ping"></span></div></div>
         <div class="panel__b" id="b-ping"></div>
       </section>
     </div>
 
-    <div class="sect"><span class="sect__t">System</span></div>
+    <div class="sect"><h2 class="sect__t">System</h2></div>
     <div class="face">
       <section class="panel">
         <div class="panel__b" id="b-sys" style="padding-top:var(--s4)"></div>
@@ -98,12 +98,12 @@
            place in the topology rail. They belong to the router as a machine,
            which is what this section already collects. -->
       <section class="panel" style="border-top:1px solid var(--line)">
-        <div class="panel__h"><span class="panel__t">Software</span>
+        <div class="panel__h"><h3 class="panel__t">Software</h3>
           <div class="panel__aside" id="st-soft"></div></div>
         <div class="panel__b" id="b-soft"></div>
       </section>
       <section class="panel" style="border-top:1px solid var(--line)">
-        <div class="panel__h"><span class="panel__t">System log</span>
+        <div class="panel__h"><h3 class="panel__t">System log</h3>
           <div class="panel__aside" id="st-log"></div></div>
         <div class="panel__b" id="b-log"></div>
       </section>
@@ -112,7 +112,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=7d209e97"></script>
+<script src="/os.js?v=c5140e86"></script>
 <script>
 (function () {
 'use strict';
@@ -179,8 +179,10 @@ window.addEventListener('beforeunload', function (e) {
 /* ---------------------------------------------------------------- helpers -- */
 function field(labelTxt, input, hint) {
     var f = el('div', 'field');
-    f.appendChild(el('label', 'label', labelTxt));
+    var lab = el('label', 'label', labelTxt);
+    f.appendChild(lab);
     f.appendChild(input);
+    OS.bindLabel(lab, input);
     if (hint) f.appendChild(el('div', 'hint', hint));
     return f;
 }
@@ -499,7 +501,7 @@ function ensureRadioPanels(radios) {
         var sec = el('section', 'panel'); sec.id = 'p-' + r.id;
         var h = el('div', 'panel__h');
         /* two radios on the same band would otherwise get identical titles */
-        h.appendChild(el('span', 'panel__t',
+        h.appendChild(el('h3', 'panel__t',
             bandLabel(r.band) + (seen[r.band] > 1 ? ' (' + r.id + ')' : '')));
         var aside = el('div', 'panel__aside'); aside.id = 'st-' + r.id;
         h.appendChild(aside);
@@ -559,7 +561,7 @@ function buildSecondaryPanel(sec) {
     panel.style.borderTop = '1px solid var(--line)';
 
     var h = el('div', 'panel__h');
-    h.appendChild(el('span', 'panel__t', netLabel(sec.network)));
+    h.appendChild(el('h3', 'panel__t', netLabel(sec.network)));
     var aside = el('div', 'panel__aside');
     aside.appendChild(sec.disabled ? OS.stateWord('OFF', 'idle') : OS.stateWord('UP', 'ok'));
     h.appendChild(aside);
