@@ -178,7 +178,7 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .tile.is-on{background:var(--pane-on);border-color:var(--edge-on)}
 .tile.is-off .tile__value,.tile.is-off .tile__sub{color:var(--ink-3)}
 .tile__hd{display:flex;align-items:center;gap:6px;min-height:18px;
-  font-size:var(--fs-label);font-weight:500;color:var(--ink-2);letter-spacing:0}
+  font-size:var(--fs-label);font-weight:500;color:var(--ink-2);letter-spacing:0;white-space:nowrap}
 .tile__hd svg{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.75;
   stroke-linecap:round;stroke-linejoin:round}
 .tile.is-on .tile__hd{color:var(--ink)}
@@ -187,10 +187,9 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
   font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .tile__value--lg{font-size:var(--fs-value-lg)}
 .tile__value small{font-size:var(--fs-sub);font-weight:500;color:var(--ink-2);margin-left:3px;letter-spacing:0}
-.tile__sub{font-size:var(--fs-sub);color:var(--ink-2);line-height:1.3;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* subs are written to fit (three short lines at most); explicit line breaks are kept */
+.tile__sub{font-size:var(--fs-sub);color:var(--ink-2);line-height:1.3;white-space:pre-line;overflow-wrap:anywhere}
 .tile__foot{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;min-height:20px}
-.tile__foot .tile__sub{-webkit-line-clamp:1}
 /* semantic colour appears on a word, and is always beside one */
 .tile__value[data-tone="ok"],.tile__sub[data-tone="ok"]{color:var(--ok)}
 .tile__value[data-tone="warn"],.tile__sub[data-tone="warn"]{color:var(--warn)}
@@ -212,16 +211,14 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .node[data-tone="bad"] .node__ico{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
 .node[data-tone="off"] .node__ico{color:var(--ink-3);border-style:dashed}
 .node__k{font-size:var(--fs-label);color:var(--ink-2)}
-.node__s{font-size:var(--fs-label);color:var(--ink-3);line-height:1.3;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.node__s{font-size:var(--fs-label);color:var(--ink-3);line-height:1.3;max-width:100%;overflow-wrap:anywhere}
 .node__s[data-tone="ok"]{color:var(--ok)}.node__s[data-tone="warn"]{color:var(--warn)}.node__s[data-tone="bad"]{color:var(--bad)}
-.node__v{font-size:var(--fs-node);font-weight:600;line-height:1.2;max-width:100%;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.node__v{font-size:var(--fs-node);font-weight:600;line-height:1.2;max-width:100%;overflow-wrap:anywhere}
 .node[data-tone="off"] .node__v{color:var(--ink-3);font-weight:500}
 /* the connector between nodes: a hairline at icon height */
 .node+.node::before{content:"";position:absolute;left:calc(-50% + 22px);right:calc(50% + 22px);top:23px;
   height:1px;background:var(--line)}
 .node+.node[data-tone="off"]::before{background:none;height:0;border-top:1px dashed var(--line)}
-@media (max-width:699px){.node__v{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}}
 
 /* ─── the switch (jumps; the only motion in this build is the sheet) ─────── */
 .switch{position:relative;width:50px;height:30px;border-radius:var(--r-pill);flex:none;
@@ -302,11 +299,9 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .cell.is-on{background:var(--pane-on);border-color:var(--edge-on)}
 .cell.is-dim{opacity:.62}
 .cell__top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:18px}
-.cell__k{font-size:var(--fs-label);color:var(--ink-2);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cell__t{font-size:var(--fs-body);font-weight:600;line-height:1.25;letter-spacing:-.01em;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.cell__s{font-size:var(--fs-label);color:var(--ink-3);line-height:1.3;margin-top:auto;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cell__k{font-size:var(--fs-label);color:var(--ink-2);font-weight:500;min-width:0;overflow-wrap:anywhere}
+.cell__t{font-size:var(--fs-body);font-weight:600;line-height:1.25;letter-spacing:-.01em;overflow-wrap:anywhere}
+.cell__s{font-size:var(--fs-label);color:var(--ink-3);line-height:1.3;margin-top:auto;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .cell__s b{color:var(--ink-2);font-weight:600}
 
 /* lines: a plain vertical list where cells would be too much (log, feed, kv) */
@@ -350,7 +345,8 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 /* ─── forms ──────────────────────────────────────────────────────────────── */
 .field{margin:0 0 14px}
 .field__h+.field,.lines+.field,.readouts+.field,.spark+.field{margin-top:14px}
-.field__h+.field__l,.act+.field__l,.field__h+div>.field__l:first-child{margin-top:16px}
+.field__h+.field__l,.act+.field__l,.sheet__sec{margin-top:18px}
+.field__h+.inline{margin-top:12px}
 .field__l{display:block;font-size:var(--fs-label);font-weight:500;color:var(--ink-2);margin-bottom:6px}
 .field__h{font-size:var(--fs-label);color:var(--ink-3);margin-top:6px;line-height:1.35}
 .in,.sel,.ta{width:100%;padding:11px 14px;border-radius:var(--r-ctl);border:1px solid var(--edge);

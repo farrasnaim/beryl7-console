@@ -11,7 +11,7 @@
 (function () {
 'use strict';
 
-var CONSOLE_VERSION = '8fc743831c';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
+var CONSOLE_VERSION = '645a87b726';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
 
 var G = window.G = {};
 
@@ -561,7 +561,7 @@ G.face = {
         if (unit) d.appendChild(el('small', null, unit)); if (tone) d.setAttribute('data-tone', tone);
         frag.appendChild(d); return d;
     },
-    sub: function (frag, s, tone) { var d = el('div', 'tile__sub', s); if (tone) d.setAttribute('data-tone', tone); frag.appendChild(d); return d; },
+    sub: function (frag, s, tone) { var d = el('div', 'tile__sub', Array.isArray(s) ? s.filter(Boolean).join('\n') : s); if (tone) d.setAttribute('data-tone', tone); frag.appendChild(d); return d; },
     foot: function (frag, left, right) {
         var f = el('div', 'tile__foot');
         var l = el('div', 'tile__sub'); if (typeof left === 'string') l.textContent = left; else if (left) l.appendChild(left); f.appendChild(l);
