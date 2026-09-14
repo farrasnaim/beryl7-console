@@ -326,8 +326,10 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .mark--solid{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 
 /* say: a callout; semantic colour on the edge and the icon, never a fill */
-.say{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;margin:6px 0 14px;border-radius:var(--r-cell);
+.say{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;padding:11px 13px;margin:6px 0 14px;border-radius:var(--r-cell);
   background:var(--pane);border:1px solid var(--edge);font-size:var(--fs-sub);color:var(--ink-2);line-height:1.4}
+.say>div{flex:1 1 200px;min-width:0}
+.say>.act{margin-left:auto;align-self:center}
 .say svg{width:16px;height:16px;flex:none;margin-top:1px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;color:var(--ink-2)}
 .say[data-tone="warn"]{border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
 .say[data-tone="warn"] svg{color:var(--warn)}
@@ -355,6 +357,11 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media (max-width:419px){.row2{grid-template-columns:1fr}}
 .inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.inline{margin-bottom:14px}
+.inline:last-child,.field>.inline,.line .inline,.cell .inline,.say .inline{margin-bottom:0}
+/* a bare action after a block, or beside another, never touches its neighbour */
+.sheet__bd>.act{margin:2px 0 14px}.act+.act,.act+.sel--inline,.sel--inline+.act{margin-left:8px}
+.inline>*+*,.ask__acts>*+*,.sheet__ft>*+*{margin-left:0}
 .check{display:flex;align-items:center;gap:10px;min-height:40px;margin:0 0 12px;font-size:var(--fs-sub);cursor:pointer}
 .check input{width:18px;height:18px;margin:0;accent-color:var(--accent);flex:none}
 @supports (-webkit-touch-callout:none){.in,.sel,.ta{font-size:16px}}   /* iOS zooms below 16px */
