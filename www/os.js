@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '8d082c8ba5';
+var CONSOLE_VERSION = '53507fb44e';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1526,26 +1526,16 @@ function topology(m, compact) {
     t.appendChild(node('eth', 'Uplink',
         m.uplink + (m.uplinkSub ? '  ·  ' + m.uplinkSub : ''),
         m.online ? 'live' : null));
-    t.appendChild(link());
-    t.appendChild(node('router', 'Router',
-        m.router + (m.routerSub ? '  ·  ' + m.routerSub : ''), 'live'));
-
-    var lanes = m.lanes || [];
-    if (lanes.length) {
-        var br = el('div', 'topo__branch');
-        lanes.forEach(function (L) {
-            var leaf = el('div', 'topo__leaf' + (L.clients ? '' : ' topo__leaf--off'));
-            leaf.appendChild(el('span', null, L.name));
-            leaf.appendChild(el('span', 'n',
-                L.clients + (L.clients === 1 ? ' device' : ' devices')));
-            br.appendChild(leaf);
-        });
-        t.appendChild(br);
-    }
+    /* NO ROUTER NODE, AND NO PER-BAND ROWS. This drawing answers "where does
+       my traffic go", and the box you are looking at is not a step on that
+       path - it is the thing drawing the picture. The band rows under it said
+       how many devices are on 2.4, 5, IoT and Ethernet, which is the Devices
+       section's whole job a screen further down, and between them they made
+       the hero three times as tall as the answer needed. */
     if (m.vpn) {
         t.appendChild(link());
-        t.appendChild(node('lock', 'Encrypted path',
-            m.vpnLabel || 'Tunnel', m.vpnUp ? 'live' : 'bad'));
+        t.appendChild(node('lock', 'VPN', m.vpnLabel || 'Tunnel',
+            m.vpnUp ? 'live' : 'bad'));
     }
     return t;
 }
