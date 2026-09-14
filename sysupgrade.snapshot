@@ -64,3 +64,4 @@
 /usr/sbin/linkquality-sample
 /www/favicon.svg
 /www/apple-touch-icon.png
+/etc/init.d/beryl-iperf

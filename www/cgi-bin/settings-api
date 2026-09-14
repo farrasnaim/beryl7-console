@@ -1162,6 +1162,63 @@ url_strong() {   # $1 = url -> prints 1 if it carries an unguessable part
 }
 
 NOTIFYCONF=/etc/dashboard/notify.conf
+# ------------------------------------------------------------------ iperf --
+# An iperf3 listener the owner can switch on for a speed test and off again.
+# Two keys, one file, the same parsed-never-sourced config family as notify.
+# The service reads the file at start and refuses to run unless it says so, so
+# "off" survives reinstalls and reboots as a fact in a file rather than as the
+# absence of a boot link (install.sh enables every init script it ships).
+IPERFCONF=/etc/dashboard/iperf.conf
+IPERFINIT=/etc/init.d/beryl-iperf
+if [ "$ACTION" = "setiperf" ]; then
+    IENABLED=$(qs_get enabled)
+    IPORT=$(qs_get port)
+    case "$IENABLED" in 0|1) ;; *) fail "enabled must be 0 or 1" ;; esac
+    case "$IPORT" in ''|*[!0-9]*) fail "the port must be a number" ;; esac
+    # Below 1024 is the privileged range and the console's own http port lives
+    # there; 5201 is what every iperf3 client assumes when none is given.
+    [ "$IPORT" -ge 1024 ] && [ "$IPORT" -le 65535 ] || fail "use a port between 1024 and 65535 (5201 is the iperf3 default)"
+    command -v iperf3 >/dev/null 2>&1 || fail "iperf3 is not installed on the router"
+
+    # Built in memory and verified by byte count, for the reasons setnotify
+    # spells out below: a redirection's exit status says nothing about whether
+    # the bytes reached the disk. This file holds only these two keys, so the
+    # write is the whole file; comments are kept if the owner added any.
+    _newconf=$( {
+        printf 'IPERF_ENABLED=%s\nIPERF_PORT=%s\n' "$IENABLED" "$IPORT"
+        if [ -r "$IPERFCONF" ]; then
+            while IFS= read -r _ln || [ -n "$_ln" ]; do
+                case "$_ln" in '#'*) printf '%s\n' "$_ln" ;; esac
+            done < "$IPERFCONF"
+        fi
+        printf 'X'
+    } )
+    _newconf=${_newconf%X}
+    _wfail="could not write /etc/dashboard/iperf.conf — the setting is unchanged. That is a filesystem refusal; check overlay space over SSH"
+    mkdir -p /etc/dashboard
+    rm -f "$IPERFCONF.tmp"
+    printf '%s' "$_newconf" > "$IPERFCONF.tmp" 2>/dev/null || { rm -f "$IPERFCONF.tmp"; fail "$_wfail"; }
+    chmod 644 "$IPERFCONF.tmp" 2>/dev/null
+    _wrote=$(wc -c < "$IPERFCONF.tmp" 2>/dev/null); _wrote=${_wrote##* }
+    [ "$_wrote" = "${#_newconf}" ] || { rm -f "$IPERFCONF.tmp"; fail "$_wfail"; }
+    mv -f "$IPERFCONF.tmp" "$IPERFCONF" 2>/dev/null || { rm -f "$IPERFCONF.tmp"; fail "$_wfail"; }
+
+    # The service reads the file it was just given. restart, not start: a port
+    # change with the server already up has to move the listener.
+    [ -x "$IPERFINIT" ] || fail "the iperf service is not installed — re-run install.sh"
+    "$IPERFINIT" enable >/dev/null 2>&1
+    if [ "$IENABLED" = "1" ]; then
+        "$IPERFINIT" restart >/dev/null 2>&1
+        sleep 1
+        pidof iperf3 >/dev/null 2>&1 || fail "saved, but iperf3 did not start — the port may be in use; check the log"
+    else
+        "$IPERFINIT" stop >/dev/null 2>&1
+    fi
+    logger -t settings "iperf server $([ "$IENABLED" = 1 ] && echo "on, port $IPORT" || echo off) via web UI"
+    printf '{"ok":true,"running":%s}' "$(pidof iperf3 >/dev/null 2>&1 && echo true || echo false)"
+    exit 0
+fi
+
 if [ "$ACTION" = "setnotify" ]; then
     NENABLED=$(qs_get enabled)
     # KEEP means "I am not changing the address", which is a different request
@@ -1505,6 +1562,16 @@ printf '"lan":{"ipaddr":"%s","netmask":"%s","dhcp":{"start":%s,"limit":%s,"lease
     "$(esc "$(uci -q get dhcp.lan.leasetime)")"
 NOTIFY_ENABLED=0; NOTIFY_URL=""
 conf_load /etc/dashboard/notify.conf >/dev/null 2>&1
+# iperf: installed, switched on, actually listening, and where. The address is
+# the LAN one because that is the network a test is run from; the firewall is
+# what keeps the other zones out, and that is said on the page rather than
+# enforced twice.
+IPERF_ENABLED=0; IPERF_PORT=5201
+conf_load /etc/dashboard/iperf.conf >/dev/null 2>&1
+case "$IPERF_PORT" in ''|*[!0-9]*) IPERF_PORT=5201 ;; esac
+IPERF_INST=$(command -v iperf3 >/dev/null 2>&1 && echo true || echo false)
+IPERF_RUN=$(pidof iperf3 >/dev/null 2>&1 && echo true || echo false)
+IPERF_IP=$(uci -q get network.lan.ipaddr)
 # The queue file exists only while a send is stranded, i.e. almost never.
 # TEST for it rather than redirecting from it: `wc -l < missing 2>/dev/null`
 # does NOT stay quiet, because the failing redirection is performed by the
@@ -1517,6 +1584,8 @@ NOTIFY_QUEUED=0
 # state worth warning about - an address already stored that would be refused
 # today - was the one state the console could not show. The alerts carry network
 # names and the names of devices joining them, so this is not cosmetic.
+printf '"iperf":{"installed":%s,"enabled":%s,"running":%s,"port":%s,"ip":"%s"},' \
+    "$IPERF_INST" "$(jbool "$IPERF_ENABLED")" "$IPERF_RUN" "$(jnum "$IPERF_PORT")" "$(esc "$IPERF_IP")"
 printf '"notify":{"enabled":%s,"url":"%s","queued":%s,"weak":%s},' \
     "$([ "$NOTIFY_ENABLED" = 1 ] && echo true || echo false)" \
     "$(esc "$NOTIFY_URL")" \

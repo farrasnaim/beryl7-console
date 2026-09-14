@@ -104,6 +104,14 @@
           <div class="panel__aside" id="st-soft"></div></div>
         <div class="panel__b" id="b-soft"></div>
       </section>
+      <!-- A speed-test listener. It belongs with the machine, not the network
+           settings: it changes nothing about how traffic flows, it only lets a
+           laptop measure how fast it can. -->
+      <section class="panel" style="border-top:1px solid var(--line)">
+        <div class="panel__h"><h3 class="panel__t">iPerf server</h3>
+          <div class="panel__aside" id="st-iperf"></div></div>
+        <div class="panel__b" id="b-iperf"></div>
+      </section>
       <section class="panel" style="border-top:1px solid var(--line)">
         <div class="panel__h"><h3 class="panel__t">System log</h3>
           <div class="panel__aside" id="st-log"></div></div>
@@ -114,7 +122,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=4f671621"></script>
+<script src="/os.js?v=9eec6886"></script>
 <script>
 (function () {
 'use strict';
@@ -1413,6 +1421,76 @@ function rebootOverlay() {
    else comes from a check against the build server, which costs seconds — so it
    is cached, shown with its age, and refreshed only when asked. A reading with
    no timestamp invites you to trust a stale one. */
+/* ---------------------------------------------------------------- iperf -- */
+function renderIperf(d) {
+    if (dirty.iperf) return;
+    var p = d.iperf; if (!p) return;
+    var box = $('#b-iperf'); clear(box);
+    var st = $('#st-iperf'); clear(st);
+
+    if (!p.installed) {
+        st.appendChild(OS.stateWord('NOT INSTALLED', 'idle'));
+        box.appendChild(OS.note('Speed tests need the iperf3 package on the router: ' +
+            'apk add iperf3 (or opkg install iperf3 on an older build), then reload this page.', null));
+        return;
+    }
+    /* Three facts in one slot, in order of how much they change what you do:
+       running beats enabled (a saved "on" that is not listening is the state
+       you need to know about), and the address is the thing you will type. */
+    if (p.running) {
+        st.appendChild(OS.stateWord('RUNNING', 'ok'));
+    } else if (p.enabled) {
+        st.appendChild(OS.stateWord('NOT LISTENING', 'warn'));
+    } else {
+        st.appendChild(OS.stateWord('OFF', null));
+    }
+
+    var form = el('div');
+    var chk = checkRow('Accept speed tests from devices on the network', p.enabled);
+    form.appendChild(chk.row);
+
+    var port = el('input', 'input n');
+    port.type = 'number'; port.inputMode = 'numeric';
+    port.min = 1024; port.max = 65535; port.step = 1;
+    port.value = p.port || 5201;
+    port.autocomplete = 'off';
+    port.style.maxWidth = '160px';
+    form.appendChild(field('Port', port,
+        '5201 is what iperf3 clients use when none is given. Anything from 1024 to 65535.'));
+
+    /* The line you copy. Present whether or not the server is up: the address
+       is a fact about the router, and seeing it before you switch on is how
+       you know what you are about to expose. */
+    var where = el('dl', 'kv');
+    function kv(k, v) { where.appendChild(el('dt', null, k)); where.appendChild(el('dd', 'n', v)); }
+    kv('Listening on', (p.ip || '—') + ':' + (p.port || 5201));
+    kv('From a laptop', 'iperf3 -c ' + (p.ip || '<router>') + ' -p ' + (p.port || 5201));
+    where.style.marginTop = '4px';
+    form.appendChild(where);
+
+    var hint = el('div', 'hint');
+    hint.style.cssText = 'margin-top:8px;color:var(--ink-3)';
+    hint.textContent = 'Reachable from the main network. Guest and IoT devices are kept out by ' +
+        'the firewall, the same as everything else on this router. The test runs against the ' +
+        'router itself, so it measures your Wi-Fi or cable, not the internet.';
+    form.appendChild(hint);
+
+    var ar = applyRow();
+    form.appendChild(ar.row);
+    box.appendChild(form);
+    watch('iperf', form, ar.apply);
+
+    ar.reset.addEventListener('click', function () { markDirty('iperf', false); renderIperf(d); });
+    ar.apply.addEventListener('click', function () {
+        var v = parseInt(port.value, 10);
+        if (!(v >= 1024 && v <= 65535)) { OS.toast('Use a port between 1024 and 65535.', 'warn'); return; }
+        OS.act(ar.apply, API, { action: 'setiperf', enabled: chk.input.checked ? '1' : '0', port: String(v) },
+               { ok: chk.input.checked ? 'Listening on ' + (p.ip || 'the router') + ':' + v : 'Speed tests off.',
+                 delay: 600, failPrefix: 'Not saved' })
+          .then(function (j) { if (j && j.ok) { markDirty('iperf', false); OS.tp.refresh(); } });
+    });
+}
+
 function renderSoft(d) {
     var box = $('#b-soft'); clear(box);
     var aside = $('#st-soft'); clear(aside);
@@ -1741,6 +1819,7 @@ function render(d) {
     renderNotify(d);
     renderSys(d);
     renderSoft(d);
+    renderIperf(d);
     renderLog();
     var up = radios.filter(function (r) { return r.current; }).length;
     setTxt($('#wifiMeta'), up + ' of ' + radios.length + ' radios up');

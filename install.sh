@@ -336,6 +336,7 @@ for p in /www/app.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/
          /etc/hotplug.d/net/42-txpower \
          /etc/hotplug.d/usb/40-usbmuxd /etc/init.d/cpugovernor /etc/sysctl.d/99-local.conf \
          /usr/sbin/pingmon /etc/init.d/pingmon /www/cgi-bin/probe-api \
+         /etc/init.d/beryl-iperf \
          /www/cgi-bin/version-api \
          /etc/init.d/beryl-vpndns \
          /etc/nftables.d/30-beryl-vpndns.nft \

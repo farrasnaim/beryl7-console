@@ -38,7 +38,7 @@ Read [Security model](#security-model) before putting this on a network you don'
 | **VPN** | `/vpn/` | WireGuard tunnels: add from a pasted `.conf`, connect/disconnect, and route individual devices through a tunnel via [pbr](https://github.com/stangri/pbr) policies. Fail-closed by default; an optional watchdog can pause routing when a tunnel dies (see `vpnwatch`). Per-device VPN DNS enforcement so routed devices can't leak DNS to the home uplink (see `beryl-vpndns`). |
 | **Wi-Fi uplink** | `/repeater/` | Repeater mode: scan, join, and forget upstream networks (hotel/cafe Wi-Fi). Shows the uplink's health and hands over between sources by route metric. |
 | **USB uplink** | `/tethering/` | USB tethering: iPhone (ipheth/usbmuxd), Android RNDIS, HiLink dongles, and NCM/QMI/MBIM modems, with APN/PIN configuration where the device needs it. Detects whatever netdev the device presents instead of assuming `eth2`. |
-| **Settings** | `/settings/` | Radio configuration (band, channel, width, PHY mode, transmit power, country) with the valid channel/width combinations derived live from what the hardware reports — you cannot select a combination the radio can't do. Plus SSID settings, hostname, timezone, LAN lease settings, device blocking, and radio restart. Under **System**: a one-click **config backup download** (the same `sysupgrade -b` archive LuCI produces), an on-demand update check via [`owut`](https://openwrt.org/docs/guide-user/installation/attended.sysupgrade) that can then upgrade exactly the packages it listed, and a **live system log** filtered by severity — the honest answer to "why is there no internet" when the only device you have is a phone. Firmware is deliberately not flashed from here. |
+| **Settings** | `/settings/` | Radio configuration (band, channel, width, PHY mode, transmit power, country) with the valid channel/width combinations derived live from what the hardware reports — you cannot select a combination the radio can't do. Plus SSID settings, hostname, timezone, LAN lease settings, device blocking, and radio restart. Under **System**: a one-click **config backup download** (the same `sysupgrade -b` archive LuCI produces), an on-demand update check via [`owut`](https://openwrt.org/docs/guide-user/installation/attended.sysupgrade) that can then upgrade exactly the packages it listed, an **iPerf server** you can switch on for a speed test against the router (port of your choosing, off by default), and a **live system log** filtered by severity — the honest answer to "why is there no internet" when the only device you have is a phone. Firmware is deliberately not flashed from here. |
 
 Every page works from 360 px phones to desktop, in light and dark - system-following by default, pinned by the toggle in the sidebar.
 
@@ -153,6 +153,7 @@ etc/
   init.d/pingmon             keeps pingmon running (procd, not cron)
   init.d/beryl-vpndns        recompute the VPN rules at boot, before fw4 (S18)
   init.d/wifiwatch           keeps wifiwatch running (procd)
+  init.d/beryl-iperf         iperf3 listener, only while /etc/dashboard/iperf.conf says so
   sysctl.d/99-local.conf     TCP MTU probing for hotel/tunnel PMTU black holes
 ```
 
