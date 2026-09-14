@@ -11,7 +11,7 @@
 (function () {
 'use strict';
 
-var CONSOLE_VERSION = '1b2eae4a78';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
+var CONSOLE_VERSION = '2f54577a4d';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
 
 var G = window.G = {};
 
@@ -126,12 +126,12 @@ function get(url, ms) {
 }
 /* writes: urlencoded POST; the browser's Origin header is what the router's
    same-origin guard checks, so this only works from the console's own host */
-function post(api, params) {
+function post(api, params, ms) {
     var body = Object.keys(params || {}).map(function (k) {
         var v = params[k]; if (v == null) v = '';
         return encodeURIComponent(k) + '=' + encodeURIComponent(v);
     }).join('&');
-    var a = withAbort(25000);
+    var a = withAbort(ms || 25000);
     return fetch(api, { method: 'POST', body: body, cache: 'no-store', signal: a.signal,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
         .then(function (r) { a.done(); return r.json(); })
@@ -446,7 +446,12 @@ ui.empty = function (ic, title, text) {
 ui.wait = function (n) { var w = el('div'); for (var i = 0; i < (n || 3); i++) { var b = el('div', 'wait'); b.style.width = (85 - i * 17) + '%'; w.appendChild(b); } return w; };
 ui.qr = function (text) {
     var q = el('div', 'qr');
-    try { q.innerHTML = window.UQR.renderSVG(text, { pixelSize: 4, border: 1 }); } catch (e) { q.textContent = 'QR unavailable'; }
+    try {
+        q.innerHTML = window.UQR.renderSVG(text, { pixelSize: 4, border: 1 });
+        /* the library sizes the svg in pixels with no viewBox, so CSS could grow the box but not the code */
+        var s = q.querySelector('svg');
+        if (s && !s.getAttribute('viewBox')) { s.setAttribute('viewBox', '0 0 ' + s.getAttribute('width') + ' ' + s.getAttribute('height')); s.removeAttribute('width'); s.removeAttribute('height'); }
+    } catch (e) { q.textContent = 'QR unavailable'; }
     return q;
 };
 /* a two-button confirmation, drawn as a small sheet-grade pane; no motion */
@@ -518,8 +523,9 @@ function buildGrid() {
             var ctl = el('div', 'tile__ctl');
             sw = ui.switchEl(false, function (v, s) {
                 ui.setSwitch(s, !v, true);      /* hold the old state, busy, until the router answers */
-                Promise.resolve(def.toggle.write(v, { data: G.data })).then(function () { s.disabled = false; renderTile(def); },
-                    function () { s.disabled = false; renderTile(def); });
+                s.setAttribute('data-busy', '1');
+                var done = function () { s.removeAttribute('data-busy'); s.disabled = false; renderTile(def); };
+                Promise.resolve(def.toggle.write(v, { data: G.data })).then(done, done);
             }, def.label);
             ctl.appendChild(sw); t.appendChild(ctl);
         }
@@ -536,7 +542,8 @@ function renderTile(def) {
         clear(f.body); f.body.appendChild(frag);
         f.el.classList.toggle('is-on', !!state.on);
         f.el.classList.toggle('is-off', state.on === false);
-        if (f.sw && !f.sw.disabled) { var v = def.toggle.read(G.data); f.sw.disabled = v == null; if (v != null) f.sw.setAttribute('aria-checked', v ? 'true' : 'false'); }
+        /* not while a write is in flight; otherwise the switch follows the data — disabled only while there is none */
+        if (f.sw && !f.sw.hasAttribute('data-busy')) { var v = def.toggle.read(G.data); f.sw.disabled = v == null; if (v != null) f.sw.setAttribute('aria-checked', v ? 'true' : 'false'); }
         if (state.tone) f.el.setAttribute('data-tone', state.tone); else f.el.removeAttribute('data-tone');
     } catch (e) { console.error('tile ' + def.id, e); }
 }

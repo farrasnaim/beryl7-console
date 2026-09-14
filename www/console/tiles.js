@@ -793,7 +793,12 @@ function secondaryTile(id, net, ic, label, order) {
         id: id, order: order, label: label, icon: ic,
         toggle: {
             read: function (X) { var n = secondary(X, net); return n ? !n.disabled : null; },
-            write: function (v, ctx) { var n = secondary(ctx.data, net); if (!n) return Promise.resolve(); return G.act(null, SET, { action: 'setiot', network: net, enabled: v ? '1' : '0', ssid: n.ssid, key: '' }, { ok: label + (v ? ' on.' : ' off.'), refresh: ['set', 'dash', 'rep'], delay: 8000 }); }
+            write: function (v, ctx) {
+                var n = secondary(ctx.data, net); if (!n) return Promise.resolve();
+                var reload = (n.bands && n.bands.length > 1 ? 'Both radios reload' : 'The radio reloads') + ' — every network on them drops for a few seconds.';
+                return confirm({ title: (v ? 'Turn on ' : 'Turn off ') + label + '?', body: v ? '“' + n.ssid + '” starts advertising again. ' + reload : '“' + n.ssid + '” disappears and its devices lose Wi-Fi. ' + reload, okText: v ? 'Turn on' : 'Turn off', danger: !v })
+                    .then(function (ok) { if (!ok) return; return G.act(null, SET, { action: 'setiot', network: net, enabled: v ? '1' : '0', ssid: n.ssid, key: '' }, { ok: label + (v ? ' on.' : ' off.'), refresh: ['set', 'dash', 'rep'], delay: 8000 }); });
+            }
         },
         render: function (frag, X) {
             var n = secondary(X, net);
@@ -1104,7 +1109,19 @@ G.tile({
     id: 'travel', order: 23, label: 'Travel', icon: 'plane',
     toggle: {
         read: function (X) { var t = travelState(X); return t ? !!t.on : null; },
-        write: function (v, ctx) { return v ? goAway(ctx.data) : comeHome(ctx.data); }
+        write: function (v, ctx) {
+            var X = ctx.data, g = secondary(X, 'guest'), i = secondary(X, 'iot'), vp = X.vpn, t = travelState(X) || {}, steps = [];
+            if (v) {
+                if (g && !g.disabled) steps.push('turn Guest Wi-Fi off'); if (i && !i.disabled) steps.push('turn IoT off');
+                if (vp && vp.failmode !== 'open') steps.push('set the VPN to fail open');
+            } else {
+                if (t.guest_was === '1' && g) steps.push('turn Guest Wi-Fi back on'); if (t.iot_was === '1' && i) steps.push('turn IoT back on');
+                if (t.vpn_was === '1') steps.push('set the VPN back to fail closed');
+            }
+            var wifi = steps.some(function (x) { return /Wi-Fi|IoT/.test(x); });
+            return confirm({ title: v ? 'Leave home?' : 'Back home?', body: steps.length ? 'This will ' + steps.join(', ') + '.' + (wifi ? ' Wi-Fi reloads once per network — give it half a minute.' : '') : 'Nothing needs changing; only the flag flips.', okText: v ? 'Away' : 'Home' })
+                .then(function (ok) { if (!ok) return; return v ? goAway(X) : comeHome(X); });
+        }
     },
     render: function (frag, X) {
         var t = travelState(X);
@@ -1169,28 +1186,55 @@ function runSteps(steps) {
 G.tile({
     id: 'speed', order: 24, label: 'Speed test', icon: 'speed',
     render: function (frag, X) {
-        var t = X.tools, s = X.set;
+        var t = X.tools, s = X.set, ip = s && s.iperf && s.iperf.running ? ' · iPerf listening' : '';
         G.face.hd(frag, 'speed', 'Speed test');
         if (!t) { G.face.value(frag, '—'); return; }
-        if (t.speed && t.speed.mbps != null) { G.face.value(frag, String(t.speed.mbps), 'Mb/s', null, true); G.face.sub(frag, 'down · ' + fmt.ago(t.speed.at) + (s && s.iperf && s.iperf.running ? ' · iPerf listening' : '')); }
-        else { G.face.value(frag, 'Run'); G.face.sub(frag, 'download from the router to the internet' + (s && s.iperf && s.iperf.running ? ' · iPerf listening' : '')); }
+        var sp = t.speed;
+        if (sp && sp.down != null) { G.face.value(frag, String(sp.down), 'Mb/s', null, true); G.face.sub(frag, '↓ down · ↑ ' + (sp.up != null ? sp.up + ' Mb/s' : '—') + ' · ' + fmt.ago(sp.at) + ip); }
+        else { G.face.value(frag, 'Run'); G.face.sub(frag, 'down and up, measured from the router' + ip); }
         return { on: !!(s && s.iperf && s.iperf.running) };
     },
     sheet: function (body, api) {
         var res = el('div'); body.appendChild(res);
-        function drawRes() {
+        var running = false, timer = null, downDone = null;
+        function drawRes(prog) {
             clear(res); var t = api.data.tools, sp = t && t.speed;
-            api.meta(sp ? sp.mbps + ' Mb/s' : '');
-            res.appendChild(ui.readouts([ui.readout('Download', sp ? String(sp.mbps) : '—', sp ? fmt.bytes(sp.bytes) + ' in ' + sp.seconds + ' s · ' + fmt.ago(sp.at) : 'not run yet', null, sp ? 'Mb/s' : '')]));
-            var run = ui.act('Run a speed test', 'primary', function (b) {
-                b.disabled = true; b.classList.add('is-busy');
-                G.post(TOOLS, { action: 'speedtest', bytes: '25000000' }).then(function (j) {
-                    b.disabled = false; b.classList.remove('is-busy');
-                    if (j && j.ok) { G.pop(j.mbps + ' Mb/s down.', 'ok'); G.polls.tools.refresh(200); } else G.pop('Speed test failed: ' + ((j && j.error) || 'unknown'), 'bad');
-                });
-            }, 'bolt');
+            if (running && prog) {
+                api.meta('measuring');
+                var d = prog.phase === 'down' ? String(prog.mbps) : (downDone != null ? String(downDone) : '—');
+                var ds = prog.phase === 'down' ? 'measuring · ' + prog.t + ' of ' + prog.of + ' s' : (downDone != null ? 'done' : 'starting');
+                var u = prog.phase === 'up' ? String(prog.mbps) : '—', us = prog.phase === 'up' ? (prog.t > 0 ? 'measuring · ' + prog.t + ' of ' + prog.of + ' s' : 'connecting to ' + prog.via) : 'after the download';
+                res.appendChild(ui.readouts([ui.readout('Download', d, ds, null, 'Mb/s'), ui.readout('Upload', u, us, null, 'Mb/s')]));
+            } else {
+                api.meta(sp ? sp.down + ' ↓ · ' + sp.up + ' ↑' : '');
+                res.appendChild(ui.readouts([
+                    ui.readout('Download', sp ? String(sp.down) : '—', sp ? 'peak ' + sp.down_peak + ' Mb/s' : 'not run yet', null, sp ? 'Mb/s' : ''),
+                    ui.readout('Upload', sp && sp.up != null ? String(sp.up) : '—', sp ? (sp.up != null ? 'via ' + sp.up_via : 'no iperf3 server answered') : '', null, sp && sp.up != null ? 'Mb/s' : '')]));
+                if (sp) res.appendChild(el('div', 'field__h', fmt.plural(sp.streams, 'stream') + ' · ' + sp.seconds + ' s each way · ' + fmt.ago(sp.at)));
+            }
+            var run = ui.act(running ? 'Measuring…' : 'Run a speed test', 'primary', start, 'bolt');
+            if (running) { run.disabled = true; run.classList.add('is-busy'); }
             res.appendChild(run);
-            res.appendChild(el('div', 'field__h', 'One stream, 25 MB from Cloudflare, timed on the router itself — so it measures the uplink, not your Wi-Fi. For your Wi-Fi, use iPerf below from a laptop or phone.'));
+            res.appendChild(el('div', 'field__h', 'What fast.com does, from the router. Down: four parallel streams from Cloudflare for ten seconds, read off the uplink’s own counters with the first two seconds discarded — so anything else using the uplink counts too. Up: iperf3, four streams, ten seconds, to the first public iperf3 server that is free (usually iperf.he.net in California — a long path, so it reads a little under the line). It measures the uplink, not your Wi-Fi; for that, use iPerf below.'));
+        }
+        function start() {
+            if (running) return;
+            running = true; downDone = null; var last = null;
+            drawRes({ phase: 'down', mbps: '—', t: 0, of: 10 });
+            timer = setInterval(function () {
+                if (G.sheet.id !== 'speed') { clearInterval(timer); return; }
+                G.get(TOOLS + '?action=speedprog', 3000).then(function (p) {
+                    if (!running || !p || p.phase === 'idle') return;
+                    if (p.phase === 'up' && last && last.phase === 'down') downDone = last.mbps;
+                    last = p; drawRes(p);
+                }).catch(function () {});
+            }, 1000);
+            G.post(TOOLS, { action: 'speedtest' }, 75000).then(function (j) {
+                clearInterval(timer); running = false;
+                if (j && j.ok) { G.pop(j.down + ' Mb/s down · ' + (j.up != null ? j.up + ' Mb/s up' : 'upload: no server free'), j.up != null ? 'ok' : 'warn', 7000); G.polls.tools.refresh(200); }
+                else G.pop('Speed test failed: ' + ((j && j.error) || 'unknown'), 'bad');
+                if (G.sheet.id === 'speed') drawRes();
+            });
         }
         var ip = el('div'); body.appendChild(ip);
         function drawIperf() {
@@ -1205,7 +1249,7 @@ G.tile({
             ip.appendChild(ui.kv([['Listening on', p.ip + ':' + p.port], ['From a laptop', 'iperf3 -c ' + p.ip + ' -p ' + p.port]]));
             ip.appendChild(el('div', 'field__h', 'Reachable from the main network; guest and IoT are kept out by the firewall. Measures your Wi-Fi or cable to the router, not the internet.'));
         }
-        drawRes(); drawIperf(); api.on('tools', drawRes); api.on('set', drawIperf);
+        drawRes(); drawIperf(); api.on('tools', function () { if (!running) drawRes(); }); api.on('set', drawIperf);
     }
 });
 

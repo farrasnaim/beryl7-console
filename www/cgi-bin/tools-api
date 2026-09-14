@@ -32,7 +32,7 @@ printf 'Cache-Control: no-store\r\n\r\n'
 read_body
 ACTION=$(qs_get action)
 case "$ACTION" in
-    ""|activity|guestqr|travel) ;;
+    ""|activity|guestqr|travel|speedprog) ;;
     *) [ "$REQUEST_METHOD" = "POST" ] || fail "POST required" ;;
 esac
 [ "$REQUEST_METHOD" = "POST" ] && guard_post
@@ -73,6 +73,12 @@ if [ "$ACTION" = "travel" ]; then
     exit 0
 fi
 
+# ------------------------------------------------------------- speedprog --
+if [ "$ACTION" = "speedprog" ]; then
+    if [ -f /tmp/.speedtest.lock ] && [ -r /tmp/.speedprog ]; then cat /tmp/.speedprog; else printf '{"ok":true,"phase":"idle"}'; fi
+    exit 0
+fi
+
 # --------------------------------------------------------------- guestqr --
 # The string a phone camera understands, plus the parts for the page to show.
 # The passphrase leaves the router here, to anyone on the main network with
@@ -99,32 +105,88 @@ if [ "$ACTION" = "guestqr" ]; then
 fi
 
 # ------------------------------------------------------------- speedtest --
-# Download a fixed number of bytes from Cloudflare's speed endpoint and time it
-# with /proc/uptime (centiseconds; busybox date has no %N). Download only: an
-# upload test needs a body this router would have to generate and hold, and
-# the number people mean by "my speed" is the down one. Honest about what it
-# is — one TCP stream to one CDN, from the router itself — so it measures the
-# uplink, not any client's Wi-Fi.
+# What fast.com does, run from the router. DOWN: four parallel streams against
+# Cloudflare's speed endpoint, each a loop of 25 MB requests (the endpoint
+# returns 403 above some size — 100 MB was refused, 25 MB is what worked), the
+# throughput read off the uplink's own byte counters once a second, the first
+# two seconds (TCP ramp) dropped, the rest averaged. Counters rather than the
+# fetcher's own figure, so the streams need no cooperation and are simply
+# killed when the window closes. Everything through the uplink counts — a
+# client streaming during the test inflates it, and the page says so.
+# UP: iperf3, four streams, ten seconds, first two omitted, to the first public
+# iperf3 server that is not busy. Not an HTTP POST because OpenWrt's wget is
+# uclient-fetch, whose POST path measured 2.4 Mbit/s over plain HTTP and 0.3
+# over TLS on this router while iperf3 pushed 70 — the tool, not the line.
+# Progress is written to /tmp for the page to poll while it runs.
+SPEEDPROG=/tmp/.speedprog
+UPSERVERS="iperf.he.net:5201 ping.online.net:5202 ping.online.net:5206 speedtest.wtnet.de:5203 speedtest.wtnet.de:5207 speedtest.uztelecom.uz:5201"
 if [ "$ACTION" = "speedtest" ]; then
-    B=$(qs_get bytes); case "$B" in ''|*[!0-9]*) B=25000000 ;; esac
-    [ "$B" -ge 1000000 ] && [ "$B" -le 100000000 ] || B=25000000
+    DUR=$(qs_get seconds); case "$DUR" in ''|*[!0-9]*) DUR=10 ;; esac; { [ "$DUR" -ge 5 ] && [ "$DUR" -le 15 ]; } || DUR=10
+    NS=$(qs_get streams); case "$NS" in ''|*[!0-9]*) NS=4 ;; esac; { [ "$NS" -ge 2 ] && [ "$NS" -le 6 ]; } || NS=4
     if [ -f "$SPEEDLOCK" ]; then
         _lp=$(cat "$SPEEDLOCK" 2>/dev/null)
         if [ -n "$_lp" ] && [ -d "/proc/$_lp" ]; then fail "a test is already running"; fi
     fi
     printf '%s' "$$" > "$SPEEDLOCK"
-    _t0=$(cut -d' ' -f1 /proc/uptime)
-    wget -q -O /dev/null -T 20 "https://speed.cloudflare.com/__down?bytes=$B" 2>/dev/null
-    _rc=$?
-    _t1=$(cut -d' ' -f1 /proc/uptime)
-    rm -f "$SPEEDLOCK"
-    [ "$_rc" = 0 ] || fail "the download did not complete — is the internet reachable?"
-    _res=$(awk -v a="$_t0" -v b="$_t1" -v n="$B" 'BEGIN{d=b-a; if(d<0.05)d=0.05; printf "%.1f %.2f", n*8/d/1e6, d}')
-    _mbps=${_res% *}; _secs=${_res#* }
+    DEV=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+    if [ -z "$DEV" ] || [ ! -r "/sys/class/net/$DEV/statistics/rx_bytes" ]; then
+        rm -f "$SPEEDLOCK"; fail "no default route — is the internet reachable?"
+    fi
+    _prog() {
+        printf '{"ok":true,"phase":"%s","mbps":%s,"t":%s,"of":%s,"via":"%s"}' "$1" "$2" "$3" "$DUR" "$(esc "$4")" > "$SPEEDPROG.tmp" && mv -f "$SPEEDPROG.tmp" "$SPEEDPROG"
+    }
+    # mean of the samples after the two-second ramp, and the peak: "<mean> <peak>"
+    _stats() { printf '%s\n' "$@" | awk '{v[NR]=$1; if($1>p)p=$1} END{st=(NR>2)?3:1; for(i=st;i<=NR;i++){s+=v[i];n++} printf "%.1f %.1f",(n?s/n:0),p+0}'; }
+
+    # ---- down: N looping streams, sampled on rx_bytes, then killed (loop and fetcher both)
+    _prog down 0 0 "Cloudflare"
+    _pids=""; _i=0
+    while [ "$_i" -lt "$NS" ]; do
+        ( trap 'kill $_w 2>/dev/null; exit 0' TERM
+          while :; do wget -q -O /dev/null -T 30 "https://speed.cloudflare.com/__down?bytes=25000000" & _w=$!; wait $_w || sleep 1; done ) >/dev/null 2>&1 &
+        _pids="$_pids $!"; _i=$((_i + 1))
+    done
+    _ctr="/sys/class/net/$DEV/statistics/rx_bytes"
+    _b0=$(cat "$_ctr"); _t0=$(cut -d' ' -f1 /proc/uptime); _s=""; _n=0
+    while [ "$_n" -lt "$DUR" ]; do
+        sleep 1
+        _b1=$(cat "$_ctr"); _t1=$(cut -d' ' -f1 /proc/uptime)
+        _m=$(awk -v a="$_b0" -v b="$_b1" -v x="$_t0" -v y="$_t1" 'BEGIN{d=y-x; if(d<0.2)d=0.2; printf "%.2f",(b-a)*8/d/1e6}')
+        _n=$((_n + 1)); _s="$_s $_m"; _b0=$_b1; _t0=$_t1
+        _prog down "$_m" "$_n" "Cloudflare"
+    done
+    kill $_pids 2>/dev/null; wait $_pids 2>/dev/null
+    _R=$(_stats $_s); _down=${_R% *}; _dpeak=${_R#* }
+
+    # ---- up: iperf3 to the first server that takes the test; its own per-second
+    # [SUM] lines feed the progress file, its receiver summary is the figure
+    _up=""; _upeak=0; _via=""
+    for _srv in $UPSERVERS; do
+        _h=${_srv%:*}; _p=${_srv#*:}
+        _prog up 0 0 "$_h"
+        _out=$(iperf3 -c "$_h" -p "$_p" -P "$NS" -t "$DUR" -O 2 -f m --connect-timeout 4000 2>&1 | while IFS= read -r _l; do
+            case "$_l" in
+                *SUM*sec*Mbits/sec*receiver*|*SUM*sec*Mbits/sec*sender*) printf '%s\n' "$_l" ;;
+                *SUM*sec*Mbits/sec*)
+                    _mb=$(printf '%s' "$_l" | awk '{for(i=1;i<=NF;i++) if($i=="Mbits/sec"){print $(i-1); exit}}')
+                    _tt=$(printf '%s' "$_l" | awk '{for(i=1;i<=NF;i++) if($i=="sec"){split($(i-1),a,"-"); printf "%d", a[2]; exit}}')
+                    [ -n "$_mb" ] && _prog up "$_mb" "${_tt:-0}" "$_h" ;;
+                *busy*|*error*|*unable*|*refused*) printf 'ERR %s\n' "$_l" ;;
+            esac
+        done)
+        _recv=$(printf '%s\n' "$_out" | awk '/receiver/{for(i=1;i<=NF;i++) if($i=="Mbits/sec"){print $(i-1)}}' | tail -n1)
+        [ -n "$_recv" ] || _recv=$(printf '%s\n' "$_out" | awk '/sender/{for(i=1;i<=NF;i++) if($i=="Mbits/sec"){print $(i-1)}}' | tail -n1)
+        if [ -n "$_recv" ]; then _up=$(printf '%s' "$_recv" | awk '{printf "%.1f",$1}'); _via=$_h; break; fi
+    done
+    rm -f "$SPEEDPROG" "$SPEEDLOCK"
+    case "$_down" in 0|0.0) fail "nothing came through — is the internet reachable?" ;; esac
     _at=$(date +%s)
-    printf 'SPEED_MBPS=%s\nSPEED_SECS=%s\nSPEED_BYTES=%s\nSPEED_AT=%s\n' "$_mbps" "$_secs" "$B" "$_at" > "$SPEEDLAST" 2>/dev/null
-    logger -t tools "speed test: $_mbps Mbit/s down ($B bytes in ${_secs}s) via web UI"
-    printf '{"ok":true,"mbps":%s,"seconds":%s,"bytes":%s,"at":%s}' "$_mbps" "$_secs" "$B" "$_at"
+    printf 'SPEED_DOWN=%s\nSPEED_UP=%s\nSPEED_DPEAK=%s\nSPEED_VIA=%s\nSPEED_SECS=%s\nSPEED_STREAMS=%s\nSPEED_AT=%s\n' \
+        "$_down" "$_up" "$_dpeak" "$_via" "$DUR" "$NS" "$_at" > "$SPEEDLAST" 2>/dev/null
+    logger -t tools "speed test: $_down Mbit/s down (Cloudflare), ${_up:-no} Mbit/s up (${_via:-no server answered}); $NS streams, ${DUR}s each way, $DEV, via web UI"
+    _upj=null; [ -n "$_up" ] && _upj=$_up
+    printf '{"ok":true,"down":%s,"up":%s,"down_peak":%s,"up_via":"%s","seconds":%s,"streams":%s,"dev":"%s","at":%s}' \
+        "$_down" "$_upj" "$_dpeak" "$(esc "$_via")" "$DUR" "$NS" "$(esc "$DEV")" "$_at"
     exit 0
 fi
 
@@ -134,17 +196,19 @@ fi
 # already holds every join, leave, uplink change and console action, and
 # reading it costs one logread, which the Settings page already does.
 speed_json() {
-    SPEED_MBPS=""; SPEED_AT=""; SPEED_SECS=""; SPEED_BYTES=""
+    SPEED_DOWN=""; SPEED_UP=""; SPEED_DPEAK=""; SPEED_VIA=""; SPEED_SECS=""; SPEED_STREAMS=""; SPEED_AT=""
     if [ -r "$SPEEDLAST" ]; then
         while IFS= read -r _l; do
             case "$_l" in
-                SPEED_MBPS=*) SPEED_MBPS=${_l#*=} ;; SPEED_AT=*) SPEED_AT=${_l#*=} ;;
-                SPEED_SECS=*) SPEED_SECS=${_l#*=} ;; SPEED_BYTES=*) SPEED_BYTES=${_l#*=} ;;
+                SPEED_DOWN=*) SPEED_DOWN=${_l#*=} ;; SPEED_UP=*) SPEED_UP=${_l#*=} ;; SPEED_DPEAK=*) SPEED_DPEAK=${_l#*=} ;;
+                SPEED_VIA=*) SPEED_VIA=${_l#*=} ;; SPEED_SECS=*) SPEED_SECS=${_l#*=} ;; SPEED_STREAMS=*) SPEED_STREAMS=${_l#*=} ;; SPEED_AT=*) SPEED_AT=${_l#*=} ;;
             esac
         done < "$SPEEDLAST"
     fi
-    case "$SPEED_MBPS" in ''|*[!0-9.]*) printf 'null'; return ;; esac
-    printf '{"mbps":%s,"at":%s,"seconds":%s,"bytes":%s}' "$SPEED_MBPS" "$(jnum "$SPEED_AT")" "$(jnum "${SPEED_SECS%.*}")" "$(jnum "$SPEED_BYTES")"
+    _dec() { case "$1" in ''|*[!0-9.]*|.|*.*.*) printf 'null' ;; *) printf '%s' "$1" ;; esac; }
+    case "$SPEED_DOWN" in ''|*[!0-9.]*) printf 'null'; return ;; esac
+    printf '{"down":%s,"up":%s,"down_peak":%s,"up_via":"%s","seconds":%s,"streams":%s,"at":%s}' \
+        "$(_dec "$SPEED_DOWN")" "$(_dec "$SPEED_UP")" "$(_dec "$SPEED_DPEAK")" "$(esc "$SPEED_VIA")" "$(_dec "$SPEED_SECS")" "$(_dec "$SPEED_STREAMS")" "$(_dec "$SPEED_AT")"
 }
 
 N=$(qs_get n); case "$N" in ''|*[!0-9]*) N=60 ;; esac; [ "$N" -gt 200 ] && N=200
