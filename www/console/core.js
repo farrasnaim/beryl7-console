@@ -11,7 +11,7 @@
 (function () {
 'use strict';
 
-var CONSOLE_VERSION = '2f54577a4d';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
+var CONSOLE_VERSION = '8fc743831c';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
 
 var G = window.G = {};
 
@@ -509,6 +509,7 @@ function buildGrid() {
     var grid = $('#grid'); clear(grid);
     TILES.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
     TILES.forEach(function (def) {
+        if (def.hidden) return;             /* sheet only — the Path strip opens it */
         var t = el('div', 'tile' + (def.wide ? ' tile--wide' : '') + (def.path ? ' tile--path' : '') + (def.toggle ? ' tile--ctl' : ''));
         t.setAttribute('data-tile', def.id);
         if (def.sheet) {

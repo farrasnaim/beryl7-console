@@ -147,22 +147,30 @@ G.tile({
     render: function (frag, X) {
         var d = X.dash, r = X.rate, v = X.vpn;
         var nodes = el('div', 'nodes');
-        function node(ic, k, val, tone, open) {
+        function node(ic, k, val, tone, open, sub, subTone) {
             var n = el('button', 'node'); n.type = 'button'; n.setAttribute('data-tone', tone || '');
             var i = el('span', 'node__ico'); i.appendChild(icon(ic)); n.appendChild(i);
             n.appendChild(el('span', 'node__k', k)); n.appendChild(el('span', 'node__v num', val));
-            n.setAttribute('aria-label', k + ': ' + val);
+            if (sub) { var ss = el('span', 'node__s', sub); if (subTone) ss.setAttribute('data-tone', subTone); n.appendChild(ss); }
+            n.setAttribute('aria-label', k + ': ' + val + (sub ? ' — ' + sub : '') + '. Opens details.');
             n.addEventListener('click', function (e) { e.stopPropagation(); G.sheet.open(open); });
             nodes.appendChild(n);
         }
         if (!d) { node('globe', 'Internet', '…', '', 'internet'); node('link', 'Uplink', '…', '', 'uplink'); node('shield', 'VPN', '…', 'off', 'vpn'); frag.appendChild(nodes); return; }
-        var up = uplinkOf(d), on = online(d);
+        var up = uplinkOf(d), on = online(d), rep = X.rep;
         var ping = r && r.ping != null ? fmt.ms(r.ping) : (on ? 'Reachable' : '');
-        node('globe', 'Internet', on ? ping : (up === 'none' ? 'No route' : 'Not responding'), on ? 'ok' : 'bad', 'internet');
-        node(UPICON[up] || 'link', 'Uplink', UPLABEL[up] + ((d.wan && d.wan.ip) ? ' · ' + d.wan.ip : ''), up === 'none' ? 'bad' : 'ok', 'uplink');
+        var loss = lossOf(r), lw = lossWord(loss);
+        node('globe', 'Internet', on ? ping : (up === 'none' ? 'No route' : 'Not responding'), on ? 'ok' : 'bad', 'internet',
+            on ? (loss ? lw[0] + ' · ' + fine(loss.pct) + '% loss' : (r && r.ring && r.ring.name ? 'probing ' + r.ring.name : '')) : '', on ? toneOf(lw) : null);
+        var usub = [];
+        if (d.sys && d.sys.wan_uptime >= 0) usub.push('up ' + fmt.dur(d.sys.wan_uptime));
+        if (rep && rep.connecting) usub = ['joining ' + (rep.uplink.ssid || 'Wi-Fi') + '…'];
+        if (up === 'none') usub = [rep && rep.last_error ? 'Wi-Fi join failed' : 'no route out'];
+        node(UPICON[up] || 'link', 'Uplink', UPLABEL[up] + ((d.wan && d.wan.ip) ? ' · ' + d.wan.ip : ''), up === 'none' ? 'bad' : 'ok', 'uplink', usub.join(' · '), up === 'none' ? 'bad' : null);
         var routed = Object.keys(d.vpn || {}).length, stale = (d.vpn_stale || []).length;
-        if (routed) node('shield', 'VPN', fmt.plural(routed, 'device') + (stale ? ' · ' + stale + ' stranded' : ''), stale ? 'bad' : 'ok', 'vpn');
-        else node('shield', 'VPN', (d.tunnels_total ? fmt.plural(d.tunnels_up || 0, 'tunnel') + ' up' : 'No tunnels'), 'off', 'vpn');
+        var vsub = d.tunnels_total ? (d.tunnels_up || 0) + ' of ' + d.tunnels_total + ' ' + (d.tunnels_total === 1 ? 'tunnel' : 'tunnels') + ' up' + (v && v.failmode === 'open' ? ' · fail open' : '') : '';
+        if (routed) node('shield', 'VPN', fmt.plural(routed, 'device') + (routed === 1 ? ' routed' : ' routed'), stale ? 'bad' : 'ok', 'vpn', vsub + (stale ? ' · ' + stale + ' stranded' : ''), stale ? 'bad' : null);
+        else node('shield', 'VPN', d.tunnels_total ? 'Direct' : 'No tunnels', 'off', 'vpn', vsub);
         frag.appendChild(nodes);
     }
 });
@@ -277,7 +285,7 @@ G.tile({
 
 /* ═══ 3. INTERNET ═════════════════════════════════════════════════════════ */
 G.tile({
-    id: 'internet', order: 11, label: 'Internet', icon: 'globe',
+    id: 'internet', order: 11, hidden: true, label: 'Internet', icon: 'globe',
     render: function (frag, X) {
         var d = X.dash, r = X.rate;
         G.face.hd(frag, 'globe', 'Internet', r && r.ring && r.ring.name ? r.ring.name : '');
@@ -363,7 +371,7 @@ G.tile({
 
 /* ═══ 4. UPLINK (Ethernet · Wi-Fi · USB, one surface) ═════════════════════ */
 G.tile({
-    id: 'uplink', order: 12, label: 'Uplink', icon: 'link',
+    id: 'uplink', order: 12, hidden: true, label: 'Uplink', icon: 'link',
     render: function (frag, X) {
         var d = X.dash, rep = X.rep, usb = X.usb;
         var up = uplinkOf(d);
@@ -529,7 +537,7 @@ G.tile({
 
 /* ═══ 5. VPN ══════════════════════════════════════════════════════════════ */
 G.tile({
-    id: 'vpn', order: 13, label: 'VPN', icon: 'shield',
+    id: 'vpn', order: 13, hidden: true, label: 'VPN', icon: 'shield',
     render: function (frag, X) {
         var d = X.dash, v = X.vpn;
         G.face.hd(frag, 'shield', 'VPN');
@@ -1190,48 +1198,42 @@ G.tile({
         G.face.hd(frag, 'speed', 'Speed test');
         if (!t) { G.face.value(frag, '—'); return; }
         var sp = t.speed;
-        if (sp && sp.down != null) { G.face.value(frag, String(sp.down), 'Mb/s', null, true); G.face.sub(frag, '↓ down · ↑ ' + (sp.up != null ? sp.up + ' Mb/s' : '—') + ' · ' + fmt.ago(sp.at) + ip); }
-        else { G.face.value(frag, 'Run'); G.face.sub(frag, 'down and up, measured from the router' + ip); }
+        if (sp && sp.down != null) { G.face.value(frag, String(sp.down), 'Mb/s', null, true); G.face.sub(frag, 'down · peak ' + sp.down_peak + ' · ' + fmt.ago(sp.at) + ip); }
+        else { G.face.value(frag, 'Run'); G.face.sub(frag, 'download, measured from the router' + ip); }
         return { on: !!(s && s.iperf && s.iperf.running) };
     },
     sheet: function (body, api) {
         var res = el('div'); body.appendChild(res);
-        var running = false, timer = null, downDone = null;
+        var running = false, timer = null;
         function drawRes(prog) {
             clear(res); var t = api.data.tools, sp = t && t.speed;
             if (running && prog) {
                 api.meta('measuring');
-                var d = prog.phase === 'down' ? String(prog.mbps) : (downDone != null ? String(downDone) : '—');
-                var ds = prog.phase === 'down' ? 'measuring · ' + prog.t + ' of ' + prog.of + ' s' : (downDone != null ? 'done' : 'starting');
-                var u = prog.phase === 'up' ? String(prog.mbps) : '—', us = prog.phase === 'up' ? (prog.t > 0 ? 'measuring · ' + prog.t + ' of ' + prog.of + ' s' : 'connecting to ' + prog.via) : 'after the download';
-                res.appendChild(ui.readouts([ui.readout('Download', d, ds, null, 'Mb/s'), ui.readout('Upload', u, us, null, 'Mb/s')]));
+                res.appendChild(ui.readouts([ui.readout('Download', prog.t > 0 ? String(prog.mbps) : '—', prog.t > 0 ? 'measuring · ' + prog.t + ' of ' + prog.of + ' s' + (prog.via ? ' · ' + prog.via : '') : (prog.via ? 'starting the streams from ' + prog.via : 'finding a test server'), null, 'Mb/s')]));
             } else {
-                api.meta(sp ? sp.down + ' ↓ · ' + sp.up + ' ↑' : '');
-                res.appendChild(ui.readouts([
-                    ui.readout('Download', sp ? String(sp.down) : '—', sp ? 'peak ' + sp.down_peak + ' Mb/s' : 'not run yet', null, sp ? 'Mb/s' : ''),
-                    ui.readout('Upload', sp && sp.up != null ? String(sp.up) : '—', sp ? (sp.up != null ? 'via ' + sp.up_via : 'no iperf3 server answered') : '', null, sp && sp.up != null ? 'Mb/s' : '')]));
-                if (sp) res.appendChild(el('div', 'field__h', fmt.plural(sp.streams, 'stream') + ' · ' + sp.seconds + ' s each way · ' + fmt.ago(sp.at)));
+                api.meta(sp ? sp.down + ' Mb/s' : '');
+                res.appendChild(ui.readouts([ui.readout('Download', sp ? String(sp.down) : '—', sp ? 'peak ' + sp.down_peak + ' Mb/s' : 'not run yet', null, sp ? 'Mb/s' : '')]));
+                if (sp) res.appendChild(el('div', 'field__h', fmt.plural(sp.streams, 'stream') + (sp.via ? ' from ' + sp.via : '') + ' · ' + sp.seconds + ' s · ' + fmt.ago(sp.at)));
             }
             var run = ui.act(running ? 'Measuring…' : 'Run a speed test', 'primary', start, 'bolt');
             if (running) { run.disabled = true; run.classList.add('is-busy'); }
             res.appendChild(run);
-            res.appendChild(el('div', 'field__h', 'What fast.com does, from the router. Down: four parallel streams from Cloudflare for ten seconds, read off the uplink’s own counters with the first two seconds discarded — so anything else using the uplink counts too. Up: iperf3, four streams, ten seconds, to the first public iperf3 server that is free (usually iperf.he.net in California — a long path, so it reads a little under the line). It measures the uplink, not your Wi-Fi; for that, use iPerf below.'));
+            res.appendChild(el('div', 'field__h', 'What fast.com does, from the router: four parallel streams from the nearest test server that answers (Singapore mirrors, then Cloudflare) for ten seconds, read off the uplink’s own counters with the first two seconds discarded — so anything else using the uplink counts too. Download only: an honest upload figure needs a server near you, and the nearest free public one read a sixth of what this line does, so it is left out rather than shown wrong. It measures the uplink, not your Wi-Fi; for that, use iPerf below.'));
         }
         function start() {
             if (running) return;
-            running = true; downDone = null; var last = null;
+            running = true;
             drawRes({ phase: 'down', mbps: '—', t: 0, of: 10 });
             timer = setInterval(function () {
                 if (G.sheet.id !== 'speed') { clearInterval(timer); return; }
                 G.get(TOOLS + '?action=speedprog', 3000).then(function (p) {
                     if (!running || !p || p.phase === 'idle') return;
-                    if (p.phase === 'up' && last && last.phase === 'down') downDone = last.mbps;
-                    last = p; drawRes(p);
+                    drawRes(p);
                 }).catch(function () {});
             }, 1000);
-            G.post(TOOLS, { action: 'speedtest' }, 75000).then(function (j) {
+            G.post(TOOLS, { action: 'speedtest' }, 45000).then(function (j) {
                 clearInterval(timer); running = false;
-                if (j && j.ok) { G.pop(j.down + ' Mb/s down · ' + (j.up != null ? j.up + ' Mb/s up' : 'upload: no server free'), j.up != null ? 'ok' : 'warn', 7000); G.polls.tools.refresh(200); }
+                if (j && j.ok) { G.pop(j.down + ' Mb/s down.', 'ok', 6000); G.polls.tools.refresh(200); }
                 else G.pop('Speed test failed: ' + ((j && j.error) || 'unknown'), 'bad');
                 if (G.sheet.id === 'speed') drawRes();
             });
