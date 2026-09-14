@@ -61,6 +61,41 @@ html{caret-color:var(--accent);scrollbar-width:thin;
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 [hidden]{display:none!important}
 
+/* ─── 1b. TOUCH ─────────────────────────────────────────────────────────────
+   This console is read on an iPhone and an iPad far more than on the desktop
+   it is administered from, and three things the browser does on touch were
+   still the browser's, not the design's.
+
+   The grey tap flash: iOS paints its own highlight on anything tappable. Off,
+   because every control here already answers a press (the pill scales, the
+   row and the tab darken below) and two answers to one touch is noise.
+
+   Long-press selection: pressing and holding a row to open it selected its
+   text instead. Off on the things that are only ever tapped — the device
+   detail underneath stays selectable, because a MAC or an address is
+   something you copy.
+
+   Hover: a touch leaves :hover stuck on whatever was last tapped, so a row
+   stayed lit after the finger left. Every hover rule in this file is gated on
+   a device that can actually hover — a trackpad on the iPad still gets it. */
+html{-webkit-tap-highlight-color:transparent}
+button,a,summary,label,select,input,[role="button"]{touch-action:manipulation}
+.btn,.iconbtn,.mtab,.pnode,.seg,.sw-toggle,.adv>summary,.tbl__group,
+.row[role="button"],.topo__node--link,.topo__leaf--link{
+  -webkit-user-select:none;user-select:none}
+/* what a press looks like where there is no pill to scale */
+.row[role="button"]:active,.tbl__group[role="button"]:active,
+a.pnode:active,.mtab:active,.adv>summary:active{
+  background:color-mix(in srgb,var(--glass-hi) 70%,transparent)}
+
+/* iOS ZOOMS THE PAGE when a focused field's text is under 16px, and stays
+   zoomed after the keyboard goes. Only iOS and iPadOS support this property,
+   so the rule reaches exactly those and leaves Android and the desktop at
+   the console's own size. */
+@supports (-webkit-touch-callout:none){
+  .input,.select,.ta{font-size:16px}
+}
+
 /* ─── 2. PALETTE & THE WARM GROUND ─────────────────────────────────────────
    WARM LIGHT is the intent (the SunCore / Kraftbase reference): a cream ground,
    a single warm-amber accent, near-white frosted cards that float on soft
@@ -261,7 +296,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   .panel__aside--controls .seg{flex:none;max-width:100%}
   .panel__aside--controls .input{flex:1 1 150px;width:auto;min-width:0}
 }
-.logq{width:170px}
+.logq{width:170px;font-size:var(--t-cap)}
 
 /* the hairline that divides panels stacked in one pane — inset, faint, iOS */
 .face .panel+.panel{position:relative}
@@ -295,7 +330,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   transition:background .18s var(--ease),transform .12s var(--ease)}
 .row+.row::before{content:"";position:absolute;left:calc(var(--s5) + 48px);right:var(--s5);top:0;
   height:1px;background:var(--sep)}
-.row:hover{background:color-mix(in srgb,var(--glass-hi) 60%,transparent)}
+@media (hover:hover){.row:hover{background:color-mix(in srgb,var(--glass-hi) 60%,transparent)}}
 .row:active{transform:scale(.99)}
 .row[aria-expanded="true"]{background:color-mix(in srgb,var(--glass-hi) 60%,transparent)}
 .row__id{display:flex;align-items:center;gap:var(--s3);min-width:0;flex:1}
@@ -486,8 +521,9 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .btn--danger{color:var(--bad);background:none;
   backdrop-filter:none;-webkit-backdrop-filter:none;
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--bad) 48%,transparent)}
+@media (hover:hover){
 .btn--danger:hover:not(:disabled){background:color-mix(in srgb,var(--bad) 10%,transparent);
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--bad) 72%,transparent)}
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--bad) 72%,transparent)}}
 .btn--sm{padding:6px 13px;font-size:var(--t-cap);min-height:30px}
 /* A 30px pill is the right SIZE for an inline action and the wrong HIT AREA
    for a thumb. The visible pill stays; an invisible box grows it to 44px on
@@ -701,7 +737,7 @@ svg.topo .capon{fill:var(--accent)}
   /* No reading, no line — never a placeholder standing in for one. */
   .pnode__v:empty{display:none}
   .pnode--branch{margin-left:16px}
-  a.pnode:hover{background:var(--glass-hi)}
+  @media (hover:hover){a.pnode:hover{background:var(--glass-hi)}}
   a.pnode.is-active{background:color-mix(in srgb,var(--accent) 15%,transparent)}
   a.pnode.is-active .pnode__k{color:var(--ink)}
   a.pnode.is-active .pnode__ico{color:var(--accent);
@@ -726,7 +762,7 @@ svg.topo .capon{fill:var(--accent)}
 .accent__pop{position:absolute;z-index:60;min-width:170px;padding:6px;border-radius:var(--r-inset)}
 .accent__opt{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--r-tile);
   cursor:pointer;font-size:var(--t-sub);width:100%;border:0;background:none;color:var(--ink)}
-.accent__opt:hover{background:var(--glass-hi)}
+@media (hover:hover){.accent__opt:hover{background:var(--glass-hi)}}
 .accent__sw{width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 .5px var(--rim-hair)}
 .push{margin-left:auto}
 
@@ -931,7 +967,7 @@ svg.topo .capon{fill:var(--accent)}
 /* a path tile that leads somewhere */
 .topo__node--link,.topo__leaf--link{cursor:pointer;
   transition:background .18s var(--ease)}
-.topo__node--link:hover,.topo__leaf--link:hover{background:var(--glass-2)}
+@media (hover:hover){.topo__node--link:hover,.topo__leaf--link:hover{background:var(--glass-2)}}
 /* ONE FOCUS RING. Every element a keyboard can land on draws the same one:
    accent, 2px, standing 2px off the edge so it never fights an inset rim. The
    text fields keep their own (a filled inset ring reads better inside a well);
