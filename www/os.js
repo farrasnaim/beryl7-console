@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = 'ac163552a7';
+var CONSOLE_VERSION = '70f54ceda1';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1048,6 +1048,51 @@ function reflow(main) {
         if (kids[i] !== want[i]) { want.forEach(function (n) { main.appendChild(n); }); return; }
     }
 }
+/* LEVEL THE TOP OF THE TWO COLUMNS.
+   One column can open with a section heading and the other with a bare card —
+   the Overview does exactly that now — and the bare one then starts a heading's
+   height above its neighbour. Rather than encode what a heading measures, this
+   reads where the first CARD in each column actually landed and pushes the
+   higher column down by the difference. It therefore also absorbs any other
+   reason the two could disagree. */
+function levelCols(a, b) {
+    /* offsetTop, NOT getBoundingClientRect. Cards rise into place with a 10px
+       translate and the one after a heading starts 20ms later, so a rect read
+       during the deal is a rect mid-animation - which is how the first attempt
+       at this levelled the columns to a number that was wrong by most of that
+       translate. offsetTop is layout position and a transform does not touch
+       it. */
+    function leadTop(col) {
+        var blk = col.firstChild;
+        if (!blk || !blk.children) return null;
+        for (var i = 0; i < blk.children.length; i++) {
+            var n = blk.children[i];
+            if (!n.classList.contains('sect')) return n.offsetTop - col.offsetTop;
+        }
+        return null;
+    }
+    a.firstChild.style.marginTop = '';
+    b.firstChild.style.marginTop = '';
+    var ta = leadTop(a), tb = leadTop(b);
+    if (ta == null || tb == null) return;
+    var d = ta - tb;
+    if (d > 1) b.firstChild.style.marginTop = d + 'px';
+    else if (d < -1) a.firstChild.style.marginTop = (-d) + 'px';
+}
+
+/* ...and again once the data has landed. A section heading is a baseline-
+   aligned flex row, so it grows by a few pixels the moment its meta slot
+   ("12 online") arrives — and the deal, which runs before the first fetch has
+   answered, levelled against the shorter version. Re-levelling costs one
+   measurement and moves nothing but a margin, so it is safe to do under a
+   reader; re-dealing would not be. */
+function relevel() {
+    var wrap = $('.cols');
+    if (!wrap) return;
+    var cols = $$('.col', wrap);
+    if (cols.length === 2) levelCols(cols[0], cols[1]);
+}
+
 function flattenCols(main) {
     /* A spanned block sits OUTSIDE .cols, so unwrap those in place first —
        missing them meant the second pass saw a leftover wrapper instead of the
@@ -1132,6 +1177,9 @@ function layoutColumns() {
         var h = block.offsetHeight || 0;
         if (toA) ha += h; else hb += h;
     });
+    levelCols(a, b);
+    /* 2.5s: past the first dashboard-api answer (~0.8s) and its render. */
+    setTimeout(relevel, 2500);
 }
 function transportEl() {
     var t = el('div', 'tp');

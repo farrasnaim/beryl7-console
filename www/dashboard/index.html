@@ -11,7 +11,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/apple-touch-icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="stylesheet" href="/app.css?v=cba4c4dd">
+<link rel="stylesheet" href="/app.css?v=08410dce">
 </head>
 <body>
 <div class="shell">
@@ -42,12 +42,12 @@
          It carries a heading of its own for that levelling: a column that
          starts with a bare card sits a heading's height higher than the column
          beside it, which is exactly the misalignment this fixes. -->
-    <div class="sect">
-      <span class="sect__t">Path</span>
-    </div>
     <div class="face--open" id="topoBlock">
       <div style="overflow-x:auto;scrollbar-width:none">
-        <div id="topo" style="padding:var(--s2) 0 var(--s3)"></div>
+        <!-- No top padding: this block is levelled against the first card in
+             the other column, and the thing being levelled has to be the tile
+             you can see, not an invisible box eight pixels above it. -->
+        <div id="topo" style="padding:0 0 var(--s3)"></div>
       </div>
     </div>
 
@@ -162,7 +162,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=1af17127"></script>
+<script src="/os.js?v=7d209e97"></script>
 <script>
 (function () {
 'use strict';

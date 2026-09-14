@@ -565,6 +565,14 @@ svg.topo .capon{fill:var(--accent)}
    Nodes are little glass tiles connected by thin lines. No box drawing, no
    monospace. Charts keep the ink line but on a glass field. */
 .topo{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) var(--s3)}
+/* ...except the Overview's, which is uncontained: there is no card edge to
+   inset from, and this padding was holding its first tile eight pixels below
+   and twelve to the right of the card in the column beside it.
+   The selector is a DESCENDANT one because #topo is the slot, not the drawing:
+   topology() builds its own .topo inside it. Written as `#topo.topo` first,
+   which matches nothing at all and is why the tile stayed eight pixels low
+   through two rounds of blaming the levelling code. */
+#topo>.topo{padding:0}
 .topo__row{display:flex;align-items:center;gap:var(--s3)}
 .topo__node{display:flex;align-items:center;gap:var(--s3);flex:1;min-width:0;
   padding:13px 15px;border-radius:var(--r-inset);background:var(--glass);
