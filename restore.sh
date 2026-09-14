@@ -149,7 +149,7 @@ ok "services enabled for boot"
 say "Rebooting"
 ssh -n $SSHOPT "$TARGET" 'reboot' || true
 echo "  the router is coming back up — give it a minute, then open:"
-echo "     http://$ROUTER/dashboard/"
+echo "     http://$ROUTER/console/"
 echo
 echo "  If the address changed because you restored a different LAN subnet,"
 echo "  use the one from the restored config, not $ROUTER."

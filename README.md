@@ -1,6 +1,6 @@
 # Beryl 7 Console
 
-A hand-built web console for the GL.iNet Beryl 7 (GL-MT3600BE) travel router running vanilla OpenWrt. Plain HTML, CSS, and JavaScript over busybox-ash CGI — no frameworks, no build step, no external requests, no dependencies beyond what the router already ships. The current console is one screen at `/console/`; the five earlier pages are still served beside it.
+A hand-built web console for the GL.iNet Beryl 7 (GL-MT3600BE) travel router running vanilla OpenWrt. Plain HTML, CSS, and JavaScript over busybox-ash CGI — no frameworks, no build step, no external requests, no dependencies beyond what the router already ships. The console is one screen at `/console/`.
 
 It replaces day-to-day use of LuCI and the vendor UI for the things a travel router actually does: watching who is connected, joining hotel Wi-Fi, tethering a phone, routing devices through WireGuard tunnels, and adjusting the radios — while leaving LuCI untouched at `/cgi-bin/luci/` for everything else.
 
@@ -19,11 +19,11 @@ cd beryl7-console
 ./install.sh 192.168.1.1         # your router's address
 ```
 
-It prints the URL when it's done. Open `http://192.168.1.1/dashboard/` — there is no login, by design; see [Security model](#security-model).
+It prints the URL when it's done. Open `http://192.168.1.1/console/` — there is no login, by design; see [Security model](#security-model).
 
 That is the whole install. Everything else in this README is explanation, not further steps:
 
-- **Optional packages** unlock the VPN and USB-uplink pages — see [Requirements](#requirements). The installer names the ones you're missing; nothing breaks without them.
+- **Optional packages** unlock the VPN and USB-uplink parts — see [Requirements](#requirements). The installer names the ones you're missing; nothing breaks without them.
 - **Name your devices** by editing `/etc/dashboard/classmap` on the router, so the client list shows "My Laptop" instead of a MAC.
 - **Re-run `./install.sh`** any time to upgrade; it keeps the device names you set.
 - **[Back up before you reflash](#backup-and-restore)** — `./backup.sh <router>` captures the config *and* the console in one file.
@@ -34,28 +34,13 @@ Read [Security model](#security-model) before putting this on a network you don'
 
 | Page | Path | What it does |
 |---|---|---|
-| **Console** | `/console/` | The current console: a single Control Center grid. A Path strip (Internet · Uplink · VPN) and fourteen tiles — Devices, Internet, Uplink, VPN, Radios, Guest Wi-Fi, IoT, Throughput, System, Activity, Travel, Speed test — each a one-glance instrument that opens a sheet for the rest. Wi-Fi uplink and USB tethering are one Uplink surface. Guest and IoT carry switches; Travel is one switch that turns guest and IoT off and sets the VPN to fail open, then puts them back exactly as they were. Activity is a feed parsed from the system log; Speed test is a router-side download timed on the router, next to the iPerf switch. Installable to an iPhone home screen (standalone, safe-area aware). Backed by the same CGIs as the pages below plus `tools-api`. |
-| **Overview** | `/dashboard/` | Live network topology (uplink → router → tunnels → devices), connected clients with Wi-Fi signal and link rate, radio status, today's traffic, system vitals (load, temperature, fan, memory), and a 1-second throughput + latency chart. Per-device detail view with rates, PHY mode, and block control. |
-| **VPN** | `/vpn/` | WireGuard tunnels: add from a pasted `.conf`, connect/disconnect, and route individual devices through a tunnel via [pbr](https://github.com/stangri/pbr) policies. Fail-closed by default; an optional watchdog can pause routing when a tunnel dies (see `vpnwatch`). Per-device VPN DNS enforcement so routed devices can't leak DNS to the home uplink (see `beryl-vpndns`). |
-| **Wi-Fi uplink** | `/repeater/` | Repeater mode: scan, join, and forget upstream networks (hotel/cafe Wi-Fi). Shows the uplink's health and hands over between sources by route metric. |
-| **USB uplink** | `/tethering/` | USB tethering: iPhone (ipheth/usbmuxd), Android RNDIS, HiLink dongles, and NCM/QMI/MBIM modems, with APN/PIN configuration where the device needs it. Detects whatever netdev the device presents instead of assuming `eth2`. |
-| **Settings** | `/settings/` | Radio configuration (band, channel, width, PHY mode, transmit power, country) with the valid channel/width combinations derived live from what the hardware reports — you cannot select a combination the radio can't do. Plus SSID settings, hostname, timezone, LAN lease settings, device blocking, and radio restart. Under **System**: a one-click **config backup download** (the same `sysupgrade -b` archive LuCI produces), an on-demand update check via [`owut`](https://openwrt.org/docs/guide-user/installation/attended.sysupgrade) that can then upgrade exactly the packages it listed, an **iPerf server** you can switch on for a speed test against the router (port of your choosing, off by default), and a **live system log** filtered by severity — the honest answer to "why is there no internet" when the only device you have is a phone. Firmware is deliberately not flashed from here. |
+| **Console** | `/console/` | The current console: a single Control Center grid. A Path strip (Internet · Uplink · VPN) and fourteen tiles — Devices, Internet, Uplink, VPN, Radios, Guest Wi-Fi, IoT, Throughput, System, Activity, Travel, Speed test — each a one-glance instrument that opens a sheet for the rest. Wi-Fi uplink and USB tethering are one Uplink surface. Guest and IoT carry switches; Travel is one switch that turns guest and IoT off and sets the VPN to fail open, then puts them back exactly as they were. Activity is a feed parsed from the system log; Speed test is a router-side download timed on the router, next to the iPerf switch. Installable to an iPhone home screen (standalone, safe-area aware). Backed by the CGIs under `www/cgi-bin/`. |
 
 Every page works from 360 px phones to desktop, in light and dark - system-following by default, pinned by the toggle in the sidebar.
 
 ## Design
 
-The console at `/console/` has its own stylesheet, `www/console/console.css`, written from scratch and documented in `DESIGN.md`: a static ground gradient, translucent panes with backdrop blur, depth by stacking (a heavier sheet over a dimmed, receded grid) with a 1px specular edge and no drop shadows, maroon as the only accent, a tinted face for a tile's "on" state, the system font stack, and one authored motion — the sheet rising. `www/console/core.js` is its runtime (polling, the tile registry, the sheet with focus trap and Escape, the component constructors) and `www/console/tiles.js` holds every instrument.
-
-The earlier pages are frosted glass in the iOS idiom, and all of that lives in one stylesheet, `www/app.css`:
-
-- **Depth is never a drop shadow.** Panes are genuinely translucent and blurred (`backdrop-filter: blur(24px) saturate(180%)`); what bounds them is a 1px specular inset edge. The page's own ground — a few soft maroon discs on a neutral field — shows through every pane, which is the whole reason the panes are translucent at all.
-- **One accent, maroon**, for the primary action and live state and nothing else. There is no accent picker: four skins were four things to keep consistent and one more decision to make on a phone in a hotel.
-- **Theming** is a 4-rule matrix per token set — bare default, `prefers-color-scheme` media rule, and `[data-theme="dark"]` / `[data-theme="light"]` overrides — so the manual toggle always beats the system preference in both directions. An inline script resolves the theme before first paint, so there is no flash of the wrong one.
-- **State is a sentence-case word beside a coloured dot**, never an all-caps shout; `stateWord()` normalises any legacy uppercase a caller still passes.
-- **Typography** is the Apple system stack — San Francisco on the devices this is read on, Segoe on the desktop it is administered from. Nothing is downloaded: a webfont is a request that fails in exactly the hotel where you need the page. Tabular numerals wherever digits align.
-
-`www/os.js` is the shared runtime: navigation, theme persistence, dialogs, the topology renderer, the two-column layout dealer for wide screens, and the polling machinery.
+The console has one stylesheet, `www/console/console.css`, documented in `DESIGN.md`: a static ground gradient, translucent panes with backdrop blur, depth by stacking (a heavier sheet over a dimmed, receded grid) with a 1px specular edge and no drop shadows, maroon as the only accent, a tinted face for a tile's "on" state, the system font stack, and one authored motion — the sheet rising. `www/console/core.js` is its runtime (polling, the tile registry, the sheet with focus trap and Escape, the component constructors) and `www/console/tiles.js` holds every instrument.
 
 ## Architecture
 
@@ -95,17 +80,14 @@ install.sh                   first-time install / upgrade, idempotent
 backup.sh                    pull a full restore bundle off the router
 restore.sh                   put a bundle back onto a fresh router
 www/
-  app.css                    the design system: tokens, themes, glass, components
-  os.js                      shared runtime: nav, theming, dialogs, topology,
-                             the wide-screen column dealer, polling
+  console/index.html         the frame: capsule, grid, sheet, toasts
+  console/console.css        the design system: tokens, ground, glass, tiles, sheet, components
+  console/core.js            runtime: polling, tile registry, sheet, component constructors
+  console/tiles.js           every instrument and its sheet
+  console/manifest.webmanifest  home-screen install
   favicon.svg                the GL.iNet mark, white on maroon
   apple-touch-icon.png       the same at 180px, for Safari and home screens
-  qr-vendor.js               QR encoder for the WireGuard peer dialog
-  dashboard/index.html       Overview
-  vpn/index.html             VPN
-  repeater/index.html        Wi-Fi uplink
-  tethering/index.html       USB uplink
-  settings/index.html        Settings
+  qr-vendor.js               QR encoder for the guest Wi-Fi code and WireGuard peers
   cgi-bin/
     dashboard-api            full state snapshot + device detail + block/deauth
     rate-api                 cheap 1s counters: WAN bytes, ping, load, temp, fan, mem
@@ -212,7 +194,7 @@ The script:
 
 Re-run it any time to upgrade — it preserves the device names in your classmap.
 
-Then open `http://<router>/dashboard/`. LuCI is untouched at `http://<router>/cgi-bin/luci/`.
+Then open `http://<router>/console/`. LuCI is untouched at `http://<router>/cgi-bin/luci/`.
 
 <details>
 <summary>Installing by hand instead</summary>
@@ -407,7 +389,7 @@ A stock dual-band OpenWrt router should work as-is. Verify against your own hard
 
 ## Status
 
-Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. `/console/` (September 2026) is the current UI; the five pages under `/dashboard/`, `/vpn/`, `/repeater/`, `/tethering/` and `/settings/` are the previous iteration and stay in place until the owner has lived with the new one. The first iteration (`legacy/` and `theme.css`) was deleted in September 2026; git has it. The second iteration (`os.css` and the IBM Plex files it loaded) is deleted rather than kept: git has it, and an unloaded 176 KB on a router is not reference material.
+Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. `/console/` (September 2026) is the UI. The two earlier iterations — the five pages under `/dashboard/`, `/vpn/`, `/repeater/`, `/tethering/` and `/settings/` with `app.css`/`os.js`, and before them `legacy/` with `theme.css` — were deleted the same month; git has them. The second iteration (`os.css` and the IBM Plex files it loaded) is deleted rather than kept: git has it, and an unloaded 176 KB on a router is not reference material.
 
 ## License
 

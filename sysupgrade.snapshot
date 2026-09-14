@@ -3,16 +3,12 @@
 
 # /etc/example.conf
 # /etc/openvpn/
-/www/dashboard
 /www/cgi-bin/dashboard-api
 /etc/dashboard
-/www/vpn
 /www/cgi-bin/vpn-api
-/www/repeater
 /www/cgi-bin/repeater-api
 /etc/hotplug.d/iface/99-repeater-iot
 /etc/dnsmasq.conf
-/www/tethering
 /www/cgi-bin/tethering-api
 /etc/hotplug.d/net/30-tethering
 /etc/hotplug.d/iface/31-tethering-clash
@@ -30,12 +26,9 @@
 /etc/dashboard/vpn-autopaused
 /etc/nlbwmon
 /etc/sysctl.d/99-local.conf
-/www/app.css
-/www/os.js
 /usr/sbin/beryl-vpndns
 /etc/nftables.d/30-beryl-vpndns.nft
 /www/cgi-bin/rate-api
-/www/settings
 /www/cgi-bin/settings-api
 /usr/sbin/pingmon
 /etc/init.d/pingmon

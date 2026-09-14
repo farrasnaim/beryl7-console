@@ -53,7 +53,7 @@
 # tells the reader their page is old and offers a reload. A stale page is still
 # possible. What is no longer possible is a stale page that says nothing.
 #
-# Run after touching os.css, os.js OR any page, and before copying the tree to
+# Run after touching console.css, core.js, tiles.js OR the page, and before copying the tree to
 # the router — a page edit now moves the console version too, so this is no
 # longer only an asset-editing step.
 # Safe to run repeatedly: if nothing changed, nothing is rewritten.
@@ -94,9 +94,7 @@ rewritten=""
 # would make the hash chase its own tail. Strip both, and the version depends
 # only on content a human actually edited.
 norm() { sed -e 's/?v=[0-9a-f]*//g' -e '/^var CONSOLE_VERSION/d' "$@"; }
-VER=$( { norm app.css os.js console/console.css console/core.js console/tiles.js; for p in */index.html; do
-             norm "$p"; done
-       } | md5sum | cut -c1-10 )
+VER=$( norm console/console.css console/core.js console/tiles.js console/index.html | md5sum | cut -c1-10 )
 
 # Stamped into os.js, so a page that arrived from cache carries the version it
 # was built with, and into the endpoint, which reports what the router actually
@@ -106,7 +104,7 @@ VER=$( { norm app.css os.js console/console.css console/core.js console/tiles.js
 # unchanged tree rewrites nothing, and a blind sed -i would touch both files on
 # every invocation — the content would be identical, but the promise would not
 # be.
-for f in os.js console/core.js cgi-bin/version-api; do
+for f in console/core.js cgi-bin/version-api; do
     [ -f "$f" ] || continue
     grep -q "CONSOLE_VERSION *= *'$VER'" "$f" && continue
     grep -q "CONSOLE_VERSION='$VER'" "$f" && continue
@@ -117,29 +115,8 @@ for f in os.js console/core.js cgi-bin/version-api; do
     rewritten="$rewritten www/$f"
 done
 
-# ---- 2. now hash the assets, os.js having reached its final content ---------
-CSS=$(hash_of app.css)
-JS=$(hash_of os.js)
-
-for page in */index.html; do
-    [ -f "$page" ] || continue
-    before=$(md5sum "$page")
-
-    # matches both the bare form and an already-stamped one
-    sed -i \
-        -e 's|href="/app\.css\(?v=[0-9a-f]*\)\?"|href="/app.css?v='"$CSS"'"|g' \
-        -e 's|src="/os\.js\(?v=[0-9a-f]*\)\?"|src="/os.js?v='"$JS"'"|g' \
-        "$page"
-
-    after=$(md5sum "$page")
-    if [ "$before" != "$after" ]; then
-        echo "  stamped  $page"
-        changed=$((changed + 1))
-        rewritten="$rewritten www/$page"
-    fi
-done
-
-# The control grid at /console/ has its own three assets. Same rule: a changed
+# ---- 2. now hash the assets, core.js having reached its final content --------
+# The console has three assets. Same rule: a changed
 # asset is a changed URL. The CSS and both scripts are stamped into its page.
 if [ -f console/index.html ]; then
     GC=$(hash_of console/console.css); GJ=$(hash_of console/core.js); GT=$(hash_of console/tiles.js)
@@ -150,7 +127,7 @@ if [ -f console/index.html ]; then
         echo "  stamped  console/index.html"; changed=$((changed + 1)); rewritten="$rewritten www/console/index.html"
     fi
 fi
-echo "  app.css=$CSS  os.js=$JS  console version=$VER  ($changed file(s) rewritten)"
+echo "  console version=$VER  ($changed file(s) rewritten)"
 
 # ---- 3. say out loud what must now ship together -----------------------------
 #
@@ -162,7 +139,7 @@ echo "  app.css=$CSS  os.js=$JS  console version=$VER  ($changed file(s) rewritt
 if [ -n "$rewritten" ]; then
     echo
     echo "  DEPLOY TOGETHER — every file below plus www/cgi-bin/version-api."
-    echo "  Shipping a subset leaves the served os.js and version-api carrying"
+    echo "  Shipping a subset leaves the served core.js and version-api carrying"
     echo "  different versions: the stale-page banner then shows on EVERY load"
     echo "  and its Reload button cannot clear it."
     for f in $rewritten; do echo "    $f"; done

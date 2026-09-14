@@ -13,7 +13,7 @@
 # actually serves.
 #
 #     pwsh -File shots.ps1                      # all pages, current theme
-#     pwsh -File shots.ps1 -Pages dashboard     # one page
+#     pwsh -File shots.ps1 -Pages console      # the console (the only page now)
 #     pwsh -File shots.ps1 -Theme light -W 420 -H 1800   # phone width, light
 #
 # A separate --user-data-dir is not optional: Chrome refuses to start headless
@@ -29,7 +29,7 @@
 
 param(
   [string]$Router = '192.168.8.1',
-  [string[]]$Pages = @('dashboard','vpn','repeater','tethering','settings'),
+  [string[]]$Pages = @('console'),
   [ValidateSet('dark','light','system')][string]$Theme = 'system',
   [int]$W = 1400,
   [int]$H = 2400,
