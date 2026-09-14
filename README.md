@@ -116,8 +116,6 @@ www/
     probe-api                the Overview's ping target, and the saved list
     wireguard-api            WireGuard transport: what each tunnel does on the wire
     version-api              which build the router serves, so a stale page can say so
-  theme.css                  v1 design system (superseded — still used by legacy/)
-  legacy/                    v1 pages (superseded — kept for reference)
 
 usr/share/beryl/
   cgi-lib.sh                 helpers every *-api sources: JSON escaping, query
@@ -409,7 +407,7 @@ A stock dual-band OpenWrt router should work as-is. Verify against your own hard
 
 ## Status
 
-Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. `/console/` (September 2026) is the current UI; the five pages under `/dashboard/`, `/vpn/`, `/repeater/`, `/tethering/` and `/settings/` are the previous iteration and stay in place until the owner has lived with the new one. The `legacy/` directory and `theme.css` are the first iteration, kept for reference. The second iteration (`os.css` and the IBM Plex files it loaded) is deleted rather than kept: git has it, and an unloaded 176 KB on a router is not reference material.
+Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. `/console/` (September 2026) is the current UI; the five pages under `/dashboard/`, `/vpn/`, `/repeater/`, `/tethering/` and `/settings/` are the previous iteration and stay in place until the owner has lived with the new one. The first iteration (`legacy/` and `theme.css`) was deleted in September 2026; git has it. The second iteration (`os.css` and the IBM Plex files it loaded) is deleted rather than kept: git has it, and an unloaded 176 KB on a router is not reference material.
 
 ## License
 

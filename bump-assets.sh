@@ -95,7 +95,7 @@ rewritten=""
 # only on content a human actually edited.
 norm() { sed -e 's/?v=[0-9a-f]*//g' -e '/^var CONSOLE_VERSION/d' "$@"; }
 VER=$( { norm app.css os.js console/console.css console/core.js console/tiles.js; for p in */index.html; do
-             case "$p" in legacy/*) continue ;; esac; norm "$p"; done
+             norm "$p"; done
        } | md5sum | cut -c1-10 )
 
 # Stamped into os.js, so a page that arrived from cache carries the version it
@@ -122,7 +122,6 @@ CSS=$(hash_of app.css)
 JS=$(hash_of os.js)
 
 for page in */index.html; do
-    case "$page" in legacy/*) continue ;; esac
     [ -f "$page" ] || continue
     before=$(md5sum "$page")
 

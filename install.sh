@@ -312,7 +312,7 @@ echo "  . pingmon, wifiwatch and cpugovernor running"
 #                     nothing TODAY. It is kept because the setting above makes
 #                     it the only place a hand-written dnsmasq directive can go.
 touch /etc/sysupgrade.conf
-for p in /www/app.css /www/os.js /www/theme.css /www/legacy /www/dashboard /www/vpn \
+for p in /www/app.css /www/os.js /www/dashboard /www/vpn \
          /www/repeater /www/tethering /www/settings /www/console \
          /www/favicon.svg /www/apple-touch-icon.png \
          /www/cgi-bin/dashboard-api /www/cgi-bin/rate-api /www/cgi-bin/vpn-api \

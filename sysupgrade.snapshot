@@ -16,7 +16,6 @@
 /www/cgi-bin/tethering-api
 /etc/hotplug.d/net/30-tethering
 /etc/hotplug.d/iface/31-tethering-clash
-/www/theme.css
 /etc/rc.local
 /etc/init.d/cpugovernor
 /usr/sbin/dashmon
@@ -33,7 +32,6 @@
 /etc/sysctl.d/99-local.conf
 /www/app.css
 /www/os.js
-/www/legacy
 /usr/sbin/beryl-vpndns
 /etc/nftables.d/30-beryl-vpndns.nft
 /www/cgi-bin/rate-api
