@@ -1,6 +1,6 @@
 # Beryl 7 Console
 
-A hand-built web console for the GL.iNet Beryl 7 (GL-MT3600BE) travel router running vanilla OpenWrt. Five pages of plain HTML, CSS, and JavaScript over busybox-ash CGI — no frameworks, no build step, no external requests, no dependencies beyond what the router already ships.
+A hand-built web console for the GL.iNet Beryl 7 (GL-MT3600BE) travel router running vanilla OpenWrt. Plain HTML, CSS, and JavaScript over busybox-ash CGI — no frameworks, no build step, no external requests, no dependencies beyond what the router already ships. The current console is one screen at `/console/`; the five earlier pages are still served beside it.
 
 It replaces day-to-day use of LuCI and the vendor UI for the things a travel router actually does: watching who is connected, joining hotel Wi-Fi, tethering a phone, routing devices through WireGuard tunnels, and adjusting the radios — while leaving LuCI untouched at `/cgi-bin/luci/` for everything else.
 
@@ -34,6 +34,7 @@ Read [Security model](#security-model) before putting this on a network you don'
 
 | Page | Path | What it does |
 |---|---|---|
+| **Console** | `/console/` | The current console: a single Control Center grid. A Path strip (Internet · Uplink · VPN) and fourteen tiles — Devices, Internet, Uplink, VPN, Radios, Guest Wi-Fi, IoT, Throughput, System, Activity, Travel, Speed test — each a one-glance instrument that opens a sheet for the rest. Wi-Fi uplink and USB tethering are one Uplink surface. Guest and IoT carry switches; Travel is one switch that turns guest and IoT off and sets the VPN to fail open, then puts them back exactly as they were. Activity is a feed parsed from the system log; Speed test is a router-side download timed on the router, next to the iPerf switch. Installable to an iPhone home screen (standalone, safe-area aware). Backed by the same CGIs as the pages below plus `tools-api`. |
 | **Overview** | `/dashboard/` | Live network topology (uplink → router → tunnels → devices), connected clients with Wi-Fi signal and link rate, radio status, today's traffic, system vitals (load, temperature, fan, memory), and a 1-second throughput + latency chart. Per-device detail view with rates, PHY mode, and block control. |
 | **VPN** | `/vpn/` | WireGuard tunnels: add from a pasted `.conf`, connect/disconnect, and route individual devices through a tunnel via [pbr](https://github.com/stangri/pbr) policies. Fail-closed by default; an optional watchdog can pause routing when a tunnel dies (see `vpnwatch`). Per-device VPN DNS enforcement so routed devices can't leak DNS to the home uplink (see `beryl-vpndns`). |
 | **Wi-Fi uplink** | `/repeater/` | Repeater mode: scan, join, and forget upstream networks (hotel/cafe Wi-Fi). Shows the uplink's health and hands over between sources by route metric. |
@@ -44,7 +45,9 @@ Every page works from 360 px phones to desktop, in light and dark - system-follo
 
 ## Design
 
-The UI is frosted glass in the iOS idiom, and all of it lives in one stylesheet, `www/app.css`:
+The console at `/console/` has its own stylesheet, `www/console/console.css`, written from scratch and documented in `DESIGN.md`: a static ground gradient, translucent panes with backdrop blur, depth by stacking (a heavier sheet over a dimmed, receded grid) with a 1px specular edge and no drop shadows, maroon as the only accent, a tinted face for a tile's "on" state, the system font stack, and one authored motion — the sheet rising. `www/console/core.js` is its runtime (polling, the tile registry, the sheet with focus trap and Escape, the component constructors) and `www/console/tiles.js` holds every instrument.
+
+The earlier pages are frosted glass in the iOS idiom, and all of that lives in one stylesheet, `www/app.css`:
 
 - **Depth is never a drop shadow.** Panes are genuinely translucent and blurred (`backdrop-filter: blur(24px) saturate(180%)`); what bounds them is a 1px specular inset edge. The page's own ground — a few soft maroon discs on a neutral field — shows through every pane, which is the whole reason the panes are translucent at all.
 - **One accent, maroon**, for the primary action and live state and nothing else. There is no accent picker: four skins were four things to keep consistent and one more decision to make on a phone in a hotel.
@@ -406,7 +409,7 @@ A stock dual-band OpenWrt router should work as-is. Verify against your own hard
 
 ## Status
 
-Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. The `legacy/` directory and `theme.css` are the first iteration of the UI, kept for reference. The second iteration (`os.css` and the IBM Plex files it loaded) is deleted rather than kept: git has it, and an unloaded 176 KB on a router is not reference material.
+Personal project, actively used daily on one router. Published as a backup and in case it is useful to someone — issues and questions are welcome, but there is no roadmap and no support obligation. `/console/` (September 2026) is the current UI; the five pages under `/dashboard/`, `/vpn/`, `/repeater/`, `/tethering/` and `/settings/` are the previous iteration and stay in place until the owner has lived with the new one. The `legacy/` directory and `theme.css` are the first iteration, kept for reference. The second iteration (`os.css` and the IBM Plex files it loaded) is deleted rather than kept: git has it, and an unloaded 176 KB on a router is not reference material.
 
 ## License
 
