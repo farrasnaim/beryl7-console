@@ -11,7 +11,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/apple-touch-icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="stylesheet" href="/app.css?v=6a7384a4">
+<link rel="stylesheet" href="/app.css?v=cba4c4dd">
 </head>
 <body>
 <div class="shell">
@@ -32,12 +32,25 @@
     <div id="alerts"></div>
     <div id="jobs"></div>
 
-    <!-- DEVICES FIRST, ALWAYS. Who is connected is the question this page gets
-         opened to answer, so it opens on the answer — above the topology, which
-         is the equipment serving them. Being first in the source is also what
-         pins it to the top of the left column in the wide layout: the column
-         dealer hands block one to the left side before any height is measured,
-         so it cannot drift down the page as the cards fill in. -->
+    <!-- THE PATH LEADS ON A PHONE, DEVICES LEAD ON A DESKTOP, and this order
+         is what produces both. On a phone the page is one column, so source
+         order is reading order and the drawing comes first. On a wide screen
+         the dealer pins this block to the RIGHT column (see layoutColumns) and
+         Devices, the next block, therefore opens the left one — so the two
+         columns start level and the answer to "who is connected" is still the
+         first thing under the masthead on the side you read first.
+         It carries a heading of its own for that levelling: a column that
+         starts with a bare card sits a heading's height higher than the column
+         beside it, which is exactly the misalignment this fixes. -->
+    <div class="sect">
+      <span class="sect__t">Path</span>
+    </div>
+    <div class="face--open" id="topoBlock">
+      <div style="overflow-x:auto;scrollbar-width:none">
+        <div id="topo" style="padding:var(--s2) 0 var(--s3)"></div>
+      </div>
+    </div>
+
     <div class="sect">
       <span class="sect__t">Devices</span>
       <span class="sect__m" id="cliCount"></span>
@@ -50,14 +63,6 @@
             <div class="sk" style="width:61%;margin-top:var(--s3)"></div></div>
         </div>
       </section>
-    </div>
-
-    <!-- The network, drawn directly on the page. No container — the topology is
-         the product, not a widget inside it. -->
-    <div class="face--open">
-      <div style="overflow-x:auto;scrollbar-width:none">
-        <div id="topo" style="padding:var(--s2) 0 var(--s3)"></div>
-      </div>
     </div>
 
     <!-- Diagnostics: quieter, contained, lower on the page.
@@ -157,7 +162,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=d0361e00"></script>
+<script src="/os.js?v=1af17127"></script>
 <script>
 (function () {
 'use strict';
@@ -1462,7 +1467,6 @@ function detailFor(box, v, d) {
         det.addEventListener('toggle', function () { advOpen[akey] = det.open; });
         var sum = document.createElement('summary');
         sum.textContent = 'Driver counters';
-        sum.style.padding = '9px 0';
         det.appendChild(sum);
         var d3 = el('dl', 'kv');
         function kv3(k, val) {
@@ -1497,7 +1501,12 @@ function detailFor(box, v, d) {
         if (st.wme) flags.push('WMM');
         if (st.preamble) flags.push(st.preamble + ' preamble');
         if (flags.length) kv3('Association', flags.join(' · '));
-        det.appendChild(d3);
+        /* In a padded body, not straight into the disclosure: the recess runs
+           the full width of the row and the counters were sitting flush
+           against both of its edges. */
+        var d3b = el('div', 'adv__b');
+        d3b.appendChild(d3);
+        det.appendChild(d3b);
         if (st.tx && +st.tx.failed > 0 && +st.tx.failed === +st.tx.retries) {
             /* Desktop only, for the same reason as the network background note
                in Settings: it explains why two numbers look alike, which is
@@ -1506,8 +1515,8 @@ function detailFor(box, v, d) {
             var w = OS.note('Retries and failures read identically here — a known mt76 ' +
                             'counter quirk on this chip, not a real error rate.', null);
             w.classList.add('desk-only');
-            w.style.marginTop = '10px';
-            det.appendChild(w);
+            w.style.marginTop = 'var(--s3)';
+            d3b.appendChild(w);
         }
         sec.appendChild(det);
     });

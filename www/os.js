@@ -758,7 +758,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = '53507fb44e';
+var CONSOLE_VERSION = 'ac163552a7';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1108,6 +1108,15 @@ function layoutColumns() {
         var span = g.some(function (n) {
             return n.id === 'vpnmap' || (n.querySelector && n.querySelector('#vpnmap'));
         });
+        /* The Overview's path drawing is pinned to the right column rather than
+           dealt. It is first in the source because a phone reads top to bottom
+           and the drawing leads there; on a wide screen the question the page
+           opens on is who is connected, and that belongs on the side you read
+           first. Pinning is also what keeps the two columns level: this block
+           and the Devices block both open with a heading. */
+        var pinRight = g.some(function (n) {
+            return n.id === 'topoBlock' || (n.querySelector && n.querySelector('#topoBlock'));
+        });
         g.forEach(function (n) { block.appendChild(n); });
         if (span) {
             /* The uncontained hero — the path drawing — spans both columns. It is
@@ -1118,7 +1127,7 @@ function layoutColumns() {
             main.insertBefore(block, wrap);
             return;
         }
-        var toA = ha <= hb;
+        var toA = pinRight ? false : (ha <= hb);
         (toA ? a : b).appendChild(block);
         var h = block.offsetHeight || 0;
         if (toA) ha += h; else hb += h;

@@ -11,7 +11,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/apple-touch-icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="stylesheet" href="/app.css?v=6a7384a4">
+<link rel="stylesheet" href="/app.css?v=cba4c4dd">
 </head>
 <body>
 <div class="shell">
@@ -117,7 +117,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=d0361e00"></script>
+<script src="/os.js?v=1af17127"></script>
 <script src="/qr-vendor.js?v=1"></script>
 <script>
 (function () {
@@ -243,8 +243,9 @@ function renderMapV(d) {
     var map = el('div', 'topo');
     map.appendChild(node('dev', 'Routed devices',
         routed + (routed === 1 ? ' device' : ' devices'), 'live', jump('#devices')));
-    map.appendChild(el('div', 'topo__link'));
-    map.appendChild(node('router', 'Router', 'This router', 'live'));
+    /* No Router node here either: the box drawing the picture is not news on
+       the path it draws, and the tunnels hanging below are what this page is
+       about. Routed devices -> tunnel -> exit is the whole claim. */
     map.appendChild(el('div', 'topo__link'));
 
     var br = el('div', 'topo__branch');

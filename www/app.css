@@ -75,10 +75,10 @@ svg{display:block}
   /* A MAROON GROUND, on purpose — this is what makes the glass READ as glass:
      scroll, and each translucent card shows the maroon bleeding through,
      blurred. Bold where the cards overlap it, calmer in the middle. */
-  --m1:rgba(164,52,44,.32);        /* the bright edge of a refracted band */
-  --m2:rgba(198,120,110,.27);      /* the rose one that crosses it */
-  --m3:rgba(140,42,40,.29);        /* the deep one behind both */
-  --m4:rgba(178,72,62,.20);        /* the wash the bands sit in */
+  --m1:rgba(164,52,44,.13);        /* the one band that carries the warmth */
+  --m2:rgba(178,72,62,.09);         /* its quieter echo, further down */
+  --m3:rgba(140,42,40,.07);        /* barely there; it only keeps the ground from being flat */
+  --m4:rgba(178,72,62,.07);        /* the corner it all fades out of */
   --m-vig:rgba(110,36,32,.04);
 
   /* THE CARD is genuinely TRANSLUCENT now (.52), not a near-opaque slab, so the
@@ -123,8 +123,8 @@ svg{display:block}
   --ink:#f6f4f5; --ink-2:rgba(246,244,245,.76); --ink-3:rgba(246,244,245,.58);
   --accent:#d4705f; --accent-2:#e48f7d; --accent-ink:#1b0d0a;
   --ok:#5bd694; --warn:#e8b862; --bad:#ef7f68; --idle:rgba(246,244,245,.34);
-  --m1:rgba(196,62,50,.40); --m2:rgba(132,40,42,.36);
-  --m3:rgba(158,50,46,.36); --m4:rgba(210,88,70,.26); --m-vig:rgba(0,0,0,.30);
+  --m1:rgba(196,62,50,.20); --m2:rgba(210,88,70,.13);
+  --m3:rgba(158,50,46,.10); --m4:rgba(210,88,70,.10); --m-vig:rgba(0,0,0,.30);
   --glass:rgba(58,50,62,.26); --glass-2:rgba(66,58,70,.36); --glass-hi:rgba(255,255,255,.09);
   --card-border:rgba(255,255,255,.14);
   --rim:rgba(255,255,255,.26); --rim-hair:rgba(255,255,255,.10); --rim-lo:rgba(0,0,0,.22);
@@ -136,8 +136,8 @@ svg{display:block}
   --ink:#f6f4f5; --ink-2:rgba(246,244,245,.76); --ink-3:rgba(246,244,245,.58);
   --accent:#d4705f; --accent-2:#e48f7d; --accent-ink:#1b0d0a;
   --ok:#5bd694; --warn:#e8b862; --bad:#ef7f68; --idle:rgba(246,244,245,.34);
-  --m1:rgba(196,62,50,.40); --m2:rgba(132,40,42,.36);
-  --m3:rgba(158,50,46,.36); --m4:rgba(210,88,70,.26); --m-vig:rgba(0,0,0,.30);
+  --m1:rgba(196,62,50,.20); --m2:rgba(210,88,70,.13);
+  --m3:rgba(158,50,46,.10); --m4:rgba(210,88,70,.10); --m-vig:rgba(0,0,0,.30);
   --glass:rgba(58,50,62,.26); --glass-2:rgba(66,58,70,.36); --glass-hi:rgba(255,255,255,.09);
   --card-border:rgba(255,255,255,.14);
   --rim:rgba(255,255,255,.26); --rim-hair:rgba(255,255,255,.10); --rim-lo:rgba(0,0,0,.22);
@@ -145,7 +145,16 @@ svg{display:block}
 }}
 :root[data-theme="light"]{color-scheme:light}
 
-/* THE GROUND: refraction, not polka dots.
+/* THE GROUND: one band of light, and the room it falls in.
+   Three bands at full strength was a page with weather in it — busy enough to
+   pull the eye off the readings, which is the opposite of what a background is
+   for. The colour is a third of what it was and there are two bands rather
+   than three: one warm streak across the upper page, a fainter echo below it,
+   and a corner the whole thing fades out of. A pane crossing the streak still
+   warms, which is the only job this layer has.
+
+   THE ORIGINAL NOTE, kept because the shape is still the reason:
+   refraction, not polka dots.
    It was four maroon discs, and discs are what a blurred blob generator makes —
    they read as decoration sitting behind the page rather than as anything the
    glass is doing. Real glass bends light into BANDS: wide, soft, slightly
@@ -158,19 +167,17 @@ svg{display:block}
    the slow drift never walks an edge into frame. */
 body::before{content:"";position:fixed;inset:-12%;z-index:-2;pointer-events:none;
   background:
-    linear-gradient(104deg, transparent 13%, var(--m1) 21%, transparent 30%),
-    linear-gradient(99deg,  transparent 41%, var(--m3) 50%, transparent 59%),
-    linear-gradient(112deg, transparent 69%, var(--m2) 78%, transparent 88%),
-    radial-gradient(70% 46% at 92% 0%, var(--m4), transparent 70%);
+    linear-gradient(104deg, transparent 16%, var(--m1) 30%, transparent 46%),
+    linear-gradient(110deg, transparent 58%, var(--m2) 74%, transparent 90%),
+    radial-gradient(80% 50% at 94% 0%, var(--m4), transparent 72%);
   animation:drift 44s var(--ease) infinite alternate}
 @media (max-width:760px){
   /* Steeper on a phone: a band crossing a narrow column at a shallow angle is
      a horizontal stripe, which reads as a seam between cards rather than light. */
   body::before{background:
-    linear-gradient(126deg, transparent 11%, var(--m1) 20%, transparent 30%),
-    linear-gradient(119deg, transparent 43%, var(--m3) 53%, transparent 63%),
-    linear-gradient(134deg, transparent 73%, var(--m2) 83%, transparent 94%),
-    radial-gradient(90% 34% at 86% 0%, var(--m4), transparent 72%)}
+    linear-gradient(126deg, transparent 14%, var(--m1) 30%, transparent 48%),
+    linear-gradient(132deg, transparent 62%, var(--m2) 78%, transparent 94%),
+    radial-gradient(110% 36% at 88% 0%, var(--m4), transparent 74%)}
 }
 body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:radial-gradient(130% 100% at 50% 40%,transparent 66%,var(--m-vig) 100%)}
