@@ -13,7 +13,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/apple-touch-icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="stylesheet" href="/app.css?v=a8114b71">
+<link rel="stylesheet" href="/app.css?v=91f66377">
 </head>
 <body>
 <div class="shell">
@@ -164,7 +164,7 @@
 </div>
 <nav class="mobilebar" aria-label="Sections"></nav>
 
-<script src="/os.js?v=f585b2d4"></script>
+<script src="/os.js?v=4f671621"></script>
 <script>
 (function () {
 'use strict';
@@ -1433,7 +1433,7 @@ function detailFor(box, v, d) {
         head.appendChild(OS.chip(OS.GEN[OS.genOf(st)], 'flat'));
         head.appendChild(OS.chip(((st.tx && st.tx.mhz) || 0) + ' MHz', 'flat'));
         var q2 = OS.quality(st.signal);
-        var sc2 = OS.rssiScale(st.signal, true); sc2.style.cssText = 'width:64px;margin-left:auto';
+        var sc2 = OS.rssiScale(st.signal, true); sc2.style.marginLeft = 'auto';
         head.appendChild(sc2);
         head.appendChild(OS.stateWord(q2.word, q2.tone === 'ok' ? 'ok' : q2.tone));
         sec.appendChild(head);

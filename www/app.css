@@ -400,15 +400,18 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 
 /* signal — four ascending bars, iOS-style, tinted by quality. Replaces the
    bar-with-diamond entirely. */
-.sig{display:inline-flex;align-items:flex-end;gap:2.5px;height:16px}
-.sig i{width:3.5px;border-radius:2px;background:var(--idle);transition:background .3s var(--ease)}
-.sig i:nth-child(1){height:36%}.sig i:nth-child(2){height:58%}
-.sig i:nth-child(3){height:80%}.sig i:nth-child(4){height:100%}
-.sig[data-tone="ok"] i.on{background:var(--ok)}
-.sig[data-tone="fair"] i.on{background:var(--ok);opacity:.8}
-.sig[data-tone="warn"] i.on{background:var(--warn)}
-.sig[data-tone="bad"] i.on{background:var(--bad)}
-.sig[data-tone="idle"] i.on{background:var(--idle)}
+/* The Wi-Fi fan. The svg's colour IS the reading; lit arcs take it through
+   currentColor, unlit ones stay at --idle. Same stroke as the icon system. */
+.sig{display:block;flex:none;width:21px;height:17.5px;color:var(--idle)}
+.sig svg{display:block;width:100%;height:100%}
+.sig path{fill:none;stroke:var(--idle);stroke-width:1.9;stroke-linecap:round;
+  transition:stroke .3s var(--ease)}
+.sig circle{fill:var(--idle);transition:fill .3s var(--ease)}
+.sig path.on{stroke:currentColor}
+.sig circle.on{fill:currentColor}
+.sig[data-tone="ok"],.sig[data-tone="fair"]{color:var(--ok)}
+.sig[data-tone="warn"]{color:var(--warn)}
+.sig[data-tone="bad"]{color:var(--bad)}
 
 /* meter — a slim continuous rounded track with an accent/semantic fill and a
    soft cap glow. Not segmented, not a diamond. */
@@ -901,7 +904,7 @@ svg.topo .capon{fill:var(--accent)}
   .row__metric{min-width:0}
   .row__metric .row__num{display:block}
   .row__metric .row__cap{display:none}
-  .sig{height:14px}
+  .sig{width:18px;height:15px}
   .panel__h,.panel__b,.tbl__group,.det{padding-left:var(--s4);padding-right:var(--s4)}
   .topo__branch{margin-left:var(--s5)}
   .topo__node{padding:11px 13px}

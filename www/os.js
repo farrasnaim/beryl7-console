@@ -775,7 +775,7 @@ function act(btn, url, params, opts) {
 /* Rewritten by bump-assets.sh. Hashed over os.css, os.js AND every page, so a
    change confined to one page's inline script moves it — that being the whole
    point, and the change class that produced two wasted debugging sessions. */
-var CONSOLE_VERSION = 'b165a93826';
+var CONSOLE_VERSION = 'd06294cf53';
 
 /* WHY THIS EXISTS AT ALL. bump-assets.sh versions the os.css and os.js URLs
    inside a page, so a changed asset can never be served stale. Nothing versions
@@ -1503,9 +1503,24 @@ function rssiClamp(dbm) { return Math.max(-90, Math.min(-20, dbm || -90)); }
 /* Signal is drawn as four ascending bars — the iOS idiom — tinted by the same
    quality() bands. No axis, no needle: the number of lit bars IS the reading,
    and the colour carries excellent/good/weak/poor. */
+/* Signal as the Wi-Fi mark everyone already reads: a dot and three arcs,
+   lit from the dot outward. Four levels, one colour per reading — green for
+   the top two, amber for two, red for one — the same thresholds quality()
+   uses to choose its word, so the icon and the word can never disagree.
+   The unlit arcs stay faintly drawn: a one-arc signal should look like a
+   weak signal, not like a smaller icon. */
 function rssiScale(dbm, small) {
-    var s = el('div', 'sig');
-    for (var i = 0; i < 4; i++) s.appendChild(el('i'));
+    /* A span around the svg, not the svg itself: callers hide a wired row's
+       icon with `.hidden = true`, and that property exists on HTML elements
+       only — on an <svg> it is a plain expando and the icon stays painted.
+       The first build of this returned the svg bare and every wired device
+       grew a grey fan. */
+    var s = el('span', 'sig');
+    s.appendChild(svg('<svg viewBox="0 0 24 20" aria-hidden="true">' +
+        '<circle cx="12" cy="17.5" r="1.7"/>' +
+        '<path d="M8.17 14.29A5 5 0 0 1 15.83 14.29"/>' +
+        '<path d="M4.72 11.39A9.5 9.5 0 0 1 19.28 11.39"/>' +
+        '<path d="M1.28 8.5A14 14 0 0 1 22.72 8.5"/></svg>'));
     rssiScaleSet(s, dbm);
     return s;
 }
@@ -1514,7 +1529,10 @@ function rssiScaleSet(s, dbm) {
     s.setAttribute('data-tone', q.tone);
     var lit = (dbm == null || dbm === 0) ? 0
         : q.tone === 'ok' ? 4 : q.tone === 'fair' ? 3 : q.tone === 'warn' ? 2 : 1;
-    for (var i = 0; i < 4; i++) s.children[i].className = i < lit ? 'on' : '';
+    /* setAttribute, not className: on an SVG element className is an
+       SVGAnimatedString and assigning a string to it does nothing. */
+    var arcs = s.firstChild.children;
+    for (var i = 0; i < 4; i++) arcs[i].setAttribute('class', i < lit ? 'on' : '');
 }
 
 /* SPECTRUM — the occupied band drawn at true centre and true width on the
