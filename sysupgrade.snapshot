@@ -65,3 +65,5 @@
 /www/favicon.svg
 /www/apple-touch-icon.png
 /etc/init.d/beryl-iperf
+/www/console
+/www/cgi-bin/tools-api

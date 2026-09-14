@@ -94,7 +94,7 @@ rewritten=""
 # would make the hash chase its own tail. Strip both, and the version depends
 # only on content a human actually edited.
 norm() { sed -e 's/?v=[0-9a-f]*//g' -e '/^var CONSOLE_VERSION/d' "$@"; }
-VER=$( { norm app.css os.js; for p in */index.html; do
+VER=$( { norm app.css os.js console/console.css console/core.js console/tiles.js; for p in */index.html; do
              case "$p" in legacy/*) continue ;; esac; norm "$p"; done
        } | md5sum | cut -c1-10 )
 
@@ -106,7 +106,7 @@ VER=$( { norm app.css os.js; for p in */index.html; do
 # unchanged tree rewrites nothing, and a blind sed -i would touch both files on
 # every invocation — the content would be identical, but the promise would not
 # be.
-for f in os.js cgi-bin/version-api; do
+for f in os.js console/core.js cgi-bin/version-api; do
     [ -f "$f" ] || continue
     grep -q "CONSOLE_VERSION *= *'$VER'" "$f" && continue
     grep -q "CONSOLE_VERSION='$VER'" "$f" && continue
@@ -140,6 +140,17 @@ for page in */index.html; do
     fi
 done
 
+# The control grid at /console/ has its own three assets. Same rule: a changed
+# asset is a changed URL. The CSS and both scripts are stamped into its page.
+if [ -f console/index.html ]; then
+    GC=$(hash_of console/console.css); GJ=$(hash_of console/core.js); GT=$(hash_of console/tiles.js)
+    before=$(md5sum console/index.html)
+    sed -i         -e 's|href="console\.css\(?v=[0-9a-f]*\)\?"|href="console.css?v='"$GC"'"|g'         -e 's|src="core\.js\(?v=[0-9a-f]*\)\?"|src="core.js?v='"$GJ"'"|g'         -e 's|src="tiles\.js\(?v=[0-9a-f]*\)\?"|src="tiles.js?v='"$GT"'"|g'         console/index.html
+    after=$(md5sum console/index.html)
+    if [ "$before" != "$after" ]; then
+        echo "  stamped  console/index.html"; changed=$((changed + 1)); rewritten="$rewritten www/console/index.html"
+    fi
+fi
 echo "  app.css=$CSS  os.js=$JS  console version=$VER  ($changed file(s) rewritten)"
 
 # ---- 3. say out loud what must now ship together -----------------------------
