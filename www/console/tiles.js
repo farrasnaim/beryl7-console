@@ -728,14 +728,17 @@ G.tile({
         return { on: up > 0 && up === rs.length, tone: up < rs.filter(function (r) { return !r.disabled; }).length ? 'warn' : null };
     },
     sheet: function (body, api) {
-        var s = api.data.set; if (!s) { body.appendChild(ui.wait(4)); return; }
-        var rs = s.wireless.radios.slice().sort(function (a, b) { return (a.band || '').localeCompare(b.band || ''); });
-        var cur = rs[0] && rs[0].id;
-        var pick = ui.pick(rs.map(function (r) { return { value: r.id, label: G.bandLabel(r.band) }; }), cur, function (v) { cur = v; draw(); }, true);
-        body.appendChild(pick);
-        var pane = el('div'); body.appendChild(pane);
+        var built = false, cur = null, pane = null, isDirty = function () { return false; };
+        function boot() {
+            clear(body); var s = api.data.set;
+            if (!s) { body.appendChild(ui.wait(4)); return; }
+            var rs = s.wireless.radios.slice().sort(function (a, b) { return (a.band || '').localeCompare(b.band || ''); });
+            cur = rs[0] && rs[0].id;
+            body.appendChild(ui.pick(rs.map(function (r) { return { value: r.id, label: G.bandLabel(r.band) }; }), cur, function (v) { cur = v; draw(); }, true));
+            pane = el('div'); body.appendChild(pane); built = true; draw();
+        }
         function draw() {
-            clear(pane);
+            clear(pane); isDirty = function () { return false; };
             var r = api.data.set.wireless.radios.filter(function (x) { return x.id === cur; })[0]; if (!r) return;
             var w = radioWord(r); api.meta(w[0]);
             var live = r.current;
@@ -746,7 +749,7 @@ G.tile({
             var cfgW = parseInt(String(r.htmode).replace(/^[A-Z]+/, ''), 10) || 20;
             if (live && !r.disabled && (String(live.channel) !== String(r.channel) || live.width !== cfgW)) pane.appendChild(ui.say('Running ch ' + live.channel + ' at ' + live.width + ' MHz, configured ch ' + r.channel + ' at ' + cfgW + ' MHz. ' + (r.band === '2g' && live.width < cfgW ? 'Neighbouring 2.4 GHz networks forced the width down.' : 'The radio negotiated it; the configured value is still the target.'), null));
             /* the form */
-            var f = form(api, { onApply: apply, onReset: draw });
+            var f = form(api, { onApply: apply, onReset: draw }); isDirty = f.isDirty;
             var en = ui.check('Radio on', !r.disabled);
             var ssid = ui.input({ value: r.ssid, maxlength: 32 }), key = ui.input({ type: 'password', placeholder: 'unchanged', autocomplete: 'new-password' });
             var chSel = ui.select(r.channels.map(function (c) { return { value: String(c.c), label: c.c + ' · ' + c.f + ' MHz' + (c.dfs ? ' · radar' : '') }; }), String(r.channel));
@@ -779,7 +782,7 @@ G.tile({
                 });
             }
         }
-        draw();
+        boot(); api.on('set', function () { if (!built) boot(); else if (!isDirty()) draw(); });
     }
 });
 
@@ -802,6 +805,9 @@ function secondaryTile(id, net, ic, label, order) {
             return { on: !n.disabled };
         },
         sheet: function (body, api) {
+            if (!api.data.set) { body.appendChild(ui.wait(3)); var once = false; api.on('set', function () { if (!once) { once = true; clear(body); build(); } }); return; }
+            build();
+            function build() {
             var n = secondary(api.data, net); if (!n) { body.appendChild(ui.empty(ic, 'No ' + label.toLowerCase() + ' network', 'Nothing on this router is attached to a network called ' + net + '.')); return; }
             api.meta(n.disabled ? 'off' : 'on');
             var facts = [n.bands.length ? n.bands.map(G.bandLabel).join(' + ') : 'no radio', n.isolate ? 'isolated from the main network' : 'not isolated'];
@@ -822,6 +828,7 @@ function secondaryTile(id, net, ic, label, order) {
                     if (!ok) return;
                     G.act(btn, SET, { action: 'setiot', network: net, enabled: en.input.checked ? '1' : '0', ssid: ssid.value, key: key.value }, { ok: 'Applied.', refresh: ['set', 'dash'], delay: 8000 }).then(function (j) { if (j && j.ok) f.clean(); });
                 });
+            }
             }
         }
     });
@@ -906,9 +913,9 @@ G.tile({
     sheet: function (body, api) {
         var seg = 'health';
         body.appendChild(ui.pick([{ value: 'health', label: 'Health' }, { value: 'network', label: 'Network' }, { value: 'alerts', label: 'Alerts' }, { value: 'router', label: 'Router' }, { value: 'log', label: 'Log' }], seg, function (v) { seg = v; draw(); }, true));
-        var pane = el('div'); body.appendChild(pane); var logTimer = null;
+        var pane = el('div'); body.appendChild(pane); var logTimer = null, isDirty = function () { return false; };
         function draw() {
-            clearTimeout(logTimer); clear(pane);
+            clearTimeout(logTimer); clear(pane); isDirty = function () { return false; };
             if (seg === 'health') return drawHealth(); if (seg === 'network') return drawNetwork(); if (seg === 'alerts') return drawAlerts(); if (seg === 'router') return drawRouter(); return drawLog();
         }
         function drawHealth() {
@@ -931,7 +938,7 @@ G.tile({
         function drawNetwork() {
             var s = api.data.set; if (!s) { pane.appendChild(ui.wait(3)); return; }
             api.meta(s.lan.ipaddr);
-            var lan = s.lan, f = form(api, { onApply: applyLan, onReset: draw });
+            var lan = s.lan, f = form(api, { onApply: applyLan, onReset: draw }); isDirty = f.isDirty;
             var ip = ui.input({ value: lan.ipaddr, inputmode: 'decimal', maxlength: 15 }), start = ui.input({ type: 'number', value: lan.dhcp.start, min: 2, max: 254, inputmode: 'numeric' }), limit = ui.input({ type: 'number', value: lan.dhcp.limit, min: 1, max: 253, inputmode: 'numeric' });
             var lease = ui.select(['30m', '1h', '6h', '12h', '24h', '72h'].map(function (x) { return { value: x, label: ({ '30m': '30 minutes', '1h': '1 hour', '6h': '6 hours', '12h': '12 hours', '24h': '24 hours', '72h': '3 days' })[x] }; }), lan.dhcp.leasetime);
             f.root.appendChild(el('div', 'field__l', 'LAN and DHCP'));
@@ -973,7 +980,7 @@ G.tile({
             var n = s.notify; api.meta(n.enabled ? 'on' : 'off');
             if (n.weak) pane.appendChild(ui.say('The stored address is guessable. Alerts can be switched off with it in place, but not back on until it is replaced — use the service’s generate button.', 'warn'));
             if (n.queued > 0) pane.appendChild(ui.say(fmt.plural(n.queued, 'message') + ' waiting to be delivered — the router could not reach the service. They go as soon as it can.', 'warn'));
-            var f = form(api, { onApply: apply, onReset: draw });
+            var f = form(api, { onApply: apply, onReset: draw }); isDirty = f.isDirty;
             var en = ui.check('Send me a message when something changes', n.enabled);
             var u = ui.input({ type: 'password', value: n.url, placeholder: 'https://ntfy.sh/your-private-topic', autocomplete: 'off' }); u.style.flex = '1 1 200px';
             var row = el('div', 'inline'); row.appendChild(u);
@@ -994,7 +1001,7 @@ G.tile({
             var sys = s.system; api.meta(sys.hostname);
             /* appearance */
             pane.appendChild(ui.field('Appearance', ui.pick([{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }], G.theme.get(), function (v) { G.theme.set(v); }, true), 'Follows the device until you choose here.'));
-            var f = form(api, { onApply: apply, onReset: draw });
+            var f = form(api, { onApply: apply, onReset: draw }); isDirty = f.isDirty;
             var ZONES = ['Asia/Jakarta', 'Asia/Makassar', 'Asia/Jayapura', 'Asia/Singapore', 'Asia/Tokyo', 'Asia/Dubai', 'Europe/London', 'Europe/Amsterdam', 'America/New_York', 'America/Los_Angeles', 'Australia/Sydney', 'UTC'];
             var zopts = ZONES.map(function (z) { return { value: z, label: z.replace(/_/g, ' ') }; }); if (ZONES.indexOf(sys.zonename) < 0 && sys.zonename) zopts.unshift({ value: sys.zonename, label: sys.zonename + ' (as configured)', disabled: true });
             var hn = ui.input({ value: sys.hostname, maxlength: 24 }), tz = ui.select(zopts, sys.zonename);
@@ -1049,6 +1056,7 @@ G.tile({
         }
         draw();
         api.on('dash', function () { if (seg === 'health') draw(); }); api.on('rate', function () { if (seg === 'health') draw(); });
+        api.on('set', function () { if (seg === 'health' || seg === 'log') return; if (!isDirty()) draw(); });
     }
 });
 
@@ -1061,7 +1069,9 @@ G.tile({
         if (!t) { G.face.value(frag, '—'); return; }
         var ev = t.events || [];
         if (!ev.length) { G.face.value(frag, 'Quiet'); G.face.sub(frag, 'nothing in the log yet'); return; }
-        G.face.value(frag, ev[0].time.slice(0, 5), null, null, false);
+        var day = ev[0].day, n = ev.filter(function (e) { return e.day === day; }).length, d = new Date();
+        var today = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + ' ' + d.getDate();
+        G.face.value(frag, String(n), day === today ? (n === 1 ? 'event today' : 'events today') : 'on ' + day);
         G.face.sub(frag, ev.slice(0, 3).map(function (e) { return e.who + ' ' + e.text; }).join(' · '));
         var flaps = ev.filter(function (e) { return e.kind === 'flap'; }).length;
         return { tone: flaps ? 'warn' : null };
@@ -1157,7 +1167,7 @@ function runSteps(steps) {
 
 /* ═══ 13. SPEED TEST · iPerf ══════════════════════════════════════════════ */
 G.tile({
-    id: 'speed', order: 24, label: 'Speed', icon: 'speed',
+    id: 'speed', order: 24, label: 'Speed test', icon: 'speed',
     render: function (frag, X) {
         var t = X.tools, s = X.set;
         G.face.hd(frag, 'speed', 'Speed test');

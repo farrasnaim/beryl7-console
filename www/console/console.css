@@ -23,7 +23,7 @@
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 
   --fs-label:12px; --fs-sub:12.5px; --fs-body:15px;
-  --fs-value:20px; --fs-value-lg:26px; --fs-title:20px; --fs-node:13px;
+  --fs-value:17px; --fs-value-lg:20px; --fs-readout:20px; --fs-title:20px; --fs-node:13px;
 
   --r-tile:22px; --r-sheet:28px; --r-ctl:14px; --r-cell:16px; --r-pill:999px;
   --gap:12px; --pad:16px;
@@ -41,17 +41,17 @@
   --ink-3:rgba(23,22,28,.62);
 
   --accent:#8b2635; --accent-ink:#ffffff;
-  --ok:#1b6a44; --warn:#855609; --bad:#ad2330;
+  --ok:#1b6a44; --warn:#7e5107; --bad:#ad2330;
 
   --pane:rgba(255,255,255,.28);          /* a tile */
-  --pane-2:rgba(255,255,255,.58);        /* the sheet — heavier, on top */
+  --pane-2:rgba(255,255,255,.66);        /* the sheet — heavier, on top */
   --pane-on:color-mix(in srgb,var(--accent) 30%,rgba(255,255,255,.22));
   --edge:rgba(23,22,28,.12);
   --edge-on:color-mix(in srgb,var(--accent) 55%,transparent);
   --spec:rgba(255,255,255,.92);
   --well:rgba(23,22,28,.06);
   --line:rgba(23,22,28,.10);
-  --dim:rgba(20,16,24,.22);
+  --dim:rgba(20,16,24,.30);
 
   --glass:blur(18px) saturate(160%);
   --glass-2:blur(36px) saturate(170%);
@@ -67,11 +67,11 @@
   --ink:#f3f0f2; --ink-2:rgba(243,240,242,.76); --ink-3:rgba(243,240,242,.62);
   --accent:#d9737e; --accent-ink:#1a0b0f;
   --ok:#6fd39b; --warn:#eabb5f; --bad:#f28b8b;
-  --pane:rgba(255,255,255,.07); --pane-2:rgba(24,20,28,.66);
+  --pane:rgba(255,255,255,.07); --pane-2:rgba(24,20,28,.78);
   --pane-on:color-mix(in srgb,var(--accent) 34%,rgba(255,255,255,.05));
   --edge:rgba(255,255,255,.13); --edge-on:color-mix(in srgb,var(--accent) 60%,transparent);
   --spec:rgba(255,255,255,.22); --well:rgba(0,0,0,.28); --line:rgba(255,255,255,.10);
-  --dim:rgba(0,0,0,.34);
+  --dim:rgba(0,0,0,.44);
   --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23f3f0f2' stroke-opacity='.7' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -83,11 +83,11 @@
   --ink:#f3f0f2; --ink-2:rgba(243,240,242,.76); --ink-3:rgba(243,240,242,.62);
   --accent:#d9737e; --accent-ink:#1a0b0f;
   --ok:#6fd39b; --warn:#eabb5f; --bad:#f28b8b;
-  --pane:rgba(255,255,255,.07); --pane-2:rgba(24,20,28,.66);
+  --pane:rgba(255,255,255,.07); --pane-2:rgba(24,20,28,.78);
   --pane-on:color-mix(in srgb,var(--accent) 34%,rgba(255,255,255,.05));
   --edge:rgba(255,255,255,.13); --edge-on:color-mix(in srgb,var(--accent) 60%,transparent);
   --spec:rgba(255,255,255,.22); --well:rgba(0,0,0,.28); --line:rgba(255,255,255,.10);
-  --dim:rgba(0,0,0,.34);
+  --dim:rgba(0,0,0,.44);
   --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23f3f0f2' stroke-opacity='.7' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
 }}
 :root[data-theme="light"]{color-scheme:light}
@@ -121,6 +121,9 @@ svg{display:block}
 button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action:manipulation}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tile,.switch,.act,.node,.cell,.pick,.cap{-webkit-user-select:none;user-select:none}
+/* secondary text on a tinted face is lifted a step: ink-3 falls under 4.5:1 there */
+.tile.is-on .tile__sub,.cell.is-on .cell__s,.cell.is-on .cell__k{color:var(--ink-2)}
+.tile.is-on:focus-visible,.cell.is-on:focus-visible{outline-color:var(--ink)}
 
 /* ─── the glass recipe, once ─────────────────────────────────────────────── */
 .glass{background:var(--pane);border:1px solid var(--edge);
@@ -139,6 +142,7 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
   margin:0 auto;width:max-content;max-width:calc(100% - 32px);
   display:flex;align-items:center;gap:9px;padding:7px 14px 7px 11px;border-radius:var(--r-pill);
   font-size:13px;font-weight:600;letter-spacing:-.01em}
+.cap__t{font:inherit;margin:0;font-size:inherit;font-weight:inherit}
 .cap__mark{width:18px;height:18px;color:var(--accent)}
 .cap__mark svg{width:100%;height:100%}
 .cap__dot{width:7px;height:7px;border-radius:50%;background:var(--ok);margin-left:2px}
@@ -207,7 +211,8 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 /* the connector between nodes: a hairline at icon height */
 .node+.node::before{content:"";position:absolute;left:calc(-50% + 22px);right:calc(50% + 22px);top:23px;
   height:1px;background:var(--line)}
-.node+.node[data-tone="off"]::before{background:repeating-linear-gradient(90deg,var(--line) 0 3px,transparent 3px 7px)}
+.node+.node[data-tone="off"]::before{background:none;height:0;border-top:1px dashed var(--line)}
+@media (max-width:699px){.node__v{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}}
 
 /* ─── the switch (jumps; the only motion in this build is the sheet) ─────── */
 .switch{position:relative;width:50px;height:30px;border-radius:var(--r-pill);flex:none;
@@ -272,7 +277,7 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .readout{padding:12px 14px;border-radius:var(--r-cell);background:var(--pane);border:1px solid var(--edge);
   box-shadow:inset 0 1px 0 var(--spec)}
 .readout__k{font-size:var(--fs-label);color:var(--ink-2);font-weight:500}
-.readout__v{font-size:var(--fs-value);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.2;margin-top:2px}
+.readout__v{font-size:var(--fs-readout);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.2;margin-top:2px}
 .readout__v small{font-size:var(--fs-sub);font-weight:500;color:var(--ink-2);margin-left:3px}
 .readout__s{font-size:var(--fs-label);color:var(--ink-3);margin-top:2px}
 .readout[data-tone="ok"] .readout__v{color:var(--ok)}
@@ -348,8 +353,9 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .sel--inline{padding-right:32px;background-position:right 11px center}
 .ta{min-height:120px;font-family:var(--mono);font-size:13px;line-height:1.45;resize:vertical}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:419px){.row2{grid-template-columns:1fr}}
 .inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.check{display:flex;align-items:center;gap:10px;min-height:28px;margin:0 0 12px;font-size:var(--fs-sub);cursor:pointer}
+.check{display:flex;align-items:center;gap:10px;min-height:40px;margin:0 0 12px;font-size:var(--fs-sub);cursor:pointer}
 .check input{width:18px;height:18px;margin:0;accent-color:var(--accent);flex:none}
 @supports (-webkit-touch-callout:none){.in,.sel,.ta{font-size:16px}}   /* iOS zooms below 16px */
 

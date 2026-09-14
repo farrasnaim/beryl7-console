@@ -11,7 +11,7 @@
 (function () {
 'use strict';
 
-var CONSOLE_VERSION = '25fecb008a';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
+var CONSOLE_VERSION = 'aaa0a8e545';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
 
 var G = window.G = {};
 
@@ -507,8 +507,7 @@ function buildGrid() {
         var t = el('div', 'tile' + (def.wide ? ' tile--wide' : '') + (def.path ? ' tile--path' : '') + (def.toggle ? ' tile--ctl' : ''));
         t.setAttribute('data-tile', def.id);
         if (def.sheet) {
-            t.setAttribute('role', 'button'); t.tabIndex = 0;
-            t.setAttribute('aria-label', def.label + ' — open');
+            t.setAttribute('role', 'button'); t.tabIndex = 0;   /* its text is its name: label, value, note */
             t.addEventListener('click', function () { sheet.open(def.id); });
             t.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sheet.open(def.id); } });
         }

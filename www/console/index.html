@@ -20,7 +20,7 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>Beryl 7</title>
 <script>(function(){var t=null;try{t=localStorage.getItem('b7.theme')}catch(e){}var q=/[?&]theme=(dark|light)/.exec(location.search);if(q)t=q[1];if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
-<link rel="stylesheet" href="console.css?v=97967a8b">
+<link rel="stylesheet" href="console.css?v=aa72bf05">
 </head>
 <body>
 <!-- The stage is everything that recedes when a sheet opens: the capsule and
@@ -28,9 +28,9 @@
      only the frame. -->
 <div class="stage" id="stage">
   <div class="cap__spacer"></div>
-  <header class="cap glass" id="cap" data-link="live" aria-live="polite">
+  <header class="cap glass" id="cap" data-link="live">
     <span class="cap__mark" id="capMark" aria-hidden="true"></span>
-    <span>Beryl 7</span>
+    <h1 class="cap__t">Beryl 7</h1>
     <span class="cap__dot" aria-hidden="true"></span>
     <span class="cap__state" id="capState">live</span>
   </header>
@@ -42,7 +42,7 @@
   <div class="sheet__grab" aria-hidden="true"></div>
   <header class="sheet__hd">
     <span id="sheetIcon" aria-hidden="true"></span>
-    <h1 class="sheet__t" id="sheetTitle"></h1>
+    <h2 class="sheet__t" id="sheetTitle"></h2>
     <span class="sheet__m" id="sheetMeta"></span>
     <button class="sheet__x" id="sheetClose" type="button" aria-label="Close"></button>
   </header>
@@ -53,7 +53,7 @@
 <div class="pops" id="pops" role="status" aria-live="polite"></div>
 
 <script src="/qr-vendor.js"></script>
-<script src="core.js?v=efc30dba"></script>
-<script src="tiles.js?v=f59e2321"></script>
+<script src="core.js?v=9140eba4"></script>
+<script src="tiles.js?v=3b55d16c"></script>
 </body>
 </html>
