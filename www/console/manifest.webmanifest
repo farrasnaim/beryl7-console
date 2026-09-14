@@ -1,0 +1,14 @@
+{
+  "name": "Beryl 7",
+  "short_name": "Beryl 7",
+  "description": "Network console for the Beryl 7 router",
+  "start_url": "/console/",
+  "scope": "/console/",
+  "display": "standalone",
+  "background_color": "#e6e8ed",
+  "theme_color": "#e6e8ed",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

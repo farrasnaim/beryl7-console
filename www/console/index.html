@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#e6e8ed" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#100f14" media="(prefers-color-scheme: dark)">
+<!-- Home-screen mode: opened from the icon it runs full-screen, the capsule
+     sits under the status bar, and there is no Safari chrome. Sheets carry
+     their own close and answer the back gesture through the history entry
+     they push, so nothing depends on browser navigation. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Beryl 7">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="alternate icon" type="image/png" href="/apple-touch-icon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>Beryl 7</title>
+<script>(function(){var t=null;try{t=localStorage.getItem('b7.theme')}catch(e){}var q=/[?&]theme=(dark|light)/.exec(location.search);if(q)t=q[1];if(t!=='light'&&t!=='dark')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
+<link rel="stylesheet" href="console.css?v=97967a8b">
+</head>
+<body>
+<!-- The stage is everything that recedes when a sheet opens: the capsule and
+     the grid. Tiles are built by tiles.js from live data; this file holds
+     only the frame. -->
+<div class="stage" id="stage">
+  <div class="cap__spacer"></div>
+  <header class="cap glass" id="cap" data-link="live" aria-live="polite">
+    <span class="cap__mark" id="capMark" aria-hidden="true"></span>
+    <span>Beryl 7</span>
+    <span class="cap__dot" aria-hidden="true"></span>
+    <span class="cap__state" id="capState">live</span>
+  </header>
+  <main class="grid" id="grid" aria-label="Router controls"></main>
+</div>
+
+<div class="veil" id="veil" hidden></div>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+  <div class="sheet__grab" aria-hidden="true"></div>
+  <header class="sheet__hd">
+    <span id="sheetIcon" aria-hidden="true"></span>
+    <h1 class="sheet__t" id="sheetTitle"></h1>
+    <span class="sheet__m" id="sheetMeta"></span>
+    <button class="sheet__x" id="sheetClose" type="button" aria-label="Close"></button>
+  </header>
+  <div class="sheet__bd" id="sheetBody"></div>
+  <footer class="sheet__ft" id="sheetFoot" hidden></footer>
+</section>
+
+<div class="pops" id="pops" role="status" aria-live="polite"></div>
+
+<script src="/qr-vendor.js"></script>
+<script src="core.js?v=efc30dba"></script>
+<script src="tiles.js?v=f59e2321"></script>
+</body>
+</html>

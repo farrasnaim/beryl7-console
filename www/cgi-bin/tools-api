@@ -1,0 +1,178 @@
+#!/bin/sh
+# /www/cgi-bin/tools-api  —  the four things the control grid needed that no
+# existing endpoint answered: the activity feed, a speed test, the guest QR
+# payload, and the travel-mode flag.
+#
+# READ-ONLY EXCEPT WHERE SAID. `activity` and `guestqr` read; `speedtest`
+# downloads and writes one small file in /tmp; `travel` writes one config file
+# in /etc/dashboard. Nothing here touches wireless, firewall, services or uci
+# state: travel mode's switching of networks and routing is done by the page
+# through the endpoints that already own those actions (settings-api,
+# vpn-api), so no new reload path exists on the router because of this file.
+
+BERYL_LIB=/usr/share/beryl/cgi-lib.sh
+if [ -r "$BERYL_LIB" ]; then
+    . "$BERYL_LIB"
+else
+    printf 'Content-Type: application/json\r\n'
+    printf 'Cache-Control: no-store\r\n\r\n'
+    printf '{"ok":false,"error":"missing %s - reinstall the console"}' "$BERYL_LIB"
+    exit 0
+fi
+
+CLASSMAP=/etc/dashboard/classmap
+LEASES=/tmp/dhcp.leases
+TRAVELCONF=/etc/dashboard/travel.conf
+SPEEDLAST=/tmp/.speedlast
+SPEEDLOCK=/tmp/.speedtest.lock
+
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+read_body
+ACTION=$(qs_get action)
+case "$ACTION" in
+    ""|activity|guestqr|travel) ;;
+    *) [ "$REQUEST_METHOD" = "POST" ] || fail "POST required" ;;
+esac
+[ "$REQUEST_METHOD" = "POST" ] && guard_post
+
+# ---------------------------------------------------------------- travel --
+# The flag and what was true before it was set, so switching off can put
+# things back. Parsed, never sourced.
+travel_json() {
+    TRAVEL_ON=0; TRAVEL_SINCE=0; TRAVEL_GUEST_WAS=""; TRAVEL_IOT_WAS=""; TRAVEL_VPN_WAS=""
+    conf_load "$TRAVELCONF" >/dev/null 2>&1
+    case "$TRAVEL_ON" in 1) _ton=true ;; *) _ton=false ;; esac
+    printf '{"on":%s,"since":%s,"guest_was":"%s","iot_was":"%s","vpn_was":"%s"}' \
+        "$_ton" "$(jnum "$TRAVEL_SINCE")" "$(esc "$TRAVEL_GUEST_WAS")" "$(esc "$TRAVEL_IOT_WAS")" "$(esc "$TRAVEL_VPN_WAS")"
+}
+if [ "$ACTION" = "travel" ] && [ "$REQUEST_METHOD" = "POST" ]; then
+    TON=$(qs_get on)
+    case "$TON" in 0|1) ;; *) fail "on must be 0 or 1" ;; esac
+    GW=$(qs_get guest_was | tr -cd '01'); IW=$(qs_get iot_was | tr -cd '01'); VW=$(qs_get vpn_was | tr -cd '01')
+    if [ "$TON" = "1" ]; then
+        _since=$(date +%s)
+    else
+        _since=0; GW=""; IW=""; VW=""
+    fi
+    _new=$(printf 'TRAVEL_ON=%s\nTRAVEL_SINCE=%s\nTRAVEL_GUEST_WAS=%s\nTRAVEL_IOT_WAS=%s\nTRAVEL_VPN_WAS=%s\nX' "$TON" "$_since" "$GW" "$IW" "$VW")
+    _new=${_new%X}
+    mkdir -p /etc/dashboard
+    rm -f "$TRAVELCONF.tmp"
+    printf '%s' "$_new" > "$TRAVELCONF.tmp" 2>/dev/null || { rm -f "$TRAVELCONF.tmp"; fail "could not write $TRAVELCONF"; }
+    _w=$(wc -c < "$TRAVELCONF.tmp"); _w=${_w##* }
+    [ "$_w" = "${#_new}" ] || { rm -f "$TRAVELCONF.tmp"; fail "could not write $TRAVELCONF"; }
+    mv -f "$TRAVELCONF.tmp" "$TRAVELCONF" || fail "could not write $TRAVELCONF"
+    logger -t tools "travel mode $([ "$TON" = 1 ] && echo on || echo off) via web UI"
+    printf '{"ok":true,"travel":%s}' "$(travel_json)"
+    exit 0
+fi
+if [ "$ACTION" = "travel" ]; then
+    printf '{"ok":true,"travel":%s}' "$(travel_json)"
+    exit 0
+fi
+
+# --------------------------------------------------------------- guestqr --
+# The string a phone camera understands, plus the parts for the page to show.
+# The passphrase leaves the router here, to anyone on the main network with
+# no login — which is the console's stated boundary, and the same person can
+# read it in LuCI. Guest and IoT zones cannot reach this endpoint at all.
+if [ "$ACTION" = "guestqr" ]; then
+    _sid=""; _key=""; _enc=""; _dis=1
+    for _s in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+        [ "$(uci -q get wireless.$_s.network)" = "guest" ] || continue
+        _sid=$(uci -q get wireless.$_s.ssid); _key=$(uci -q get wireless.$_s.key)
+        _enc=$(uci -q get wireless.$_s.encryption); _dis=$(uci -q get wireless.$_s.disabled); _dis=${_dis:-0}
+        break
+    done
+    [ -n "$_sid" ] || { printf '{"ok":true,"present":false}'; exit 0; }
+    case "$_enc" in none|owe*) _t="nopass" ;; *) _t="WPA" ;; esac
+    # WIFI: escapes \ ; , " : with a backslash
+    _qesc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/;/\\;/g; s/,/\\,/g; s/"/\\"/g; s/:/\\:/g'; }
+    _wifi="WIFI:T:$_t;S:$(_qesc "$_sid");"
+    [ "$_t" = "nopass" ] || _wifi="${_wifi}P:$(_qesc "$_key");"
+    _wifi="${_wifi};"
+    printf '{"ok":true,"present":true,"enabled":%s,"ssid":"%s","key":"%s","wifi":"%s"}' \
+        "$([ "$_dis" = 1 ] && echo false || echo true)" "$(esc "$_sid")" "$(esc "$_key")" "$(esc "$_wifi")"
+    exit 0
+fi
+
+# ------------------------------------------------------------- speedtest --
+# Download a fixed number of bytes from Cloudflare's speed endpoint and time it
+# with /proc/uptime (centiseconds; busybox date has no %N). Download only: an
+# upload test needs a body this router would have to generate and hold, and
+# the number people mean by "my speed" is the down one. Honest about what it
+# is — one TCP stream to one CDN, from the router itself — so it measures the
+# uplink, not any client's Wi-Fi.
+if [ "$ACTION" = "speedtest" ]; then
+    B=$(qs_get bytes); case "$B" in ''|*[!0-9]*) B=25000000 ;; esac
+    [ "$B" -ge 1000000 ] && [ "$B" -le 100000000 ] || B=25000000
+    if [ -f "$SPEEDLOCK" ]; then
+        _lp=$(cat "$SPEEDLOCK" 2>/dev/null)
+        if [ -n "$_lp" ] && [ -d "/proc/$_lp" ]; then fail "a test is already running"; fi
+    fi
+    printf '%s' "$$" > "$SPEEDLOCK"
+    _t0=$(cut -d' ' -f1 /proc/uptime)
+    wget -q -O /dev/null -T 20 "https://speed.cloudflare.com/__down?bytes=$B" 2>/dev/null
+    _rc=$?
+    _t1=$(cut -d' ' -f1 /proc/uptime)
+    rm -f "$SPEEDLOCK"
+    [ "$_rc" = 0 ] || fail "the download did not complete — is the internet reachable?"
+    _res=$(awk -v a="$_t0" -v b="$_t1" -v n="$B" 'BEGIN{d=b-a; if(d<0.05)d=0.05; printf "%.1f %.2f", n*8/d/1e6, d}')
+    _mbps=${_res% *}; _secs=${_res#* }
+    _at=$(date +%s)
+    printf 'SPEED_MBPS=%s\nSPEED_SECS=%s\nSPEED_BYTES=%s\nSPEED_AT=%s\n' "$_mbps" "$_secs" "$B" "$_at" > "$SPEEDLAST" 2>/dev/null
+    logger -t tools "speed test: $_mbps Mbit/s down ($B bytes in ${_secs}s) via web UI"
+    printf '{"ok":true,"mbps":%s,"seconds":%s,"bytes":%s,"at":%s}' "$_mbps" "$_secs" "$B" "$_at"
+    exit 0
+fi
+
+# -------------------------------------------------------------- activity --
+# The last things that happened, newest first, named. Read from the ring
+# buffer rather than from a file this console would have to keep: the log
+# already holds every join, leave, uplink change and console action, and
+# reading it costs one logread, which the Settings page already does.
+speed_json() {
+    SPEED_MBPS=""; SPEED_AT=""; SPEED_SECS=""; SPEED_BYTES=""
+    if [ -r "$SPEEDLAST" ]; then
+        while IFS= read -r _l; do
+            case "$_l" in
+                SPEED_MBPS=*) SPEED_MBPS=${_l#*=} ;; SPEED_AT=*) SPEED_AT=${_l#*=} ;;
+                SPEED_SECS=*) SPEED_SECS=${_l#*=} ;; SPEED_BYTES=*) SPEED_BYTES=${_l#*=} ;;
+            esac
+        done < "$SPEEDLAST"
+    fi
+    case "$SPEED_MBPS" in ''|*[!0-9.]*) printf 'null'; return ;; esac
+    printf '{"mbps":%s,"at":%s,"seconds":%s,"bytes":%s}' "$SPEED_MBPS" "$(jnum "$SPEED_AT")" "$(jnum "${SPEED_SECS%.*}")" "$(jnum "$SPEED_BYTES")"
+}
+
+N=$(qs_get n); case "$N" in ''|*[!0-9]*) N=60 ;; esac; [ "$N" -gt 200 ] && N=200
+printf '{"ok":true,"now":%s,"travel":%s,"speed":%s,"events":[' "$(date +%s)" "$(travel_json)" "$(speed_json)"
+# classmap: MAC|Name|class|ip|zone ; leases: expiry MAC ip hostname clientid
+logread 2>/dev/null | tail -n 600 | awk -v N="$N" -v CM="$CLASSMAP" -v LZ="$LEASES" '
+function esc(s){ gsub(/\\/,"\\\\",s); gsub(/"/,"\\\"",s); gsub(/[\001-\037\177]/,"",s); return s }
+function nameof(m,  n){ m=tolower(m); if (m in NAME) return NAME[m]; if (m in HOST) return HOST[m]; return toupper(m) }
+BEGIN{
+  while ((getline l < CM) > 0) { if (l ~ /^#/ || l == "") continue; split(l, f, "|"); if (f[1] != "" && f[2] != "") NAME[tolower(f[1])] = f[2] }
+  close(CM)
+  while ((getline l < LZ) > 0) { split(l, f, " "); if (f[2] != "" && f[4] != "" && f[4] != "*") HOST[tolower(f[2])] = f[4] }
+  close(LZ)
+  n=0
+}
+{
+  # "Tue Sep 15 00:56:40 2026 daemon.notice hostapd: phy0.1-ap0: AP-STA-CONNECTED 70:13:84:47:31:bf auth_alg=sae"
+  day=$2" "$3; t=$4; kind=""; who=""; text=""; tone=""; band=""
+  if ($0 ~ /AP-STA-CONNECTED/) { kind="join"; mac=$(NF-1); if (mac !~ /:/) mac=$NF; who=nameof(mac); band=($6 ~ /phy0\.1/) ? "5 GHz" : "2.4 GHz"; if ($6 ~ /ap1/) band="IoT"; text="joined on " band; tone="ok" }
+  else if ($0 ~ /AP-STA-DISCONNECTED/) { kind="leave"; mac=$NF; who=nameof(mac); band=($6 ~ /phy0\.1/) ? "5 GHz" : "2.4 GHz"; if ($6 ~ /ap1/) band="IoT"; text="left " band; tone="" }
+  else if ($0 ~ /wifiwatch: flapping:/) { kind="flap"; mac=$8; who=nameof(mac); text="keeps dropping"; tone="warn" }
+  else if ($0 ~ /Interface .[a-z0-9]+. is now (up|down)/) { kind="uplink"; who=$0; sub(/.*Interface ./,"",who); sub(/. is now.*/,"",who); text=($0 ~ /now up/) ? "came up" : "went down"; tone=($0 ~ /now up/) ? "ok" : "bad"; if (who == "lan" || who == "loopback" || who == "iot" || who == "guest") next }
+  else if ($0 ~ / settings: /) { kind="change"; who="Settings"; text=$0; sub(/.* settings: /,"",text); tone="" }
+  else if ($0 ~ / tools: /) { kind="change"; who="Console"; text=$0; sub(/.* tools: /,"",text); tone="" }
+  else if ($0 ~ / notifymon: /) { kind="alert"; who="Alert"; text=$0; sub(/.* notifymon: /,"",text); tone="warn" }
+  else if ($0 ~ / beryl-iperf: /) { kind="change"; who="iPerf"; text=$0; sub(/.* beryl-iperf: /,"",text); tone="" }
+  else next
+  n++; E[n]=sprintf("{\"day\":\"%s\",\"time\":\"%s\",\"kind\":\"%s\",\"who\":\"%s\",\"text\":\"%s\",\"tone\":\"%s\"}", esc(day), esc(t), kind, esc(who), esc(text), tone)
+}
+END{ c=0; for (i=n; i>=1 && c<N; i--) { printf "%s%s", (c?",":""), E[i]; c++ } }'
+printf ']}'

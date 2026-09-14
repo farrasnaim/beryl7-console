@@ -423,7 +423,7 @@ conf_load() {
         # union rather than a loop over a variable, because splitting a list
         # here would depend on IFS - and IFS is one of the names being kept out.
         case "$_ck" in
-            NOTIFY_*|MSG_*|IPERF_*) ;;
+            NOTIFY_*|MSG_*|IPERF_*|TRAVEL_*) ;;
             *) continue ;;                              # not a key we own
         esac
         _cv=${_cl#*=}

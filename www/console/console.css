@@ -1,0 +1,443 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   console.css — the Beryl 7 control grid.
+
+   A new system with no lineage. The router is a panel of glass instruments:
+   one grid of tiles, one sheet. Every tile is a live reading and the way into
+   its depth. There are no pages, no sidebar, no section headings, no tabs.
+
+   THE MATERIAL IS THE ONLY THING INHERITED, and it is held to a stricter rule
+   than before: a pane is translucent or it is not a pane. Fills sit between
+   .07 and .30 alpha, so with every blur stripped the grid still reads as clear
+   glass over a lit ground — never as flat rectangles. Depth is two glass
+   layers stacked (the sheet over the receded grid), and a 1px specular inset
+   edge is the whole boundary. There is no drop shadow in this file.
+
+   ONE MOTION: the sheet rising as the grid recedes. Nothing else animates or
+   transitions — values swap, switches jump, toasts appear. That is a rule,
+   not an omission.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── tokens ─────────────────────────────────────────────────────────────── */
+:root{
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+
+  --fs-label:12px; --fs-sub:12.5px; --fs-body:15px;
+  --fs-value:20px; --fs-value-lg:26px; --fs-title:20px; --fs-node:13px;
+
+  --r-tile:22px; --r-sheet:28px; --r-ctl:14px; --r-cell:16px; --r-pill:999px;
+  --gap:12px; --pad:16px;
+
+  --ease:cubic-bezier(.2,.8,.2,1); --dur:420ms;
+
+  /* light — the default face; the scene is a phone in daylight */
+  --ground:#e6e8ed;
+  --g-warm:rgba(139,38,53,.20);
+  --g-glow:rgba(255,255,255,.55);
+  --g-cool:rgba(72,86,124,.18);
+
+  --ink:#17161c;
+  --ink-2:rgba(23,22,28,.74);
+  --ink-3:rgba(23,22,28,.62);
+
+  --accent:#8b2635; --accent-ink:#ffffff;
+  --ok:#1b6a44; --warn:#855609; --bad:#ad2330;
+
+  --pane:rgba(255,255,255,.28);          /* a tile */
+  --pane-2:rgba(255,255,255,.58);        /* the sheet — heavier, on top */
+  --pane-on:color-mix(in srgb,var(--accent) 30%,rgba(255,255,255,.22));
+  --edge:rgba(23,22,28,.12);
+  --edge-on:color-mix(in srgb,var(--accent) 55%,transparent);
+  --spec:rgba(255,255,255,.92);
+  --well:rgba(23,22,28,.06);
+  --line:rgba(23,22,28,.10);
+  --dim:rgba(20,16,24,.22);
+
+  --glass:blur(18px) saturate(160%);
+  --glass-2:blur(36px) saturate(170%);
+
+  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%2317161c' stroke-opacity='.65' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#100f14;
+  --g-warm:rgba(217,115,126,.22);
+  --g-glow:rgba(139,38,53,.38);
+  --g-cool:rgba(70,80,124,.26);
+  --ink:#f3f0f2; --ink-2:rgba(243,240,242,.76); --ink-3:rgba(243,240,242,.62);
+  --accent:#d9737e; --accent-ink:#1a0b0f;
+  --ok:#6fd39b; --warn:#eabb5f; --bad:#f28b8b;
+  --pane:rgba(255,255,255,.07); --pane-2:rgba(24,20,28,.66);
+  --pane-on:color-mix(in srgb,var(--accent) 34%,rgba(255,255,255,.05));
+  --edge:rgba(255,255,255,.13); --edge-on:color-mix(in srgb,var(--accent) 60%,transparent);
+  --spec:rgba(255,255,255,.22); --well:rgba(0,0,0,.28); --line:rgba(255,255,255,.10);
+  --dim:rgba(0,0,0,.34);
+  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23f3f0f2' stroke-opacity='.7' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --ground:#100f14;
+  --g-warm:rgba(217,115,126,.22);
+  --g-glow:rgba(139,38,53,.38);
+  --g-cool:rgba(70,80,124,.26);
+  --ink:#f3f0f2; --ink-2:rgba(243,240,242,.76); --ink-3:rgba(243,240,242,.62);
+  --accent:#d9737e; --accent-ink:#1a0b0f;
+  --ok:#6fd39b; --warn:#eabb5f; --bad:#f28b8b;
+  --pane:rgba(255,255,255,.07); --pane-2:rgba(24,20,28,.66);
+  --pane-on:color-mix(in srgb,var(--accent) 34%,rgba(255,255,255,.05));
+  --edge:rgba(255,255,255,.13); --edge-on:color-mix(in srgb,var(--accent) 60%,transparent);
+  --spec:rgba(255,255,255,.22); --well:rgba(0,0,0,.28); --line:rgba(255,255,255,.10);
+  --dim:rgba(0,0,0,.34);
+  --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23f3f0f2' stroke-opacity='.7' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+}}
+:root[data-theme="light"]{color-scheme:light}
+
+/* ─── reset & ground ─────────────────────────────────────────────────────── */
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;caret-color:var(--accent);
+  scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--ink) 26%,transparent) transparent;
+  -webkit-tap-highlight-color:transparent}
+body{margin:0;min-height:100vh;min-height:100svh;font-family:var(--font);font-size:var(--fs-body);
+  line-height:1.45;color:var(--ink);background:var(--ground);letter-spacing:-.005em;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+/* The ground: a fixed field the grid scrolls over. Warm at the top, a soft
+   glow off to one side, cooler toward the foot — so a tile passing any point
+   of the page shows a different colour through it, which is how you know it
+   is glass. Static. */
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(70% 45% at 82% -6%, var(--g-glow), transparent 70%),
+    linear-gradient(180deg, var(--g-warm) 0%, transparent 46%),
+    linear-gradient(206deg, transparent 40%, var(--g-cool) 100%)}
+h1,h2,h3,p,dl,dd,figure{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:0;padding:0;cursor:pointer}
+a{color:inherit;text-decoration:none}
+svg{display:block}
+[hidden]{display:none!important}
+.num{font-variant-numeric:tabular-nums;letter-spacing:0}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+::selection{background:color-mix(in srgb,var(--accent) 28%,transparent)}
+button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action:manipulation}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tile,.switch,.act,.node,.cell,.pick,.cap{-webkit-user-select:none;user-select:none}
+
+/* ─── the glass recipe, once ─────────────────────────────────────────────── */
+.glass{background:var(--pane);border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 var(--spec);
+  -webkit-backdrop-filter:var(--glass);backdrop-filter:var(--glass)}
+
+/* ─── the stage: everything that recedes when a sheet opens ──────────────── */
+.stage{transform-origin:50% 40%;padding-bottom:calc(40px + env(safe-area-inset-bottom))}
+.stage.is-back{transform:scale(.965);opacity:.78}
+@media (prefers-reduced-motion:no-preference){
+  .stage{transition:transform var(--dur) var(--ease),opacity var(--dur) var(--ease)}
+}
+
+/* ─── the capsule: the only fixed chrome ─────────────────────────────────── */
+.cap{position:sticky;top:calc(env(safe-area-inset-top) + 10px);z-index:20;
+  margin:0 auto;width:max-content;max-width:calc(100% - 32px);
+  display:flex;align-items:center;gap:9px;padding:7px 14px 7px 11px;border-radius:var(--r-pill);
+  font-size:13px;font-weight:600;letter-spacing:-.01em}
+.cap__mark{width:18px;height:18px;color:var(--accent)}
+.cap__mark svg{width:100%;height:100%}
+.cap__dot{width:7px;height:7px;border-radius:50%;background:var(--ok);margin-left:2px}
+.cap[data-link="stale"] .cap__dot,.cap[data-link="down"] .cap__dot{background:var(--warn)}
+.cap__state{font-size:var(--fs-label);font-weight:500;color:var(--ink-2)}
+.cap__spacer{height:calc(env(safe-area-inset-top) + 10px)}
+
+/* ─── the grid ───────────────────────────────────────────────────────────── */
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--gap);
+  padding:18px var(--pad) 0;max-width:1180px;margin:0 auto}
+@media (min-width:700px){.grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;padding-top:22px}}
+@media (min-width:1100px){.grid{grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;padding:26px 24px 0}}
+
+/* ─── a tile ─────────────────────────────────────────────────────────────── */
+.tile{position:relative;display:flex;flex-direction:column;justify-content:space-between;gap:6px;
+  min-height:0;max-height:200px;aspect-ratio:1/1;padding:14px 14px 13px;border-radius:var(--r-tile);
+  text-align:left;color:var(--ink);overflow:hidden;
+  background:var(--pane);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--spec);
+  -webkit-backdrop-filter:var(--glass);backdrop-filter:var(--glass)}
+.tile--wide{grid-column:span 2;aspect-ratio:2/1}
+.tile--path{grid-column:1 / -1;aspect-ratio:auto;min-height:0;max-height:none}
+@media (min-width:700px){.tile--path{grid-column:span 4}}
+@media (min-width:1100px){.tile--path{grid-column:span 3}}
+.tile:active{background:color-mix(in srgb,var(--pane) 70%,var(--well))}
+/* the on-state: the face itself takes the accent. No dot. */
+.tile.is-on{background:var(--pane-on);border-color:var(--edge-on)}
+.tile.is-off .tile__value,.tile.is-off .tile__sub{color:var(--ink-3)}
+.tile__hd{display:flex;align-items:center;gap:6px;min-height:18px;
+  font-size:var(--fs-label);font-weight:500;color:var(--ink-2);letter-spacing:0}
+.tile__hd svg{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.75;
+  stroke-linecap:round;stroke-linejoin:round}
+.tile.is-on .tile__hd{color:var(--ink)}
+.tile__hd .push{margin-left:auto}
+.tile__value{font-size:var(--fs-value);font-weight:600;line-height:1.15;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tile__value--lg{font-size:var(--fs-value-lg)}
+.tile__value small{font-size:var(--fs-sub);font-weight:500;color:var(--ink-2);margin-left:3px;letter-spacing:0}
+.tile__sub{font-size:var(--fs-sub);color:var(--ink-2);line-height:1.3;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tile__foot{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;min-height:20px}
+.tile__foot .tile__sub{-webkit-line-clamp:1}
+/* semantic colour appears on a word, and is always beside one */
+.tile__value[data-tone="ok"],.tile__sub[data-tone="ok"]{color:var(--ok)}
+.tile__value[data-tone="warn"],.tile__sub[data-tone="warn"]{color:var(--warn)}
+.tile__value[data-tone="bad"],.tile__sub[data-tone="bad"]{color:var(--bad)}
+/* a tile that is only ever a control still shows what it controls */
+.tile__ctl{position:absolute;right:12px;top:12px}
+.tile--ctl .tile__hd{padding-right:60px}
+
+/* ─── the path: three nodes in a dashed frame ────────────────────────────── */
+.tile--path{padding:12px 14px;border-style:dashed;justify-content:center}
+.nodes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:0;position:relative}
+.node{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;position:relative;
+  padding:6px 4px 2px;border-radius:var(--r-cell);min-width:0}
+.node:active{background:var(--well)}
+.node__ico{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
+  background:var(--pane);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--spec);color:var(--ink-2)}
+.node__ico svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.node[data-tone="ok"] .node__ico{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.node[data-tone="bad"] .node__ico{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.node[data-tone="off"] .node__ico{color:var(--ink-3);border-style:dashed}
+.node__k{font-size:var(--fs-label);color:var(--ink-2)}
+.node__v{font-size:var(--fs-node);font-weight:600;line-height:1.2;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.node[data-tone="off"] .node__v{color:var(--ink-3);font-weight:500}
+/* the connector between nodes: a hairline at icon height */
+.node+.node::before{content:"";position:absolute;left:calc(-50% + 22px);right:calc(50% + 22px);top:23px;
+  height:1px;background:var(--line)}
+.node+.node[data-tone="off"]::before{background:repeating-linear-gradient(90deg,var(--line) 0 3px,transparent 3px 7px)}
+
+/* ─── the switch (jumps; the only motion in this build is the sheet) ─────── */
+.switch{position:relative;width:50px;height:30px;border-radius:var(--r-pill);flex:none;
+  background:var(--well);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--spec)}
+.switch::before{content:"";position:absolute;inset:-7px}                 /* 44px hit box */
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:24px;height:24px;border-radius:50%;
+  background:var(--spec);box-shadow:inset 0 0 0 .5px var(--edge)}
+.switch[aria-checked="true"]{background:var(--accent);border-color:transparent}
+.switch[aria-checked="true"]::after{left:auto;right:2px;background:#fff}
+.switch:disabled{opacity:.45;cursor:default}
+
+/* ─── the sheet: the second glass layer ──────────────────────────────────── */
+.veil{position:fixed;inset:0;z-index:50;background:var(--dim);opacity:0;pointer-events:none}
+.veil.is-open{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;flex-direction:column;
+  max-height:min(92dvh,92vh);border-radius:var(--r-sheet) var(--r-sheet) 0 0;
+  background:var(--pane-2);border:1px solid var(--edge);border-bottom:0;
+  box-shadow:inset 0 1px 0 var(--spec);
+  -webkit-backdrop-filter:var(--glass-2);backdrop-filter:var(--glass-2);
+  transform:translateY(102%);visibility:hidden}
+.sheet.is-open{transform:none;visibility:visible}
+@media (prefers-reduced-motion:no-preference){
+  .veil{transition:opacity var(--dur) var(--ease)}
+  .sheet{transition:transform var(--dur) var(--ease),visibility 0s linear var(--dur)}
+  .sheet.is-open{transition:transform var(--dur) var(--ease),visibility 0s}
+}
+.sheet__grab{width:38px;height:5px;border-radius:3px;background:color-mix(in srgb,var(--ink) 22%,transparent);
+  margin:8px auto 0;flex:none}
+.sheet__hd{display:flex;align-items:center;gap:12px;padding:12px 20px 6px;flex:none}
+.sheet__hd svg.ico{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;color:var(--accent);flex:none}
+.sheet__t{font-size:var(--fs-title);font-weight:600;letter-spacing:-.02em;line-height:1.2;flex:1;min-width:0}
+.sheet__m{font-size:var(--fs-label);color:var(--ink-2);font-weight:500}
+.sheet__x{position:relative;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex:none;
+  background:var(--well);border:1px solid var(--edge);color:var(--ink-2)}
+.sheet__x::before{content:"";position:absolute;inset:-5px}
+.sheet__x svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+.sheet__bd{overflow:auto;-webkit-overflow-scrolling:touch;padding:6px 20px calc(22px + env(safe-area-inset-bottom));
+  overscroll-behavior:contain;flex:1 1 auto;min-height:0}
+.sheet__ft{flex:none;display:flex;gap:8px;justify-content:flex-end;align-items:center;
+  padding:12px 20px calc(14px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+.sheet__ft .push{margin-right:auto}
+@media (min-width:1100px){
+  .stage.is-back{transform:translateX(-1.5%) scale(.985)}
+  .sheet{left:auto;right:18px;top:18px;bottom:18px;width:min(540px,calc(100% - 36px));max-height:none;
+    border-radius:var(--r-sheet);border-bottom:1px solid var(--edge);transform:translateX(104%)}
+  .sheet.is-open{transform:none}
+  .sheet__grab{display:none}
+  .sheet__hd{padding-top:20px}
+}
+
+/* ─── inside a sheet ─────────────────────────────────────────────────────── */
+.pick{display:inline-flex;padding:3px;gap:2px;border-radius:var(--r-pill);background:var(--well);
+  border:1px solid var(--edge);margin:6px 0 14px;max-width:100%;overflow:auto;scrollbar-width:none}
+.pick>button{padding:7px 13px;border-radius:var(--r-pill);font-size:var(--fs-sub);font-weight:600;
+  color:var(--ink-2);white-space:nowrap;position:relative}
+.pick>button::before{content:"";position:absolute;inset:-6px 0}
+.pick>button[aria-pressed="true"]{background:var(--pane-2);color:var(--ink);box-shadow:inset 0 1px 0 var(--spec)}
+.pick--fill{display:flex}.pick--fill>button{flex:1}
+
+/* readout: a label over a big number — the instrument, in a sheet */
+.readouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:4px 0 14px}
+.readout{padding:12px 14px;border-radius:var(--r-cell);background:var(--pane);border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 var(--spec)}
+.readout__k{font-size:var(--fs-label);color:var(--ink-2);font-weight:500}
+.readout__v{font-size:var(--fs-value);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.2;margin-top:2px}
+.readout__v small{font-size:var(--fs-sub);font-weight:500;color:var(--ink-2);margin-left:3px}
+.readout__s{font-size:var(--fs-label);color:var(--ink-3);margin-top:2px}
+.readout[data-tone="ok"] .readout__v{color:var(--ok)}
+.readout[data-tone="warn"] .readout__v{color:var(--warn)}
+.readout[data-tone="bad"] .readout__v{color:var(--bad)}
+
+/* cells: a grid of compact cards (devices, tunnels, networks) */
+.cells{display:grid;grid-template-columns:repeat(auto-fill,minmax(156px,1fr));gap:10px;margin:2px 0 16px}
+.cell{position:relative;display:flex;flex-direction:column;gap:6px;padding:12px 12px 11px;text-align:left;
+  border-radius:var(--r-cell);background:var(--pane);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--spec);
+  color:var(--ink);min-height:96px}
+.cell:active{background:color-mix(in srgb,var(--pane) 70%,var(--well))}
+.cell.is-on{background:var(--pane-on);border-color:var(--edge-on)}
+.cell.is-dim{opacity:.62}
+.cell__top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:18px}
+.cell__k{font-size:var(--fs-label);color:var(--ink-2);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cell__t{font-size:var(--fs-body);font-weight:600;line-height:1.25;letter-spacing:-.01em;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cell__s{font-size:var(--fs-label);color:var(--ink-3);line-height:1.3;margin-top:auto;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cell__s b{color:var(--ink-2);font-weight:600}
+
+/* lines: a plain vertical list where cells would be too much (log, feed, kv) */
+.lines{margin:2px 0 14px}
+.line{display:flex;align-items:baseline;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:var(--fs-sub)}
+.line:first-child{border-top:0}
+.line__t{font-variant-numeric:tabular-nums;color:var(--ink-3);flex:none;min-width:44px}
+.line__b{flex:1;min-width:0;color:var(--ink);overflow-wrap:anywhere}
+.line__b b{font-weight:600}
+.line__e{flex:none;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.line[data-tone="ok"] .line__e,.line[data-tone="ok"] .line__b b{color:var(--ok)}
+.line[data-tone="warn"] .line__e{color:var(--warn)}
+.line[data-tone="bad"] .line__e,.line[data-tone="bad"] .line__b b{color:var(--bad)}
+.kv{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:7px 16px;margin:4px 0 14px;font-size:var(--fs-sub)}
+.kv dt{color:var(--ink-2)}
+.kv dd{text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+
+/* marks: a word in a small glass pill; colour on the edge and the word */
+.mark{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:var(--r-pill);
+  font-size:11.5px;font-weight:600;line-height:1.5;white-space:nowrap;
+  background:var(--pane);border:1px solid var(--edge);color:var(--ink-2)}
+.mark[data-tone="ok"]{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.mark[data-tone="warn"]{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,transparent)}
+.mark[data-tone="bad"]{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.mark[data-tone="accent"]{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 50%,transparent)}
+.mark--solid{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+
+/* say: a callout; semantic colour on the edge and the icon, never a fill */
+.say{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;margin:6px 0 14px;border-radius:var(--r-cell);
+  background:var(--pane);border:1px solid var(--edge);font-size:var(--fs-sub);color:var(--ink-2);line-height:1.4}
+.say svg{width:16px;height:16px;flex:none;margin-top:1px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;color:var(--ink-2)}
+.say[data-tone="warn"]{border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
+.say[data-tone="warn"] svg{color:var(--warn)}
+.say[data-tone="bad"]{border-color:color-mix(in srgb,var(--bad) 55%,transparent)}
+.say[data-tone="bad"] svg{color:var(--bad)}
+.say[data-tone="ok"]{border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
+.say[data-tone="ok"] svg{color:var(--ok)}
+
+/* ─── forms ──────────────────────────────────────────────────────────────── */
+.field{margin:0 0 14px}
+.field__h+.field,.lines+.field,.readouts+.field,.spark+.field{margin-top:14px}
+.field__l{display:block;font-size:var(--fs-label);font-weight:500;color:var(--ink-2);margin-bottom:6px}
+.field__h{font-size:var(--fs-label);color:var(--ink-3);margin-top:6px;line-height:1.35}
+.in,.sel,.ta{width:100%;padding:11px 14px;border-radius:var(--r-ctl);border:1px solid var(--edge);
+  background:var(--well);color:var(--ink);font-size:var(--fs-body);
+  box-shadow:inset 0 1px 0 rgba(0,0,0,.04)}
+.in::placeholder,.ta::placeholder{color:var(--ink-3)}
+.in:focus,.sel:focus,.ta:focus{outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.sel{appearance:none;-webkit-appearance:none;padding-right:36px;background-image:var(--chev);
+  background-repeat:no-repeat;background-position:right 14px center}
+.sel--inline,.in--inline{width:auto;padding:7px 12px;border-radius:var(--r-pill)}
+.sel--inline{padding-right:32px;background-position:right 11px center}
+.ta{min-height:120px;font-family:var(--mono);font-size:13px;line-height:1.45;resize:vertical}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.check{display:flex;align-items:center;gap:10px;min-height:28px;margin:0 0 12px;font-size:var(--fs-sub);cursor:pointer}
+.check input{width:18px;height:18px;margin:0;accent-color:var(--accent);flex:none}
+@supports (-webkit-touch-callout:none){.in,.sel,.ta{font-size:16px}}   /* iOS zooms below 16px */
+
+/* acts: three levels, one of them red */
+.act{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-height:36px;padding:8px 15px;border-radius:var(--r-pill);font-size:var(--fs-sub);font-weight:600;
+  color:var(--ink);background:var(--pane);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--spec);
+  white-space:nowrap;flex:none}
+.act::before{content:"";position:absolute;inset:-4px 0}
+.act svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.act:active:not(:disabled){background:color-mix(in srgb,var(--pane) 60%,var(--well))}
+.act:disabled{opacity:.42;cursor:default}
+.act--primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
+.act--primary:active:not(:disabled){background:color-mix(in srgb,var(--accent) 88%,#000)}
+.act--quiet{background:none;border-color:transparent;box-shadow:none;color:var(--ink-2)}
+.act--danger{background:none;color:var(--bad);border-color:color-mix(in srgb,var(--bad) 50%,transparent);box-shadow:none}
+.act--sm{min-height:30px;padding:5px 11px;font-size:var(--fs-label)}
+.act--sm::before{inset:-7px -2px}
+.act.is-busy{color:transparent;pointer-events:none}
+.act.is-busy::after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--ink-2);border-top-color:transparent;left:calc(50% - 7px);top:calc(50% - 7px)}
+.act--primary.is-busy::after{border-color:var(--accent-ink);border-top-color:transparent}
+
+/* ─── instruments ────────────────────────────────────────────────────────── */
+/* spark: a line over time; the tile's own area is the chart */
+.spark{width:100%;height:100%;display:block;overflow:visible}
+.spark .l{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.spark .l2{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.spark .a{fill:var(--ink);opacity:.06}
+.spark .a2{fill:var(--accent);opacity:.14}
+.spark .z{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.spark .e{fill:var(--accent)}
+.tile .spark{height:auto;flex:1 1 auto;min-height:36px}
+/* arc: a gauge drawn as a 240° ring */
+.arcs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;align-items:end}
+.arc{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0}
+.arc svg{width:100%;max-width:56px;height:auto;overflow:visible}
+.arc .t{fill:none;stroke:var(--well);stroke-width:5;stroke-linecap:round}
+.arc .f{fill:none;stroke:var(--ink);stroke-width:5;stroke-linecap:round}
+.arc[data-tone="warn"] .f{stroke:var(--warn)}
+.arc[data-tone="bad"] .f{stroke:var(--bad)}
+.arc__v{font-size:var(--fs-sub);font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
+.arc__k{font-size:11px;color:var(--ink-3)}
+/* fan: the Wi-Fi mark, lit from the dot outward */
+.fan{width:20px;height:16px;color:var(--ink-3);flex:none}
+.fan svg{width:100%;height:100%}
+.fan path{fill:none;stroke:color-mix(in srgb,var(--ink) 22%,transparent);stroke-width:1.9;stroke-linecap:round}
+.fan circle{fill:color-mix(in srgb,var(--ink) 22%,transparent)}
+.fan .on{stroke:currentColor}
+.fan circle.on{fill:currentColor}
+.fan[data-tone="ok"]{color:var(--ok)}.fan[data-tone="warn"]{color:var(--warn)}.fan[data-tone="bad"]{color:var(--bad)}
+/* bar: a thin track with a fill; the fill is scaled, never re-laid */
+.bar{height:5px;border-radius:3px;background:var(--well);overflow:hidden}
+.bar i{display:block;height:100%;width:100%;border-radius:3px;background:var(--ink-2);transform-origin:left center;transform:scaleX(0)}
+.bar[data-tone="warn"] i{background:var(--warn)}.bar[data-tone="bad"] i{background:var(--bad)}
+
+/* ─── waiting & empty ─────────────────────────────────────────────────────── */
+.wait{height:12px;border-radius:6px;background:var(--well);margin:6px 0}
+.empty{text-align:center;padding:28px 12px;color:var(--ink-2);font-size:var(--fs-sub);line-height:1.45}
+.empty svg{width:28px;height:28px;margin:0 auto 10px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;color:var(--ink-3)}
+.empty b{display:block;color:var(--ink);font-size:var(--fs-body);margin-bottom:4px}
+
+/* ─── pops: a message, bottom centre, no motion ──────────────────────────── */
+.pops{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom));
+  z-index:100;display:flex;flex-direction:column;gap:8px;width:min(420px,calc(100vw - 32px));pointer-events:none}
+.pop{display:flex;gap:10px;align-items:center;padding:12px 16px;border-radius:var(--r-cell);
+  font-size:var(--fs-sub);font-weight:500;color:var(--ink);
+  background:var(--pane-2);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--spec);
+  -webkit-backdrop-filter:var(--glass-2);backdrop-filter:var(--glass-2)}
+.pop svg{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.pop[data-tone="ok"] svg{color:var(--ok)}.pop[data-tone="warn"] svg{color:var(--warn)}.pop[data-tone="bad"] svg{color:var(--bad)}
+
+/* ─── QR ─────────────────────────────────────────────────────────────────── */
+.qr{display:grid;place-items:center;padding:16px;margin:6px auto 14px;width:max-content;max-width:100%;
+  border-radius:var(--r-cell);background:#fff;border:1px solid var(--edge)}
+.qr svg{width:min(240px,70vw);height:auto}
+
+/* ─── stale page ─────────────────────────────────────────────────────────── */
+.stale{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 58px);z-index:30;
+  display:flex;gap:10px;align-items:center;padding:8px 10px 8px 14px;border-radius:var(--r-pill);font-size:var(--fs-sub);
+  background:var(--pane-2);border:1px solid color-mix(in srgb,var(--warn) 55%,transparent);box-shadow:inset 0 1px 0 var(--spec);
+  -webkit-backdrop-filter:var(--glass-2);backdrop-filter:var(--glass-2)}
+
+/* ─── ask: a confirmation, sheet-grade glass, centred, no motion ─────────── */
+.ask{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:90;width:min(400px,calc(100vw - 32px));
+  padding:20px 20px 16px;border-radius:var(--r-sheet);background:var(--pane-2);border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 var(--spec);-webkit-backdrop-filter:var(--glass-2);backdrop-filter:var(--glass-2)}
+.ask__t{font-size:var(--fs-title);font-weight:600;letter-spacing:-.02em;margin-bottom:8px}
+.ask__b{font-size:var(--fs-sub);color:var(--ink-2);line-height:1.45;margin-bottom:14px}
+.ask__acts{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
