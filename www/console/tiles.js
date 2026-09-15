@@ -310,8 +310,8 @@ G.tile({
             var v = pingSeries(r).filter(function (x) { return x > 0; });
             var avg = v.length ? v.reduce(function (a, b) { return a + b; }, 0) / v.length : null;
             top.appendChild(ui.readouts([
-                ui.readout('Ping', r && r.ping != null ? fine(r.ping) : '—', avg != null ? 'avg ' + fine(avg) + ' ms over 5 min' : 'no reply', r && r.ping != null ? 'ok' : 'warn', r && r.ping != null ? 'ms' : ''),
-                ui.readout('Loss', l ? fine(l.pct) : '—', lw[0] + (l ? ' · ' + l.lost + ' of ' + l.probed : ''), toneOf(lw), l ? '%' : ''),
+                ui.readout('Ping', r && r.ping != null ? fine(r.ping) : '—', avg != null ? 'avg ' + fine(avg) + ' ms' : 'no reply', r && r.ping != null ? 'ok' : 'warn', r && r.ping != null ? 'ms' : ''),
+                ui.readout('Loss', l ? fine(l.pct) : '—', lw[0], toneOf(lw), l ? '%' : ''),
                 ui.readout('Jitter', j != null ? fine(j) : '—', jw[0], toneOf(jw), j != null ? 'ms' : '')
             ]));
             if (r && r.ring && r.ring.note) top.appendChild(ui.say(r.ring.note, 'warn'));
@@ -319,7 +319,7 @@ G.tile({
             if (d && d.sys && d.sys.v6_loss != null && d.sys.v6_loss >= 0) top.appendChild(ui.say('IPv6 ' + (d.sys.v6_loss >= 100 ? 'is not reachable' : 'reachable'), d.sys.v6_loss >= 100 ? 'bad' : 'ok', 'globe'));
             clear(chart);
             var s = pingSeries(r);
-            if (s.length > 2) { var sp = ui.spark(s, { w: 300, h: 90, fill: true, dot: true, zero: true, max: pingMax(s) }); sp.style.height = '110px'; chart.appendChild(sp); chart.appendChild(el('div', 'field__h', 'Last 5 minutes')); }
+            if (s.length > 2) { var sp = ui.spark(s, { w: 300, h: 90, fill: true, dot: true, zero: true, max: pingMax(s) }); sp.style.height = '110px'; chart.appendChild(sp); }
         }
         function drawTarget() {
             clear(target);
@@ -870,7 +870,7 @@ G.tile({
         pair.appendChild(ui.spark(recent.map(function (s) { return s.dn; }), { w: 240, h: 40, fill: true, max: peak || 1 }));
         pair.appendChild(ui.spark(recent.map(function (s) { return s.up; }), { w: 240, h: 40, fill: true, max: peak || 1, accent: true }));
         frag.appendChild(pair);
-        G.face.sub(frag, 'peak ' + inUnit(peak, u) + ' ' + u + ' · down in ink, up in maroon');
+        G.face.sub(frag, 'peak ' + inUnit(peak, u) + ' ' + u);
     },
     sheet: function (body, api) {
         var top = el('div'), chart = el('div'), tr = el('div');
@@ -880,11 +880,10 @@ G.tile({
             if (ring.length < 2) { top.appendChild(ui.wait(2)); return; }
             var last = ring[ring.length - 1], peak = Math.max.apply(null, ring.map(function (s) { return Math.max(s.dn, s.up); })), u = unitFor(peak);
             api.meta(fmt.dur(last.t - ring[0].t) + ' window');
-            top.appendChild(ui.readouts([ui.readout('Down', inUnit(last.dn, u), 'now', null, u), ui.readout('Up', inUnit(last.up, u), 'now', null, u), ui.readout('Peak', inUnit(peak, u), 'in the window', null, u)]));
+            top.appendChild(ui.readouts([ui.readout('Down', inUnit(last.dn, u), '', null, u), ui.readout('Up', inUnit(last.up, u), '', null, u), ui.readout('Peak', inUnit(peak, u), '', null, u)]));
             var dn = ui.spark(ring.map(function (s) { return s.dn; }), { w: 300, h: 80, fill: true, max: peak || 1, zero: true }); dn.style.height = '96px';
             var up = ui.spark(ring.map(function (s) { return s.up; }), { w: 300, h: 80, fill: true, max: peak || 1, accent: true }); up.style.height = '96px'; up.style.marginTop = '-96px';
             chart.appendChild(dn); chart.appendChild(up);
-            chart.appendChild(el('div', 'field__h', 'Down in ink, up in maroon'));
         }
         function traffic() {
             clear(tr); var d = api.data.dash; if (!d) return;
@@ -898,7 +897,6 @@ G.tile({
             tr.appendChild(el('div', 'field__l', title + (grand ? ' · ' + fmt.bytes(grand) : '')));
             if (!rows.length) { tr.appendChild(ui.say(d.nlbw_up === false ? 'Accounting is not running.' : 'Nothing counted yet today.', null)); return; }
             tr.appendChild(ui.lines(rows.slice(0, 12).map(function (r) { var b = el('span'); b.appendChild(el('b', null, r.name)); b.appendChild(document.createTextNode('  ↓ ' + fmt.bytes(r.dn) + ' · ↑ ' + fmt.bytes(r.up))); var pct = r.sum * 100 / grand; return ui.line(null, b, fmt.bytes(r.sum) + ' · ' + (pct < 1 ? '<1' : Math.round(pct)) + '%'); })));
-            var uu = d.uplink_usage; if (uu && uu.ok) tr.appendChild(el('div', 'field__h', (uu.kind === 'wwan' ? 'Wi-Fi uplink, this session: ' : uu.kind === 'tethering' ? 'USB uplink, this session: ' : 'This month over Ethernet: ') + fmt.bytes(uu.total)));
         }
         live(); traffic(); api.on('rate', live); api.on('dash', traffic);
     }
@@ -1066,7 +1064,7 @@ G.tile({
                         if (!j.lines.length) list.appendChild(ui.say(q ? 'Nothing matches.' : level === 'all' ? 'The log is empty.' : 'Nothing at this level.', null));
                         else list.appendChild(ui.lines(j.lines.map(function (l) { var b = el('span'); b.appendChild(el('b', null, l.src)); b.appendChild(document.createTextNode('  ' + l.msg)); return ui.line(l.t, b, null, /^(emerg|alert|crit|err)/.test(l.lvl) ? 'bad' : /^warn/.test(l.lvl) ? 'warn' : null); })));
                     }
-                    setTxt(foot, j.lines.length + ' of ' + (total >= 0 ? total : j.lines.length) + ' lines, newest first · ' + (scrolled ? 'paused while you read' : 'following, every 4s'));
+                    setTxt(foot, j.lines.length + ' of ' + (total >= 0 ? total : j.lines.length) + (scrolled ? ' · paused' : ''));
                     logTimer = setTimeout(fetchLog, 4000);
                 }).catch(function () { logTimer = setTimeout(fetchLog, 8000); });
             }
@@ -1110,7 +1108,7 @@ G.tile({
         function draw() {
             clear(body); var t = travelState(api.data);
             api.meta(t && t.on ? 'away' : 'home');
-            body.appendChild(ui.say(t && t.on ? 'Away since ' + fmt.ago(t.since) + '.' : 'One switch for leaving the house.', null, t && t.on ? 'plane' : 'home'));
+            if (t && t.on) body.appendChild(ui.say('Away since ' + fmt.ago(t.since) + '.', null, 'plane'));
             var g = secondary(api.data, 'guest'), i = secondary(api.data, 'iot'), v = api.data.vpn;
             body.appendChild(el('div', 'field__l', 'What Away does'));
             body.appendChild(ui.lines([
@@ -1175,16 +1173,15 @@ G.tile({
             clear(res); var t = api.data.tools, sp = t && t.speed;
             if (running && prog) {
                 api.meta('measuring');
-                res.appendChild(ui.readouts([ui.readout('Download', prog.t > 0 ? String(prog.mbps) : '—', prog.t > 0 ? 'measuring · ' + prog.t + ' of ' + prog.of + ' s' + (prog.via ? ' · ' + prog.via : '') : (prog.via ? 'starting the streams from ' + prog.via : 'finding a test server'), null, 'Mb/s')]));
+                res.appendChild(ui.readouts([ui.readout('Download', prog.t > 0 ? String(prog.mbps) : '—', prog.t > 0 ? prog.t + ' of ' + prog.of + ' s' : 'starting', null, 'Mb/s')]));
             } else {
                 api.meta(sp ? sp.down + ' Mb/s' : '');
                 res.appendChild(ui.readouts([ui.readout('Download', sp ? String(sp.down) : '—', sp ? 'peak ' + sp.down_peak + ' Mb/s' : 'not run yet', null, sp ? 'Mb/s' : '')]));
-                if (sp) res.appendChild(el('div', 'field__h', fmt.plural(sp.streams, 'stream') + (sp.via ? ' from ' + sp.via : '') + ' · ' + sp.seconds + ' s · ' + fmt.ago(sp.at)));
+                if (sp) res.appendChild(el('div', 'field__h', fmt.ago(sp.at) + (sp.via ? ' · ' + sp.via : '')));
             }
             var run = ui.act(running ? 'Measuring' : 'Run a speed test', 'primary', start, 'bolt');
             if (running) { run.disabled = true; run.classList.add('is-busy'); }
             var rrow = el('div', 'inline'); rrow.appendChild(run); res.appendChild(rrow);
-            res.appendChild(el('div', 'field__h', 'Four streams, ten seconds, from the router. Download only.'));
         }
         function start() {
             if (running) return;
@@ -1215,7 +1212,6 @@ G.tile({
             var row = el('div', 'inline'); row.appendChild(sw); row.appendChild(ui.mark(w[0], w[1])); row.appendChild(port);
             ip.appendChild(row);
             ip.appendChild(ui.kv([['Listening on', p.ip + ':' + p.port], ['From a laptop', 'iperf3 -c ' + p.ip + ' -p ' + p.port]]));
-            ip.appendChild(el('div', 'field__h', 'Main network only. Tests your Wi-Fi to the router.'));
         }
         drawRes(); drawIperf(); api.on('tools', function () { if (!running) drawRes(); }); api.on('set', drawIperf);
     }
