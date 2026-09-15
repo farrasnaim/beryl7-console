@@ -301,7 +301,7 @@ G.tile({
         return { tone: on ? toneOf(lw) : 'bad' };
     },
     sheet: function (body, api) {
-        var top = el('div'), chart = el('div'), target = el('div'), saved = el('div'), savedOpen = false;
+        var top = el('div'), chart = el('div'), target = el('div', 'sheet__sec'), saved = el('div'), savedOpen = false;
         body.appendChild(top); body.appendChild(chart); body.appendChild(target); body.appendChild(saved);
         function live() {
             var r = api.data.rate, d = api.data.dash;
