@@ -423,6 +423,8 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .spark .z{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
 .spark .e{fill:var(--accent)}
 .tile .spark{height:auto;flex:1 1 auto;min-height:36px}
+.sparks{position:relative;flex:1 1 auto;min-height:36px;display:flex}
+.sparks .spark{position:absolute;inset:0;height:100%;min-height:0}
 /* arc: a gauge drawn as a 240° ring */
 .arcs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;align-items:end}
 .arc{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0}

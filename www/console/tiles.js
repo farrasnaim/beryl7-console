@@ -865,8 +865,12 @@ G.tile({
         var u = unitFor(Math.max(peak, last.dn, last.up));
         var v = G.face.value(frag, '↓ ' + inUnit(last.dn, u), u, null, true);
         v.appendChild(el('small', null, '   ↑ ' + inUnit(last.up, u) + ' ' + u));
-        frag.appendChild(ui.spark(recent.map(function (s) { return s.dn; }), { w: 240, h: 40, fill: true, max: peak || 1 }));
-        G.face.sub(frag, 'peak ' + inUnit(peak, u) + ' ' + u + ' · WAN, every 1.5 s');
+        /* both directions on one scale: download in ink, upload in maroon */
+        var pair = el('div', 'sparks');
+        pair.appendChild(ui.spark(recent.map(function (s) { return s.dn; }), { w: 240, h: 40, fill: true, max: peak || 1 }));
+        pair.appendChild(ui.spark(recent.map(function (s) { return s.up; }), { w: 240, h: 40, fill: true, max: peak || 1, accent: true }));
+        frag.appendChild(pair);
+        G.face.sub(frag, 'peak ' + inUnit(peak, u) + ' ' + u + ' · down in ink, up in maroon');
     },
     sheet: function (body, api) {
         var top = el('div'), chart = el('div'), tr = el('div');
