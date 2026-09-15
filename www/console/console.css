@@ -31,14 +31,14 @@
   --ease:cubic-bezier(.2,.8,.2,1); --dur:420ms;
 
   /* light — the default face; the scene is a phone in daylight */
-  --ground:#e6e8ed;
-  --g-warm:rgba(139,38,53,.20);
-  --g-glow:rgba(255,255,255,.55);
-  --g-cool:rgba(72,86,124,.18);
+  --ground:#e4e6ec;
+  --g-warm:rgba(139,38,53,.30);
+  --g-glow:rgba(217,115,126,.34);
+  --g-cool:rgba(72,86,124,.30);
 
   --ink:#17161c;
   --ink-2:rgba(23,22,28,.74);
-  --ink-3:rgba(23,22,28,.62);
+  --ink-3:rgba(23,22,28,.68);   /* .62 fell to 4.2:1 over the warm band once the ground gained presence */
 
   --accent:#8b2635; --accent-ink:#ffffff;
   --ok:#1b6a44; --warn:#7e5107; --bad:#ad2330;
@@ -61,9 +61,9 @@
 :root[data-theme="dark"]{
   color-scheme:dark;
   --ground:#100f14;
-  --g-warm:rgba(217,115,126,.22);
-  --g-glow:rgba(139,38,53,.38);
-  --g-cool:rgba(70,80,124,.26);
+  --g-warm:rgba(217,115,126,.28);
+  --g-glow:rgba(139,38,53,.50);
+  --g-cool:rgba(70,80,124,.36);
   --ink:#f3f0f2; --ink-2:rgba(243,240,242,.76); --ink-3:rgba(243,240,242,.62);
   --accent:#d9737e; --accent-ink:#1a0b0f;
   --ok:#6fd39b; --warn:#eabb5f; --bad:#f28b8b;
@@ -77,9 +77,9 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   color-scheme:dark;
   --ground:#100f14;
-  --g-warm:rgba(217,115,126,.22);
-  --g-glow:rgba(139,38,53,.38);
-  --g-cool:rgba(70,80,124,.26);
+  --g-warm:rgba(217,115,126,.28);
+  --g-glow:rgba(139,38,53,.50);
+  --g-cool:rgba(70,80,124,.36);
   --ink:#f3f0f2; --ink-2:rgba(243,240,242,.76); --ink-3:rgba(243,240,242,.62);
   --accent:#d9737e; --accent-ink:#1a0b0f;
   --ok:#6fd39b; --warn:#eabb5f; --bad:#f28b8b;
@@ -98,7 +98,7 @@ html{background:var(--ground);-webkit-text-size-adjust:100%;caret-color:var(--ac
   scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--ink) 26%,transparent) transparent;
   -webkit-tap-highlight-color:transparent}
 body{margin:0;min-height:100vh;min-height:100svh;font-family:var(--font);font-size:var(--fs-body);
-  line-height:1.45;color:var(--ink);background:var(--ground);letter-spacing:-.005em;
+  line-height:1.45;color:var(--ink);background:transparent;letter-spacing:-.005em;   /* the ground is on html; body must not cover its own fixed gradient */
   -webkit-font-smoothing:antialiased;overflow-x:hidden}
 /* The ground: a fixed field the grid scrolls over. Warm at the top, a soft
    glow off to one side, cooler toward the foot — so a tile passing any point
@@ -106,9 +106,10 @@ body{margin:0;min-height:100vh;min-height:100svh;font-family:var(--font);font-si
    is glass. Static. */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:
-    radial-gradient(70% 45% at 82% -6%, var(--g-glow), transparent 70%),
-    linear-gradient(180deg, var(--g-warm) 0%, transparent 46%),
-    linear-gradient(206deg, transparent 40%, var(--g-cool) 100%)}
+    radial-gradient(60% 50% at 84% -4%, var(--g-glow), transparent 72%),
+    radial-gradient(48% 42% at 6% 62%, var(--g-warm), transparent 74%),
+    linear-gradient(180deg, var(--g-warm) 0%, transparent 42%),
+    linear-gradient(206deg, transparent 38%, var(--g-cool) 100%)}
 h1,h2,h3,p,dl,dd,figure{margin:0}
 button,input,select,textarea{font:inherit;color:inherit}
 button{background:none;border:0;padding:0;cursor:pointer}
@@ -138,30 +139,39 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 }
 
 /* ─── the capsule: the only fixed chrome ─────────────────────────────────── */
-.cap{position:sticky;top:calc(env(safe-area-inset-top) + 10px);z-index:20;
+.cap{position:sticky;top:calc(env(safe-area-inset-top) + 22px);z-index:20;
   margin:0 auto;width:max-content;max-width:calc(100% - 32px);
-  display:flex;align-items:center;gap:9px;padding:7px 14px 7px 11px;border-radius:var(--r-pill);
-  font-size:13px;font-weight:600;letter-spacing:-.01em}
+  display:flex;align-items:center;gap:11px;padding:10px 20px 10px 15px;border-radius:var(--r-pill);
+  font-size:15px;font-weight:600;letter-spacing:-.01em}
 .cap__t{font:inherit;margin:0;font-size:inherit;font-weight:inherit}
-.cap__mark{width:18px;height:18px;color:var(--accent)}
+.cap__mark{width:22px;height:22px;color:var(--accent)}
 .cap__mark svg{width:100%;height:100%}
-.cap__dot{width:7px;height:7px;border-radius:50%;background:var(--ok);margin-left:2px}
+.cap__dot{width:8px;height:8px;border-radius:50%;background:var(--ok);margin-left:3px}
 .cap[data-link="stale"] .cap__dot,.cap[data-link="down"] .cap__dot{background:var(--warn)}
-.cap__state{font-size:var(--fs-label);font-weight:500;color:var(--ink-2)}
-.cap__spacer{height:calc(env(safe-area-inset-top) + 10px)}
+.cap__state{font-size:13px;font-weight:500;color:var(--ink-2)}
+.cap__spacer{height:calc(env(safe-area-inset-top) + 22px)}
 /* installed on a home screen the status bar is drawn over the page and the
    inset iPadOS reports is 0, so the capsule needs its own clearance there */
 @media (display-mode:standalone){
-  .cap{top:calc(max(env(safe-area-inset-top),24px) + 14px)}
-  .cap__spacer{height:calc(max(env(safe-area-inset-top),24px) + 14px)}
-  .stale{top:calc(max(env(safe-area-inset-top),24px) + 62px)}
+  .cap{top:calc(max(env(safe-area-inset-top),24px) + 22px)}
+  .cap__spacer{height:calc(max(env(safe-area-inset-top),24px) + 22px)}
+  .stale{top:calc(max(env(safe-area-inset-top),24px) + 78px)}
 }
 
 /* ─── the grid ───────────────────────────────────────────────────────────── */
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--gap);
-  padding:18px var(--pad) 0;max-width:1180px;margin:0 auto}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--gap);grid-auto-flow:dense;
+  padding:22px var(--pad) 0;max-width:1180px;margin:0 auto}
 @media (min-width:700px){.grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;padding-top:22px}}
-@media (min-width:1100px){.grid{grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;padding:26px 24px 0}}
+@media (min-width:1100px){
+  .grid{grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-flow:row;gap:18px;padding:28px 24px 0;max-width:1300px}
+  .tile{max-height:236px;padding:16px 16px 15px}
+  .tile__sub{font-size:13px}
+}
+/* a tall desktop window: the block is composed in the middle of the ground, not left at the top */
+@media (min-width:1100px) and (min-height:820px){
+  .stage{display:flex;flex-direction:column;min-height:100svh;padding-bottom:0}
+  .grid{margin:auto;padding-bottom:calc(env(safe-area-inset-top) + 66px)}
+}
 
 /* ─── a tile ─────────────────────────────────────────────────────────────── */
 .tile{position:relative;display:flex;flex-direction:column;justify-content:space-between;gap:6px;
@@ -448,7 +458,7 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .qr svg{width:min(240px,70vw);height:auto;display:block;shape-rendering:crispEdges}
 
 /* ─── stale page ─────────────────────────────────────────────────────────── */
-.stale{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 58px);z-index:30;
+.stale{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 74px);z-index:30;
   display:flex;gap:10px;align-items:center;padding:8px 10px 8px 14px;border-radius:var(--r-pill);font-size:var(--fs-sub);
   background:var(--pane-2);border:1px solid color-mix(in srgb,var(--warn) 55%,transparent);box-shadow:inset 0 1px 0 var(--spec);
   -webkit-backdrop-filter:var(--glass-2);backdrop-filter:var(--glass-2)}

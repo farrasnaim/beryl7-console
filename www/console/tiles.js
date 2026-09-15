@@ -75,7 +75,7 @@ G.poll('vpn', VPN, 10000);
 G.poll('rep', REP, 12000);
 G.poll('usb', USB, 12000);
 G.poll('set', SET, 20000);
-G.poll('tools', TOOLS + '?n=60', 20000);
+G.poll('tools', TOOLS + '?n=1', 20000);
 function loadProbe() { G.get(PROBE + '?action=list').then(function (j) { if (j && j.ok) { G.data.probe = j; G.bus.emit('data:probe', j); } }).catch(function () {}); }
 
 /* the throughput ring: bytes/s from consecutive rate samples, kept 5 minutes */
@@ -845,14 +845,14 @@ function secondaryTile(id, net, ic, label, order) {
         }
     });
 }
-secondaryTile('guest', 'guest', 'users', 'Guest Wi-Fi', 15);
-secondaryTile('iot', 'iot', 'plug', 'IoT', 16);
+secondaryTile('iot', 'iot', 'plug', 'IoT', 19);
+secondaryTile('guest', 'guest', 'users', 'Guest Wi-Fi', 20);
 
 /* ═══ 9. THROUGHPUT ═══════════════════════════════════════════════════════ */
 function unitFor(max) { var r = fmt.rate(max); return r.u; }
 function inUnit(Bps, u) { var b = Bps * 8, div = { 'b/s': 1, 'kb/s': 1e3, 'Mb/s': 1e6, 'Gb/s': 1e9 }[u]; var x = b / div; return x >= 100 ? x.toFixed(0) : x >= 10 ? x.toFixed(1) : x.toFixed(2); }
 G.tile({
-    id: 'throughput', order: 20, wide: true, label: 'Throughput', icon: 'pulse',
+    id: 'throughput', order: 16, wide: true, label: 'Throughput', icon: 'pulse',
     render: function (frag, X) {
         G.face.hd(frag, 'pulse', 'Throughput', ring.length ? 'last ' + Math.round(ring[ring.length - 1].t - ring[0].t) + 's' : '');
         if (ring.length < 2) { G.face.value(frag, '—'); G.face.sub(frag, 'collecting'); return; }
@@ -905,7 +905,7 @@ function health(d, r) {
     return { load: load, cpu: load / 4, temp: temp, memF: memF, mt: mt, ma: ma, ovl: ovl, word: word, fan: (r && r.fan) || sy.fan_rpm || 0 };
 }
 G.tile({
-    id: 'system', order: 21, label: 'System', icon: 'gauge',
+    id: 'system', order: 17, label: 'System', icon: 'gauge',
     render: function (frag, X) {
         var d = X.dash, r = X.rate;
         G.face.hd(frag, 'gauge', 'System');
@@ -1072,49 +1072,10 @@ G.tile({
     }
 });
 
-/* ═══ 11. ACTIVITY ════════════════════════════════════════════════════════ */
-G.tile({
-    id: 'activity', order: 22, label: 'Activity', icon: 'clock',
-    render: function (frag, X) {
-        var t = X.tools;
-        G.face.hd(frag, 'clock', 'Activity');
-        if (!t) { G.face.value(frag, '—'); return; }
-        var ev = t.events || [];
-        if (!ev.length) { G.face.value(frag, 'Quiet'); G.face.sub(frag, 'nothing in the log yet'); return; }
-        var day = ev[0].day, n = ev.filter(function (e) { return e.day === day; }).length, d = new Date();
-        var today = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + ' ' + d.getDate();
-        G.face.value(frag, String(n), day === today ? (n === 1 ? 'event today' : 'events today') : 'on ' + day);
-        var td = ev.filter(function (e) { return e.day === day; }), cnt = function (k) { return td.filter(function (e) { return k.indexOf(e.kind) >= 0; }).length; };
-        var joins = cnt(['join']), leaves = cnt(['leave']), changes = cnt(['change', 'alert', 'uplink']), flaps = cnt(['flap']);
-        G.face.sub(frag, [joins + ' joined · ' + leaves + ' left', changes ? fmt.plural(changes, 'change') : '', flaps ? fmt.plural(flaps, 'device') + ' flapping' : ''], flaps ? 'warn' : null);
-        return { tone: flaps ? 'warn' : null };
-    },
-    sheet: function (body, api) {
-        var kind = 'all';
-        body.appendChild(ui.pick([{ value: 'all', label: 'All' }, { value: 'wifi', label: 'Wi-Fi' }, { value: 'uplink', label: 'Uplink' }, { value: 'change', label: 'Changes' }], kind, function (v) { kind = v; draw(); }, true));
-        var list = el('div'); body.appendChild(list);
-        function draw() {
-            var t = api.data.tools; clear(list); if (!t) { list.appendChild(ui.wait(4)); return; }
-            var ev = (t.events || []).filter(function (e) { return kind === 'all' || (kind === 'wifi' ? (e.kind === 'join' || e.kind === 'leave' || e.kind === 'flap') : kind === 'uplink' ? e.kind === 'uplink' : (e.kind === 'change' || e.kind === 'alert')); });
-            api.meta(fmt.plural(ev.length, 'event'));
-            if (!ev.length) { list.appendChild(ui.empty('clock', 'Nothing here', 'Joins, departures, uplink changes and console actions appear as they happen.')); return; }
-            var day = ''; var nodes = [];
-            ev.forEach(function (e) {
-                if (e.day !== day) { day = e.day; nodes.push(el('div', 'field__l', day)); }
-                var b = el('span'); b.appendChild(el('b', null, e.who)); b.appendChild(document.createTextNode(' ' + e.text));
-                nodes.push(ui.line(e.time.slice(0, 5), b, null, e.tone || null));
-            });
-            var wrap = el('div', 'lines'); nodes.forEach(function (n) { wrap.appendChild(n); }); list.appendChild(wrap);
-        }
-        draw(); api.on('tools', draw);
-        G.polls.tools.refresh(60);
-    }
-});
-
 /* ═══ 12. TRAVEL ══════════════════════════════════════════════════════════ */
 function travelState(X) { return X.tools && X.tools.travel ? X.tools.travel : null; }
 G.tile({
-    id: 'travel', order: 23, label: 'Travel', icon: 'plane',
+    id: 'travel', order: 18, label: 'Travel', icon: 'plane',
     toggle: {
         read: function (X) { var t = travelState(X); return t ? !!t.on : null; },
         write: function (v, ctx) {
@@ -1192,7 +1153,7 @@ function runSteps(steps) {
 
 /* ═══ 13. SPEED TEST · iPerf ══════════════════════════════════════════════ */
 G.tile({
-    id: 'speed', order: 24, label: 'Speed test', icon: 'speed',
+    id: 'speed', order: 15, label: 'Speed test', icon: 'speed',
     render: function (frag, X) {
         var t = X.tools, s = X.set, ip = s && s.iperf && s.iperf.running ? ' · iPerf listening' : '';
         G.face.hd(frag, 'speed', 'Speed test');

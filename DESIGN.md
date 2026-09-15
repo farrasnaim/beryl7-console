@@ -31,7 +31,7 @@ Rules the build keeps:
 
 ### The ground
 
-`body` is `--ground` (`#e6e8ed` light, `#100f14` dark). `body::before` is a fixed, static field of three gradients that the grid scrolls over, so any tile shows a different colour through it at different scroll positions:
+`body` is `--ground` (`#e4e6ec` light, `#100f14` dark). `body::before` is a fixed, static field of three gradients that the grid scrolls over, so any tile shows a different colour through it at different scroll positions:
 
 ```
 radial-gradient(70% 45% at 82% -6%, var(--g-glow), transparent 70%),
@@ -39,7 +39,7 @@ linear-gradient(180deg, var(--g-warm) 0%, transparent 46%),
 linear-gradient(206deg, transparent 40%, var(--g-cool) 100%)
 ```
 
-Light: `--g-warm rgba(139,38,53,.20)`, `--g-glow rgba(255,255,255,.55)`, `--g-cool rgba(72,86,124,.18)`. Dark: `--g-warm rgba(217,115,126,.22)`, `--g-glow rgba(139,38,53,.38)`, `--g-cool rgba(70,80,124,.26)`. Warm at the top, cool at the foot. Static.
+Light: `--g-warm rgba(139,38,53,.30)`, `--g-glow rgba(217,115,126,.34)`, `--g-cool rgba(72,86,124,.30)`. Dark: `--g-warm rgba(217,115,126,.28)`, `--g-glow rgba(139,38,53,.50)`, `--g-cool rgba(70,80,124,.36)`. Warm at the top, cool at the foot. Static.
 
 `theme-color` in `index.html` mirrors `--ground` per scheme.
 
@@ -74,7 +74,7 @@ Semantic colour is applied only through `data-tone="ok|warn|bad"` and always lan
 |---|---|---|
 | `--ink` | `#17161c` | `#f3f0f2` |
 | `--ink-2` | `rgba(23,22,28,.74)` | `rgba(243,240,242,.76)` |
-| `--ink-3` | `rgba(23,22,28,.62)` | `rgba(243,240,242,.62)` |
+| `--ink-3` | `rgba(23,22,28,.68)` | `rgba(243,240,242,.62)` |
 
 `--ink` for values and titles, `--ink-2` for labels and supporting text, `--ink-3` for hints, timestamps and the off state.
 
@@ -187,7 +187,7 @@ Every component is a constructor on `G.ui` in `core.js` and a class family in `c
 
 ## 8. Voice
 
-- Labels are nouns in Sentence case and fixed by PRODUCT.md: Path · Devices · Internet · Uplink · VPN · Radios · Guest Wi-Fi · IoT · Throughput · System · Activity · Travel · Speed test.
+- Labels are nouns in Sentence case and fixed by PRODUCT.md: Path · Devices · Radios · Speed test · Throughput · System · Travel · IoT · Guest Wi-Fi (Internet, Uplink and VPN are sheets opened from the Path strip).
 - State words are live readings, one word where possible, Sentence case, and always carry their `data-tone`: Up / Down / Standby / Carrying / Off / On / None / Blocked / Wired / Direct / Quiet / Home / Away / No route / No data. The placeholder before first data is `—`.
 - A control names its action: Turn on, Turn off, Connect, Disconnect, Forget, Join, Rename, Remove, Apply, Save, Run, Scan USB.
 - A pop names the result or the problem and the recovery, ending in a full stop: "Saved.", "Forgotten.", "Added — press Connect on it.", "Scan failed: the radio was busy — try again.", "This network needs a password."
