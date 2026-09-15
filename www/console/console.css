@@ -31,10 +31,11 @@
   --ease:cubic-bezier(.2,.8,.2,1); --dur:420ms;
 
   /* light — the default face; the scene is a phone in daylight */
-  --ground:#e4e6ec;
-  --g-warm:rgba(139,38,53,.30);
-  --g-glow:rgba(217,115,126,.34);
-  --g-cool:rgba(72,86,124,.30);
+  --ground:#f2f1ee;
+  --g-warm:rgba(139,38,53,.07);
+  --g-glow:rgba(255,255,255,.80);
+  --g-cool:rgba(60,68,96,.09);
+  --motif:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 1000' fill='none' stroke='rgba(20,18,24,0.085)' stroke-width='1'%3E%3Ccircle cx='500' cy='500' r='110'/%3E%3Ccircle cx='500' cy='500' r='210'/%3E%3Ccircle cx='500' cy='500' r='310'/%3E%3Ccircle cx='500' cy='500' r='410'/%3E%3Ccircle cx='500' cy='500' r='495'/%3E%3Cpath d='M500 5V995M5 500H995M150 150L850 850M850 150L150 850'/%3E%3C/svg%3E");
 
   --ink:#17161c;
   --ink-2:rgba(23,22,28,.74);
@@ -43,11 +44,11 @@
   --accent:#8b2635; --accent-ink:#ffffff;
   --ok:#1b6a44; --warn:#7e5107; --bad:#ad2330;
 
-  --pane:rgba(255,255,255,.28);          /* a tile */
+  --pane:rgba(255,255,255,.58);          /* a tile */
   --pane-2:rgba(255,255,255,.66);        /* the sheet — heavier, on top */
-  --pane-on:color-mix(in srgb,var(--accent) 30%,rgba(255,255,255,.22));
-  --edge:rgba(23,22,28,.12);
-  --edge-on:color-mix(in srgb,var(--accent) 55%,transparent);
+  --pane-on:color-mix(in srgb,var(--accent) 16%,rgba(255,255,255,.60));
+  --edge:rgba(23,22,28,.09);
+  --edge-on:color-mix(in srgb,var(--accent) 38%,transparent);
   --spec:rgba(255,255,255,.92);
   --well:rgba(23,22,28,.06);
   --line:rgba(23,22,28,.10);
@@ -60,32 +61,34 @@
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --ground:#100f14;
-  --g-warm:rgba(217,115,126,.28);
-  --g-glow:rgba(139,38,53,.50);
-  --g-cool:rgba(70,80,124,.36);
+  --ground:#0c0c0f;
+  --g-warm:rgba(217,115,126,.09);
+  --g-glow:rgba(139,38,53,.18);
+  --g-cool:rgba(70,80,124,.16);
+  --motif:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 1000' fill='none' stroke='rgba(255,255,255,0.075)' stroke-width='1'%3E%3Ccircle cx='500' cy='500' r='110'/%3E%3Ccircle cx='500' cy='500' r='210'/%3E%3Ccircle cx='500' cy='500' r='310'/%3E%3Ccircle cx='500' cy='500' r='410'/%3E%3Ccircle cx='500' cy='500' r='495'/%3E%3Cpath d='M500 5V995M5 500H995M150 150L850 850M850 150L150 850'/%3E%3C/svg%3E");
   --ink:#f3f0f2; --ink-2:rgba(243,240,242,.76); --ink-3:rgba(243,240,242,.62);
   --accent:#d9737e; --accent-ink:#1a0b0f;
   --ok:#6fd39b; --warn:#eabb5f; --bad:#f28b8b;
-  --pane:rgba(255,255,255,.07); --pane-2:rgba(24,20,28,.78);
-  --pane-on:color-mix(in srgb,var(--accent) 34%,rgba(255,255,255,.05));
-  --edge:rgba(255,255,255,.13); --edge-on:color-mix(in srgb,var(--accent) 60%,transparent);
+  --pane:rgba(255,255,255,.05); --pane-2:rgba(22,21,26,.82);
+  --pane-on:color-mix(in srgb,var(--accent) 20%,rgba(255,255,255,.04));
+  --edge:rgba(255,255,255,.10); --edge-on:color-mix(in srgb,var(--accent) 45%,transparent);
   --spec:rgba(255,255,255,.22); --well:rgba(0,0,0,.28); --line:rgba(255,255,255,.10);
   --dim:rgba(0,0,0,.44);
   --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23f3f0f2' stroke-opacity='.7' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   color-scheme:dark;
-  --ground:#100f14;
-  --g-warm:rgba(217,115,126,.28);
-  --g-glow:rgba(139,38,53,.50);
-  --g-cool:rgba(70,80,124,.36);
+  --ground:#0c0c0f;
+  --g-warm:rgba(217,115,126,.09);
+  --g-glow:rgba(139,38,53,.18);
+  --g-cool:rgba(70,80,124,.16);
+  --motif:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 1000' fill='none' stroke='rgba(255,255,255,0.075)' stroke-width='1'%3E%3Ccircle cx='500' cy='500' r='110'/%3E%3Ccircle cx='500' cy='500' r='210'/%3E%3Ccircle cx='500' cy='500' r='310'/%3E%3Ccircle cx='500' cy='500' r='410'/%3E%3Ccircle cx='500' cy='500' r='495'/%3E%3Cpath d='M500 5V995M5 500H995M150 150L850 850M850 150L150 850'/%3E%3C/svg%3E");
   --ink:#f3f0f2; --ink-2:rgba(243,240,242,.76); --ink-3:rgba(243,240,242,.62);
   --accent:#d9737e; --accent-ink:#1a0b0f;
   --ok:#6fd39b; --warn:#eabb5f; --bad:#f28b8b;
-  --pane:rgba(255,255,255,.07); --pane-2:rgba(24,20,28,.78);
-  --pane-on:color-mix(in srgb,var(--accent) 34%,rgba(255,255,255,.05));
-  --edge:rgba(255,255,255,.13); --edge-on:color-mix(in srgb,var(--accent) 60%,transparent);
+  --pane:rgba(255,255,255,.05); --pane-2:rgba(22,21,26,.82);
+  --pane-on:color-mix(in srgb,var(--accent) 20%,rgba(255,255,255,.04));
+  --edge:rgba(255,255,255,.10); --edge-on:color-mix(in srgb,var(--accent) 45%,transparent);
   --spec:rgba(255,255,255,.22); --well:rgba(0,0,0,.28); --line:rgba(255,255,255,.10);
   --dim:rgba(0,0,0,.44);
   --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23f3f0f2' stroke-opacity='.7' stroke-width='1.75' stroke-linecap='round'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
@@ -106,9 +109,10 @@ body{margin:0;min-height:100vh;min-height:100svh;font-family:var(--font);font-si
    is glass. Static. */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:
+    var(--motif) right -22vw top -30vh / 78vmin 78vmin no-repeat,
+    var(--motif) left -26vw bottom -34vh / 66vmin 66vmin no-repeat,
     radial-gradient(60% 50% at 84% -4%, var(--g-glow), transparent 72%),
     radial-gradient(48% 42% at 6% 62%, var(--g-warm), transparent 74%),
-    linear-gradient(180deg, var(--g-warm) 0%, transparent 42%),
     linear-gradient(206deg, transparent 38%, var(--g-cool) 100%)}
 h1,h2,h3,p,dl,dd,figure{margin:0}
 button,input,select,textarea{font:inherit;color:inherit}
@@ -209,7 +213,7 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .tile--ctl .tile__hd{padding-right:60px}
 
 /* ─── the path: three nodes in a dashed frame ────────────────────────────── */
-.tile--path{padding:12px 14px;border-style:dashed;justify-content:center}
+.tile--path{padding:12px 14px;justify-content:center}
 .nodes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:0;position:relative}
 .node{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;position:relative;
   padding:6px 4px 2px;border-radius:var(--r-cell);min-width:0}
@@ -359,6 +363,12 @@ button,a,summary,label,select,input,[role="button"],[role="switch"]{touch-action
 .field__h+.inline{margin-top:12px}
 .field__l{display:block;font-size:var(--fs-label);font-weight:500;color:var(--ink-2);margin-bottom:6px}
 .field__h{font-size:var(--fs-label);color:var(--ink-3);margin-top:6px;line-height:1.35}
+/* a disclosure: a quiet row that folds a section away until asked */
+.disc{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:44px;padding:8px 2px;margin-top:6px;
+  color:var(--ink-2);font-size:var(--fs-sub);font-weight:600;border-top:1px solid var(--line)}
+.disc svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;color:var(--ink-3);transform:rotate(90deg)}
+.disc[aria-expanded="true"] svg{transform:rotate(-90deg)}
+.disc__b{padding-top:4px}
 .in,.sel,.ta{width:100%;padding:11px 14px;border-radius:var(--r-ctl);border:1px solid var(--edge);
   background:var(--well);color:var(--ink);font-size:var(--fs-body);
   box-shadow:inset 0 1px 0 rgba(0,0,0,.04)}

@@ -301,7 +301,7 @@ G.tile({
         return { tone: on ? toneOf(lw) : 'bad' };
     },
     sheet: function (body, api) {
-        var top = el('div'), chart = el('div'), target = el('div'), saved = el('div');
+        var top = el('div'), chart = el('div'), target = el('div'), saved = el('div'), savedOpen = false;
         body.appendChild(top); body.appendChild(chart); body.appendChild(target); body.appendChild(saved);
         function live() {
             var r = api.data.rate, d = api.data.dash;
@@ -315,11 +315,11 @@ G.tile({
                 ui.readout('Jitter', j != null ? fine(j) : '—', jw[0], toneOf(jw), j != null ? 'ms' : '')
             ]));
             if (r && r.ring && r.ring.note) top.appendChild(ui.say(r.ring.note, 'warn'));
-            else if (r && r.ring && r.ring.state === 'silent') top.appendChild(ui.say('This address does not answer pings. That is the target, not the link.', null));
+            else if (r && r.ring && r.ring.state === 'silent') top.appendChild(ui.say('This address does not answer pings.', null));
             if (d && d.sys && d.sys.v6_loss != null && d.sys.v6_loss >= 0) top.appendChild(ui.say('IPv6 ' + (d.sys.v6_loss >= 100 ? 'is not reachable' : 'reachable'), d.sys.v6_loss >= 100 ? 'bad' : 'ok', 'globe'));
             clear(chart);
             var s = pingSeries(r);
-            if (s.length > 2) { var sp = ui.spark(s, { w: 300, h: 90, fill: true, dot: true, zero: true, max: pingMax(s) }); sp.style.height = '110px'; chart.appendChild(sp); chart.appendChild(el('div', 'field__h', 'last 5 minutes · one probe a second · gaps are lost probes')); }
+            if (s.length > 2) { var sp = ui.spark(s, { w: 300, h: 90, fill: true, dot: true, zero: true, max: pingMax(s) }); sp.style.height = '110px'; chart.appendChild(sp); chart.appendChild(el('div', 'field__h', 'Last 5 minutes')); }
         }
         function drawTarget() {
             clear(target);
@@ -340,28 +340,33 @@ G.tile({
             sel.addEventListener('change', function () {
                 if (sel.value === 'custom') { ipIn.hidden = false; go.hidden = false; ipIn.focus(); return; }
                 var v = sel.value, params = /^ip:/.test(v) ? { action: 'set', sel: 'custom', ip: v.slice(3) } : { action: 'set', sel: v };
-                G.act(null, PROBE, params, { ok: 'Probe target changed — the 5-minute history starts over.', refresh: ['rate'] });
+                G.act(null, PROBE, params, { ok: 'Probe target changed.', refresh: ['rate'] });
             });
             ipIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') go.click(); });
-            target.appendChild(ui.field('Probe target', wrap, 'Changing it resets the history for every open console.'));
+            target.appendChild(ui.field('Probe target', wrap));
         }
         function drawSaved() {
             clear(saved);
             var p = api.data.probe; if (!p) return;
-            var h = el('div', 'field__l', 'Saved addresses' + (p.targets && p.targets.length ? ' · ' + p.targets.length + ' of ' + (p.max || 12) : '')); saved.appendChild(h);
+            var count = (p.targets || []).length;
+            var h = el('button', 'disc'); h.type = 'button'; h.setAttribute('aria-expanded', savedOpen ? 'true' : 'false');
+            h.appendChild(el('span', 'disc__t', 'Saved addresses' + (count ? ' · ' + count : ''))); h.appendChild(icon('chevron'));
+            var fold = el('div', 'disc__b'); fold.hidden = !savedOpen;
+            h.addEventListener('click', function () { savedOpen = !savedOpen; fold.hidden = !savedOpen; h.setAttribute('aria-expanded', savedOpen ? 'true' : 'false'); });
+            saved.appendChild(h); saved.appendChild(fold);
             var rows = (p.targets || []).map(function (t) {
                 var del = ui.act('Remove', 'danger sm', function (b) { G.act(b, PROBE, { action: 'del', ip: t.ip }, { ok: 'Removed.' }).then(function (j) { if (j && j.ok) { G.data.probe.targets = j.targets; drawSaved(); drawTarget(); } }); });
                 var b = el('span'); b.appendChild(el('b', null, t.name)); b.appendChild(document.createTextNode('  ' + t.ip));
                 return ui.line(null, b, del);
             });
-            if (rows.length) saved.appendChild(ui.lines(rows));
+            if (rows.length) fold.appendChild(ui.lines(rows));
             var addIp = ui.input({ placeholder: '203.0.113.7', inputmode: 'decimal', maxlength: 15, inline: true, label: 'Address' });
             var addName = ui.input({ placeholder: 'Name (optional)', inline: true, maxlength: 24, label: 'Name' });
             var add = ui.act('Add', 'sm', function (b) {
                 var ip = addIp.value.replace(/\s+/g, ''); if (!ip) return;
                 G.act(b, PROBE, { action: 'add', ip: ip, name: addName.value.trim() }, { ok: 'Saved.' }).then(function (j) { if (j && j.ok) { G.data.probe.targets = j.targets; addIp.value = ''; addName.value = ''; drawSaved(); drawTarget(); } });
             }, 'plus');
-            var row = el('div', 'inline'); row.style.marginTop = '8px'; row.appendChild(addIp); row.appendChild(addName); row.appendChild(add); saved.appendChild(row);
+            var row = el('div', 'inline'); row.style.marginTop = '8px'; row.appendChild(addIp); row.appendChild(addName); row.appendChild(add); fold.appendChild(row);
         }
         live(); drawTarget(); drawSaved();
         api.on('rate', live); api.on('dash', live); api.on('probe', function () { drawTarget(); drawSaved(); });
@@ -412,8 +417,8 @@ G.tile({
             var prefersUsb = (t.metric || 99) <= (w.metric || 99);
             pane.appendChild(ui.field('When both a USB device and a Wi-Fi uplink are connected', ui.pick([{ value: 'modem', label: 'USB first' }, { value: 'wifi', label: 'Wi-Fi first' }], prefersUsb ? 'modem' : 'wifi', function (v) {
                 G.act(null, USB, { action: 'priority', pref: v }, { ok: (v === 'modem' ? 'USB' : 'Wi-Fi') + ' first from now on.', refresh: ['rep', 'usb', 'dash'], delay: 1500 });
-            }, true), 'Ethernet is always tried first. Lower metric wins.'));
-            if (p.width && p.width.original !== p.width.current) pane.appendChild(ui.say('The ' + G.bandLabel(p.width.band) + ' radio was narrowed from ' + p.width.original.replace(/^[A-Z]+/, '') + ' to ' + p.width.current.replace(/^[A-Z]+/, '') + ' MHz to fit the uplink’s channel. It widens again when the uplink is removed.', 'warn'));
+            }, true)));
+            if (p.width && p.width.original !== p.width.current) pane.appendChild(ui.say('The ' + G.bandLabel(p.width.band) + ' radio narrowed to ' + p.width.current.replace(/^[A-Z]+/, '') + ' MHz to match the uplink.', 'warn'));
             if (p.uplink && p.last_error) pane.appendChild(ui.say(p.last_error, 'bad'));
         }
         function drawWifi(rep) {
@@ -433,12 +438,12 @@ G.tile({
                     G.act(b, REP, { action: u.enabled ? 'down' : 'up' }, { ok: u.enabled ? 'Disconnecting.' : 'Connecting — give it 20 seconds.', refresh: ['rep', 'dash'], delay: 3000 });
                 }));
                 acts.appendChild(ui.act('Forget', 'danger', function (b) {
-                    confirm({ title: 'Forget ' + (u.ssid || 'this network') + '?', body: 'The uplink is removed and the router goes back to Ethernet. The saved password is kept under Remembered.', okText: 'Forget', danger: true }).then(function (ok) {
+                    confirm({ title: 'Forget ' + (u.ssid || 'this network') + '?', body: 'The router goes back to Ethernet. The password stays remembered.', okText: 'Forget', danger: true }).then(function (ok) {
                         if (ok) G.act(b, REP, { action: 'del' }, { ok: 'Forgotten.', refresh: ['rep', 'dash'], delay: 2000 });
                     });
                 }));
                 pane.appendChild(acts);
-            } else pane.appendChild(ui.say('Not joined to anyone else’s Wi-Fi. Scan below to find a network; the router keeps using Ethernet until the uplink actually connects.', null, 'wifi'));
+            } else pane.appendChild(ui.say('Not joined to another network.', null, 'wifi'));
             /* scan */
             var scanHd = el('div', 'inline'); scanHd.style.cssText = 'justify-content:space-between;margin:6px 0 8px';
             scanHd.appendChild(el('span', 'field__l', 'Networks in range' + (scanResults ? ' · ' + scanResults.length + ' · ' + fmt.ago(scanAt) : '')));
@@ -491,7 +496,7 @@ G.tile({
             var i = usb.iface || {};
             var word = !usb.present ? ['Not detected', 'idle'] : !usb.enabled ? ['Off', 'idle'] : i.up && usb.active === 'tethering' ? ['Carrying', 'ok'] : i.up ? ['Standby', null] : usb.carrier ? ['No address', 'warn'] : ['No link', 'bad'];
             api.meta(word[0]);
-            if (usb.clash) pane.appendChild(ui.say('Address clash: the device hands out ' + usb.clash.tether + ', which overlaps ' + usb.clash.with + ' on ' + usb.clash.dev + '. The USB uplink was refused. Change the phone’s hotspot subnet or the router’s LAN, then dismiss.', 'bad'));
+            if (usb.clash) pane.appendChild(ui.say('Address clash: the device uses ' + usb.clash.tether + ', the same as ' + usb.clash.with + '.', 'bad'));
             if (usb.usbmuxd === false) pane.appendChild(ui.say('usbmuxd is not running, so an iPhone cannot pair.', 'warn'));
             var acts = el('div', 'inline'); acts.style.marginBottom = '16px';
             if (usb.present) {
@@ -502,7 +507,7 @@ G.tile({
                 acts.appendChild(ui.act(usb.enabled ? 'Disconnect' : 'Connect', usb.enabled ? null : 'primary', function (b) { G.act(b, USB, { action: usb.enabled ? 'disable' : 'enable' }, { ok: usb.enabled ? 'Disconnected.' : 'Connecting.', refresh: ['usb', 'dash'], delay: 1800 }); }));
                 if (usb.enabled) acts.appendChild(ui.act('Reconnect', null, function (b) { G.act(b, USB, { action: 'up' }, { ok: 'Reconnecting.', refresh: ['usb', 'dash'], delay: 3000 }).then(function (j) { if (j && j.ok && j.hint) G.pop(j.hint, 'warn', 9000); }); }));
                 acts.appendChild(ui.act('Forget', 'danger', function (b) { confirm({ title: 'Forget this USB device?', body: 'The binding is cleared; plug it back in or scan to use it again.', okText: 'Forget', danger: true }).then(function (ok) { if (ok) G.act(b, USB, { action: 'forget' }, { ok: 'Forgotten.', refresh: ['usb'], delay: 1500 }); }); }));
-            } else pane.appendChild(ui.say('Nothing on USB. Plug in a phone with Personal Hotspot on, or a modem — the router picks it up by itself. On an iPhone, tap Trust when it asks.', null, 'usb'));
+            } else pane.appendChild(ui.say('Nothing on USB.', null, 'usb'));
             acts.appendChild(ui.act('Scan USB', usb.present ? null : 'primary', function (b) { G.act(b, USB, { action: 'redetect' }, { ok: false, refresh: ['usb'], delay: 1200 }).then(function (j) { if (j && j.ok) G.pop(j.device ? 'Found ' + j.device + '.' : 'No new USB device found.', j.device ? 'ok' : 'warn'); }); }, 'search'));
             pane.appendChild(acts);
             var m = usb.modem || {};
@@ -563,18 +568,18 @@ G.tile({
             var ts_ = ts, tuns = v.tunnels.slice().sort(function (a, b) { return (a.label || a.name).localeCompare(b.label || b.name); });
             api.meta(tuns.length ? fmt.plural(tuns.filter(function (t) { return tunnelLive(t, ts_); }).length, 'tunnel') + ' up' : '');
             var dead = tuns.filter(function (t) { var s = tunnelState(t, ts_); return !t.disabled && s.tone === 'bad'; });
-            if (dead.length) pane.appendChild(ui.say(dead.map(function (t) { return t.label || t.name; }).join(', ') + (dead.length === 1 ? ' is' : ' are') + ' not answering. ' + (v.failmode === 'closed' ? 'Devices routed through it have no internet until it recovers — switch Routing to fail open if you are travelling.' : (v.vpnwatch === 1 ? 'Devices on it are released to the normal uplink automatically.' : v.vpnwatch === 0 ? 'Automatic release is NOT running.' : 'Automatic release has not reported in yet.')), 'bad'));
+            if (dead.length) pane.appendChild(ui.say(dead.map(function (t) { return t.label || t.name; }).join(', ') + (dead.length === 1 ? ' is' : ' are') + ' not answering. ' + (v.failmode === 'closed' ? 'Routed devices have no internet until it recovers.' : 'Routed devices are released to the normal uplink.'), 'bad'));
             if (tuns.length) pane.appendChild(ui.cells(tuns.map(function (t) {
                 var s = tunnelState(t, ts_);
                 var sub = s.key === 'up' ? '↓ ' + fmt.bytes(t.rx) + ' · handshake ' + fmt.ago(t.handshake, ts_) : (t.endpoint || '').replace(/:$/, '');
                 return ui.cell({ k: t.name, t: t.label || t.name, s: sub, right: ui.mark(s.word, s.tone === 'idle' ? null : s.tone), on: s.key === 'up', dim: t.disabled, onClick: function () { tunnelDetail(t, ts_); } });
             })));
-            else pane.appendChild(ui.say('No tunnels yet. Paste a WireGuard .conf from your provider below.', null, 'shield'));
+            else pane.appendChild(ui.say('No tunnels yet.', null, 'shield'));
             /* add */
             pane.appendChild(el('div', 'field__l', 'Add a tunnel'));
             var nm = ui.input({ placeholder: 'Name (optional, letters, digits, - _)', maxlength: 12 });
             var conf = ui.textarea({ placeholder: '[Interface]\nPrivateKey = (yours)\nAddress = 10.2.0.2/32\nDNS = 10.2.0.1\n\n[Peer]\nPublicKey = (theirs)\nEndpoint = 1.2.3.4:51820\nAllowedIPs = 0.0.0.0/0, ::/0' });
-            pane.appendChild(ui.field('Name', nm)); pane.appendChild(ui.field('WireGuard configuration', conf, 'The whole file, [Interface] and [Peer] included. Its private key stays on the router.'));
+            pane.appendChild(ui.field('Name', nm)); pane.appendChild(ui.field('WireGuard configuration', conf, 'The whole file, [Interface] and [Peer].'));
             var row = el('div', 'inline'); row.style.justifyContent = 'flex-end';
             row.appendChild(ui.act('Add tunnel', 'primary', function (b) {
                 var c = conf.value; if (!c.trim() || !/\[Interface\]/i.test(c) || !/PrivateKey/i.test(c)) { G.pop('That does not look like a WireGuard config.', 'warn'); return; }
@@ -604,10 +609,10 @@ G.tile({
             var routed = v.policies.filter(function (p) { return p.enabled; }).length;
             api.meta(routed ? fmt.plural(routed, 'device') + ' routed' : 'all direct');
             var wants = v.policies.some(function (p) { return p.enabled; });
-            if (wants && v.pbr_active === false) pane.appendChild(ui.say('Per-device routing is not applying — pbr is not running. ' + (v.pbr_rules === 0 ? 'Start it.' : ''), 'bad'));
+            if (wants && v.pbr_active === false) pane.appendChild(ui.say('Routing is not applying: pbr is not running.', 'bad'));
             if (wants && v.pbr_active === false) { var st = ui.act('Start routing', 'primary sm', function (b) { G.act(b, VPN, { action: 'pbrstart' }, { ok: 'Routing is applying.', refresh: ['vpn'], delay: 700 }); }); st.style.marginBottom = '12px'; pane.appendChild(st); }
             var unrouted = v.policies.filter(function (p) { var t = byIface[p.iface]; return p.enabled && p.carrying === false && t && !t.disabled && t.up; });
-            if (unrouted.length) pane.appendChild(ui.say(fmt.plural(unrouted.length, 'device') + ' set to use a tunnel but nothing is routing through it — a policy-routing fault, not the tunnel.', 'warn'));
+            if (unrouted.length) pane.appendChild(ui.say(fmt.plural(unrouted.length, 'device') + ' set to a tunnel but not routed through it.', 'warn'));
             /* devices: present ones plus any absent one that still has a rule */
             var rows = devs.filter(function (x) { return x.online && !(x.zone === 'iot'); });
             Object.keys(pol).forEach(function (mac) { if (!rows.some(function (x) { return x.mac === mac; })) rows.push({ mac: mac, name: ((d && d.classmap && d.classmap[mac]) || {}).name || mac, online: false, ip: '', medium: 'idle', links: [] }); });
@@ -624,10 +629,10 @@ G.tile({
             /* fail mode */
             pane.appendChild(ui.field('If a tunnel goes down', ui.pick([{ value: 'closed', label: 'Block the device' }, { value: 'open', label: 'Keep it online' }], v.failmode === 'open' ? 'open' : 'closed', function (m) {
                 G.act(null, VPN, { action: 'failmode', mode: m }, { ok: m === 'open' ? 'Devices stay online without the tunnel while it is down.' : 'Devices are held private: no tunnel, no internet.', refresh: ['vpn'], delay: 400 });
-            }, true), v.failmode === 'open' ? 'Not private while the tunnel is down: after three minutes without an answer the device is sent to the normal uplink, and put back when the tunnel returns.' : 'Stays private: a device pinned to a dead tunnel has no internet until it recovers.'));
-            if (v.autopaused > 0) pane.appendChild(ui.say(fmt.plural(v.autopaused, 'route') + ' paused because a tunnel stopped responding; they resume on their own.', 'warn'));
+            }, true), v.failmode === 'open' ? 'Falls back to the normal uplink after three minutes.' : 'Private: no tunnel, no internet.'));
+            if (v.autopaused > 0) pane.appendChild(ui.say(fmt.plural(v.autopaused, 'route') + ' paused until the tunnel answers.', 'warn'));
             var pa = ui.act('Send every device to the normal uplink', 'danger sm', function (b) {
-                confirm({ title: 'Pause all VPN routing?', body: 'Every routed device goes back to the normal uplink. Routing has to be set again per device afterwards — the tunnels themselves stay up.', okText: 'Pause all', danger: true }).then(function (ok) { if (ok) G.act(b, VPN, { action: 'pauseall' }, { ok: 'All devices are on the normal uplink.', refresh: ['vpn', 'dash'] }); });
+                confirm({ title: 'Pause all VPN routing?', body: 'Every routed device goes back to the normal uplink.', okText: 'Pause all', danger: true }).then(function (ok) { if (ok) G.act(b, VPN, { action: 'pauseall' }, { ok: 'All devices are on the normal uplink.', refresh: ['vpn', 'dash'] }); });
             }); pane.appendChild(pa);
         }
         function drawAccess(v, ts) {
@@ -652,7 +657,7 @@ G.tile({
                         if (name == null) return; if (!String(name).trim()) { G.pop('Give the device a name.', 'warn'); return; }
                         G.act(b, WG, { action: 'addpeer', iface: road.iface, name: String(name).trim(), route: routeAll ? 'all' : 'lan' }, { ok: false, refresh: ['vpn'], delay: 300 }).then(function (j) {
                             if (!(j && j.ok)) return;
-                            var box = el('div'); box.appendChild(ui.say('Scan this once with the WireGuard app. The private key inside it is shown now and never again.', 'warn'));
+                            var box = el('div'); box.appendChild(ui.say('Scan once with the WireGuard app. The key is shown only now.', 'warn'));
                             box.appendChild(ui.qr(j.config)); var ta = ui.textarea({ value: j.config }); ta.readOnly = true; ta.style.minHeight = '140px'; box.appendChild(ta);
                             confirm({ title: j.name + ' · ' + j.address, body: box, okText: 'Done', cancelText: 'Close' });
                         });
@@ -662,8 +667,8 @@ G.tile({
                 pane.appendChild(acts);
                 var devs = (road.devices || []).slice().sort(function (a, b) { return (b.handshake || 0) - (a.handshake || 0); });
                 if (off) pane.appendChild(ui.say('Devices appear here while home access is on.', null, 'key'));
-                else if (down) pane.appendChild(ui.say('The relay server is not answering, so the device list cannot be read. Devices may still be connected.', 'warn'));
-                else if (!devs.length) pane.appendChild(ui.say('No devices yet — add one and scan its code with the WireGuard app.', null, 'key'));
+                else if (down) pane.appendChild(ui.say('The relay is not answering; the device list cannot be read.', 'warn'));
+                else if (!devs.length) pane.appendChild(ui.say('No devices yet.', null, 'key'));
                 else pane.appendChild(ui.cells(devs.map(function (dv) {
                     var age = dv.handshake ? ts - dv.handshake : null;
                     var state = age == null ? ['never connected', null] : age >= 86400 ? ['inactive', null] : age < 180 ? ['connected', 'ok'] : [fmt.ago(dv.handshake, ts), null];
@@ -678,7 +683,7 @@ G.tile({
                 var rp = road.peer || {};
                 pane.appendChild(ui.kv([['Relay server', rp.endpoint ? rp.endpoint + (rp.endpoint_port ? ':' + rp.endpoint_port : '') : ''], ['Keepalive', rp.keepalive ? rp.keepalive + ' s' : ''], ['MTU', road.mtu || 'automatic'], ['Interface', road.iface]]));
                 var rrow = el('div', 'inline'); rrow.style.marginBottom = '14px';
-                rrow.appendChild(ui.act('Change relay address', 'sm', function () { confirm({ title: 'Relay server', body: 'Change this only when the server itself is renumbered. Every tunnel that points at the old address follows; getting it wrong while remote loses the way in.', field: { label: 'Host or address', value: rp.endpoint || '' }, okText: 'Change', danger: true }).then(function (h) { if (h == null) return; h = String(h).trim(); if (!h || h === rp.endpoint) { G.pop(h ? 'That is the address it already uses.' : 'Enter an address.', 'warn'); return; } G.act(null, WG, { action: 'setvpshost', host: h, old: rp.endpoint }, { ok: 'Relay address changed.', refresh: ['vpn'], delay: 4000 }); }); }));
+                rrow.appendChild(ui.act('Change relay address', 'sm', function () { confirm({ title: 'Relay server', body: 'Every tunnel pointing at the old address follows.', field: { label: 'Host or address', value: rp.endpoint || '' }, okText: 'Change', danger: true }).then(function (h) { if (h == null) return; h = String(h).trim(); if (!h || h === rp.endpoint) { G.pop(h ? 'That is the address it already uses.' : 'Enter an address.', 'warn'); return; } G.act(null, WG, { action: 'setvpshost', host: h, old: rp.endpoint }, { ok: 'Relay address changed.', refresh: ['vpn'], delay: 4000 }); }); }));
                 rrow.appendChild(ui.act('Re-dial', 'sm', function (b) { confirm({ title: 'Re-dial home access?', body: 'Drops and re-establishes the tunnel — a few seconds.', okText: 'Re-dial' }).then(function (ok) { if (ok) G.act(b, WG, { action: 'redial', iface: road.iface }, { ok: 'Re-dialling.', refresh: ['vpn'], delay: 5000 }); }); }));
                 pane.appendChild(rrow);
             }
@@ -694,16 +699,15 @@ G.tile({
         function drawDns(v) {
             api.meta('');
             var vd = v.vpndns || {};
-            var notes = { unprotected: ['IPv6 leak protection is NOT in force: ' + vd.routed + ' routed device(s), and the firewall carries no IPv6 rules for them.', 'bad'], external: ['The firewall is refusing its ruleset because of a file outside this console; protection is still in force from the last good load.', 'warn'], 'rejected-v6only': ['The DNS redirect was refused and dropped. IPv6 is still blocked; routed devices resolve through the normal uplink.', 'warn'], nofirewall: ['There is no firewall loaded. Nothing is filtered, and this console has no login.', 'bad'] };
+            var notes = { unprotected: ['IPv6 leak protection is not in force for ' + vd.routed + ' routed device(s).', 'bad'], external: ['The firewall refused its ruleset; the last good rules still hold.', 'warn'], 'rejected-v6only': ['The DNS redirect was refused; IPv6 is still blocked.', 'warn'], nofirewall: ['No firewall is loaded.', 'bad'] };
             if (notes[vd.state]) pane.appendChild(ui.say(notes[vd.state][0], notes[vd.state][1]));
-            if (vd.state === 'nodns' && vd.nodns && vd.nodns.length) pane.appendChild(ui.say('No usable DNS server on ' + fmt.plural(vd.nodns.length, 'routed tunnel') + '. IPv6 is still blocked for those devices.', 'warn'));
+            if (vd.state === 'nodns' && vd.nodns && vd.nodns.length) pane.appendChild(ui.say('No usable DNS server on ' + fmt.plural(vd.nodns.length, 'routed tunnel') + '.', 'warn'));
             pane.appendChild(ui.readouts([ui.readout('Tunnel DNS', vd.state === 'ok' ? 'Protected' : vd.state === 'idle' ? 'Idle' : (vd.state || 'unknown'), vd.routed ? fmt.plural(vd.routed, 'routed device') + ' · ' + (vd.v6_rules || 0) + ' IPv6 rules' : 'nothing routed', vd.state === 'ok' ? 'ok' : vd.state === 'idle' ? null : 'warn')]));
             var td = v.traveldns;
             if (td && td.state !== 'off' && td.state !== 'unknown') {
                 var tw = td.state === 'active' ? ['Plaintext fallback', 'warn'] : td.state === 'settling' ? ['Switching', 'warn'] : td.state === 'pending' ? ['Fallback not loaded', 'bad'] : td.state === 'indeterminate' ? ['Cannot tell', 'warn'] : [td.state, 'warn'];
                 pane.appendChild(ui.readouts([ui.readout('Travel DNS', tw[0], (td.servers && td.servers.length) ? td.servers.join(', ') : 'this network’s resolver', tw[1])]));
-                if (td.state === 'pending') pane.appendChild(ui.say('The fallback is written but dnsmasq has not loaded it. Over SSH: /etc/init.d/dnsmasq reload', 'bad'));
-                else pane.appendChild(ui.say('On a hotel or phone uplink, DNS goes to that network’s own resolver in plain text so captive portals can appear. Encrypted DNS returns at home.', null));
+                if (td.state === 'pending') pane.appendChild(ui.say('Fallback not loaded. Over SSH: /etc/init.d/dnsmasq reload', 'bad'));
             }
             var a = v.adguard;
             if (a) {
@@ -711,7 +715,7 @@ G.tile({
                 var reads = [ui.readout('Content filtering', word[0], a.up ? (a.reason || '') : (a.reason === 'auth' ? 'service fine, the console’s credential no longer matches' : 'DNS is down with it — /etc/init.d/adguardhome restart over SSH'), word[1])];
                 if (a.up) { reads.push(ui.readout('Queries · 24 h', (a.queries || 0).toLocaleString(), '')); reads.push(ui.readout('Blocked', (a.blocked || 0).toLocaleString(), a.queries ? (Math.round(a.blocked * 1000 / a.queries) / 10) + '% of all queries' : '')); }
                 pane.appendChild(ui.readouts(reads));
-                if (a.up && a.upfail && a.upfail.recent >= 2) pane.appendChild(ui.say(a.upfail.recent + ' upstream failures in the last 30 minutes, last at ' + a.upfail.last + '. Encrypted DNS is not answering; lookups may be slow or fail.', 'bad'));
+                if (a.up && a.upfail && a.upfail.recent >= 2) pane.appendChild(ui.say(a.upfail.recent + ' upstream failures in 30 minutes; encrypted DNS is struggling.', 'bad'));
                 if (a.up) { var r = el('div', 'inline'); r.appendChild(ui.act(a.protection ? 'Pause filtering' : 'Resume filtering', a.protection ? null : 'primary', function (b) { G.act(b, VPN, { action: 'aghprot', state: a.protection ? 'off' : 'on' }, { ok: a.protection ? 'Filtering paused.' : 'Filtering on.', refresh: ['vpn'], delay: 300 }); })); var portal = el('a', 'act'); portal.href = 'http://' + location.hostname + ':3010/'; portal.target = '_blank'; portal.rel = 'noopener'; portal.textContent = 'Open the AdGuard portal'; r.appendChild(portal); pane.appendChild(r); }
             }
         }
@@ -754,7 +758,7 @@ G.tile({
             if (clients != null) reads.push(ui.readout('Devices', String(clients), 'on this band'));
             pane.appendChild(ui.readouts(reads));
             var cfgW = parseInt(String(r.htmode).replace(/^[A-Z]+/, ''), 10) || 20;
-            if (live && !r.disabled && (String(live.channel) !== String(r.channel) || live.width !== cfgW)) pane.appendChild(ui.say('Running ch ' + live.channel + ' at ' + live.width + ' MHz, configured ch ' + r.channel + ' at ' + cfgW + ' MHz. ' + (r.band === '2g' && live.width < cfgW ? 'Neighbouring 2.4 GHz networks forced the width down.' : 'The radio negotiated it; the configured value is still the target.'), null));
+            if (live && !r.disabled && (String(live.channel) !== String(r.channel) || live.width !== cfgW)) pane.appendChild(ui.say('Running ch ' + live.channel + ' at ' + live.width + ' MHz; configured ch ' + r.channel + ' at ' + cfgW + ' MHz.', null));
             /* the form */
             var f = form(api, { onApply: apply, onReset: draw }); isDirty = f.isDirty;
             var en = ui.check('Radio on', !r.disabled);
@@ -774,9 +778,9 @@ G.tile({
             pw.setAttribute('data-nodirty', '1'); if (!r.txopts.length) pw.disabled = true;
             pw.addEventListener('change', function (e) { e.stopPropagation(); G.act(null, SET, { action: 'setpower', radio: r.id, pct: pw.value }, { ok: 'Power set.', refresh: ['set'], delay: 1500 }); });
             f.root.appendChild(en.row);
-            f.root.appendChild(ui.field('Network name', ssid)); f.root.appendChild(ui.field('Password', key, 'Leave blank to keep the current one. 8–63 characters.'));
+            f.root.appendChild(ui.field('Network name', ssid)); f.root.appendChild(ui.field('Password', key, 'Blank keeps the current one.'));
             var g = el('div', 'row2'); g.appendChild(ui.field('Channel', chSel)); g.appendChild(ui.field('Mode', modeSel)); f.root.appendChild(g);
-            f.root.appendChild(ui.field('Transmit power', pw, 'Applies immediately, nothing disconnects.'));
+            f.root.appendChild(ui.field('Transmit power', pw));
             var restart = ui.act('Restart radio', 'danger sm', function (b) { confirm({ title: 'Restart the ' + G.bandLabel(r.band) + ' radio?', body: 'Every device on this band drops for a few seconds.', okText: 'Restart', danger: true }).then(function (ok) { if (ok) G.act(b, DASH, { action: 'fixradio', radio: r.id }, { ok: 'Restarting.', refresh: ['set', 'dash'], delay: 4000 }); }); });
             f.row.insertBefore(restart, f.row.firstChild); restart.style.marginRight = 'auto';
             f.root.appendChild(f.row); pane.appendChild(f.root);
@@ -823,16 +827,16 @@ function secondaryTile(id, net, ic, label, order) {
             var n = secondary(api.data, net); if (!n) { body.appendChild(ui.empty(ic, 'No ' + label.toLowerCase() + ' network', 'Nothing on this router is attached to a network called ' + net + '.')); return; }
             api.meta(n.disabled ? 'off' : 'on');
             var facts = [n.bands.length ? n.bands.map(G.bandLabel).join(' + ') : 'no radio', n.isolate ? 'isolated from the main network' : 'not isolated'];
-            body.appendChild(ui.say(facts.join(' · ') + (n.legacy ? '. Advertises WPA2-PSK alone, so old devices can join.' : ''), null, ic));
-            if (n.split) body.appendChild(ui.say('The two bands of this network have drifted apart (different name or password). Applying writes the same to both.', 'warn'));
+            body.appendChild(ui.say(facts.join(' · ') + (n.legacy ? ' · WPA2 only' : ''), null, ic));
+            if (n.split) body.appendChild(ui.say('The two bands differ; Apply writes the same to both.', 'warn'));
             if (net === 'guest') {
                 var qbox = el('div'); body.appendChild(qbox);
-                function drawQr() { clear(qbox); G.get(TOOLS + '?action=guestqr').then(function (j) { if (!(j && j.ok && j.present)) return; var q = ui.qr(j.wifi); qbox.appendChild(q); qbox.appendChild(el('div', 'field__h', (j.enabled ? 'Scan with a phone camera to join ' : 'Guest is off — the code works once it is on. ') + '“' + j.ssid + '”.')); qbox.lastChild.style.textAlign = 'center'; }).catch(function () {}); }
+                function drawQr() { clear(qbox); G.get(TOOLS + '?action=guestqr').then(function (j) { if (!(j && j.ok && j.present)) return; var q = ui.qr(j.wifi); qbox.appendChild(q); qbox.appendChild(el('div', 'field__h', j.enabled ? 'Scan to join' : 'Guest is off')); qbox.lastChild.style.textAlign = 'center'; }).catch(function () {}); }
                 drawQr();
             }
             var f = form(api, { onApply: apply, onReset: function () { G.sheet.open(id); } });
             var en = ui.check('Network on', !n.disabled), ssid = ui.input({ value: n.ssid, maxlength: 32 }), key = ui.input({ type: 'password', placeholder: 'unchanged', autocomplete: 'new-password' });
-            f.root.appendChild(en.row); f.root.appendChild(ui.field('Network name', ssid)); f.root.appendChild(ui.field('Password', key, 'Leave blank to keep the current one.'));
+            f.root.appendChild(en.row); f.root.appendChild(ui.field('Network name', ssid)); f.root.appendChild(ui.field('Password', key, 'Blank keeps the current one.'));
             f.root.appendChild(f.row); body.appendChild(f.root);
             function apply(btn) {
                 var off = !en.input.checked && !n.disabled;
@@ -876,7 +880,7 @@ G.tile({
             var dn = ui.spark(ring.map(function (s) { return s.dn; }), { w: 300, h: 80, fill: true, max: peak || 1, zero: true }); dn.style.height = '96px';
             var up = ui.spark(ring.map(function (s) { return s.up; }), { w: 300, h: 80, fill: true, max: peak || 1, accent: true }); up.style.height = '96px'; up.style.marginTop = '-96px';
             chart.appendChild(dn); chart.appendChild(up);
-            chart.appendChild(el('div', 'field__h', 'download in ink, upload in maroon · same scale'));
+            chart.appendChild(el('div', 'field__h', 'Down in ink, up in maroon'));
         }
         function traffic() {
             clear(tr); var d = api.data.dash; if (!d) return;
@@ -888,7 +892,7 @@ G.tile({
             rows.sort(function (a, b) { return b.sum - a.sum; });
             var title = d.nlbw_daily ? 'Traffic today' : (d.nlbw_period ? 'Traffic since ' + d.nlbw_period : 'Traffic');
             tr.appendChild(el('div', 'field__l', title + (grand ? ' · ' + fmt.bytes(grand) : '')));
-            if (!rows.length) { tr.appendChild(ui.say(d.nlbw_up === false ? 'Per-device accounting is not running, so nothing is being counted.' : 'No per-device accounting yet today.', null)); return; }
+            if (!rows.length) { tr.appendChild(ui.say(d.nlbw_up === false ? 'Accounting is not running.' : 'Nothing counted yet today.', null)); return; }
             tr.appendChild(ui.lines(rows.slice(0, 12).map(function (r) { var b = el('span'); b.appendChild(el('b', null, r.name)); b.appendChild(document.createTextNode('  ↓ ' + fmt.bytes(r.dn) + ' · ↑ ' + fmt.bytes(r.up))); var pct = r.sum * 100 / grand; return ui.line(null, b, fmt.bytes(r.sum) + ' · ' + (pct < 1 ? '<1' : Math.round(pct)) + '%'); })));
             var uu = d.uplink_usage; if (uu && uu.ok) tr.appendChild(el('div', 'field__h', (uu.kind === 'wwan' ? 'Wi-Fi uplink, this session: ' : uu.kind === 'tethering' ? 'USB uplink, this session: ' : 'This month over Ethernet: ') + fmt.bytes(uu.total)));
         }
@@ -933,8 +937,8 @@ G.tile({
         function drawHealth() {
             var d = api.data.dash, r = api.data.rate, s = api.data.set; if (!d) { pane.appendChild(ui.wait(3)); return; }
             var h = health(d, r); api.meta(h.word[0]);
-            if (d.sys.firewall === 'absent') { var fw = ui.say('There is NO firewall loaded. Nothing is filtered and this console has no login — a file under /etc/nftables.d/ is broken. Restart it now; if that fails, the file has to be removed over SSH.', 'bad'); fw.appendChild(ui.act('Restart firewall', 'primary sm', function (b) { confirm({ title: 'Restart the firewall?', body: 'Connections in flight may drop.', okText: 'Restart' }).then(function (ok) { if (ok) G.act(b, SET, { action: 'fwrestart' }, { ok: 'Firewall reloaded. Filtering is back on.', failPrefix: 'Could not reload it', refresh: ['dash', 'vpn'] }); }); })); pane.appendChild(fw); }
-            if (d.jobs && d.jobs.state === 'stale' && d.jobs.stale.length) { var NM = { dashmon: 'history and reachability', apwatch: 'the Wi-Fi watchdog', vpnwatch: 'automatic VPN release', notifymon: 'push notifications', wifiwatch: 'real-time Wi-Fi alerts' }; pane.appendChild(ui.say(d.jobs.cron === false ? 'The scheduler is not running, so no background job is. Over SSH: /etc/init.d/cron restart' : 'Not reporting in: ' + d.jobs.stale.map(function (j) { return NM[j] || j; }).join(', ') + '.' + (d.jobs.stale.indexOf('wifiwatch') >= 0 ? ' Over SSH: /etc/init.d/wifiwatch restart' : ''), 'bad')); }
+            if (d.sys.firewall === 'absent') { var fw = ui.say('No firewall is loaded. Nothing is filtered.', 'bad'); fw.appendChild(ui.act('Restart firewall', 'primary sm', function (b) { confirm({ title: 'Restart the firewall?', body: 'Connections in flight may drop.', okText: 'Restart' }).then(function (ok) { if (ok) G.act(b, SET, { action: 'fwrestart' }, { ok: 'Firewall reloaded. Filtering is back on.', failPrefix: 'Could not reload it', refresh: ['dash', 'vpn'] }); }); })); pane.appendChild(fw); }
+            if (d.jobs && d.jobs.state === 'stale' && d.jobs.stale.length) { var NM = { dashmon: 'history and reachability', apwatch: 'the Wi-Fi watchdog', vpnwatch: 'automatic VPN release', notifymon: 'push notifications', wifiwatch: 'real-time Wi-Fi alerts' }; pane.appendChild(ui.say(d.jobs.cron === false ? 'The scheduler is not running. Over SSH: /etc/init.d/cron restart' : 'Not reporting: ' + d.jobs.stale.map(function (j) { return NM[j] || j; }).join(', ') + '.' + (d.jobs.stale.indexOf('wifiwatch') >= 0 ? ' Over SSH: /etc/init.d/wifiwatch restart' : ''), 'bad')); }
             pane.appendChild(ui.readouts([
                 ui.readout('CPU', Math.round(h.cpu * 100), h.cpu >= 1 ? 'overloaded' : h.cpu > 0.7 ? 'working hard' : h.cpu > 0.25 ? 'comfortable' : 'plenty of headroom', h.cpu >= 1 ? 'bad' : h.cpu > 0.7 ? 'warn' : null, '%'),
                 ui.readout('Temperature', h.temp ? h.temp.toFixed(1) : '—', h.fan ? 'fan at ' + h.fan + ' rpm' : 'fan idle', h.temp > 85 ? 'bad' : h.temp > 75 ? 'warn' : null, h.temp ? '°C' : ''),
@@ -954,7 +958,7 @@ G.tile({
             var ip = ui.input({ value: lan.ipaddr, inputmode: 'decimal', maxlength: 15 }), start = ui.input({ type: 'number', value: lan.dhcp.start, min: 2, max: 254, inputmode: 'numeric' }), limit = ui.input({ type: 'number', value: lan.dhcp.limit, min: 1, max: 253, inputmode: 'numeric' });
             var lease = ui.select(['30m', '1h', '6h', '12h', '24h', '72h'].map(function (x) { return { value: x, label: ({ '30m': '30 minutes', '1h': '1 hour', '6h': '6 hours', '12h': '12 hours', '24h': '24 hours', '72h': '3 days' })[x] }; }), lan.dhcp.leasetime);
             f.root.appendChild(el('div', 'field__l', 'LAN and DHCP'));
-            f.root.appendChild(ui.field('Router address', ip, 'Subnet stays 255.255.255.0. Changing this moves the console to the new address.'));
+            f.root.appendChild(ui.field('Router address', ip, 'The console moves with it.'));
             var g = el('div', 'row2'); g.appendChild(ui.field('Pool starts at', start)); g.appendChild(ui.field('Pool size', limit)); f.root.appendChild(g);
             f.root.appendChild(ui.field('Lease time', lease));
             f.root.appendChild(f.row); pane.appendChild(f.root);
@@ -962,7 +966,7 @@ G.tile({
                 var v = ip.value.trim(), moving = v !== lan.ipaddr;
                 var okIp = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(v) && v.split('.').every(function (o) { return +o <= 255; }) && +v.split('.')[3] >= 1 && +v.split('.')[3] <= 254;
                 if (!okIp) { G.pop('That is not a usable router address.', 'warn'); return; }
-                (moving ? confirm({ title: 'Move the router to ' + v + '?', body: 'Every device renews its lease within a minute. This console will then be at http://' + v + '/console/', okText: 'Move', danger: true }) : Promise.resolve(true)).then(function (ok) {
+                (moving ? confirm({ title: 'Move the router to ' + v + '?', body: 'The console will be at http://' + v + '/console/', okText: 'Move', danger: true }) : Promise.resolve(true)).then(function (ok) {
                     if (!ok) return;
                     G.act(btn, SET, { action: 'setlan', ipaddr: v, start: start.value, limit: limit.value, leasetime: lease.value }, { ok: moving ? 'Moving.' : 'Applied.', refresh: moving ? [] : ['set'] }).then(function (j) {
                         if (j && j.ok) f.clean();
@@ -983,23 +987,21 @@ G.tile({
             if (rd.verdict && rd.verdict !== 'off') {
                 var vw = rd.verdict === 'fault' ? ['Unreachable', 'bad'] : rd.verdict === 'none' ? ['None', null] : ['On-link', 'ok'];
                 pane.appendChild(ui.readouts([ui.readout('DNS advertised to devices', vw[0], (rd.servers || []).map(function (x) { return x.addr; }).join(', ') || 'no server', vw[1])]));
-                pane.appendChild(el('div', 'field__h', rd.source === 'override' ? 'Set explicitly on this router.' : rd.source === 'upstream' ? 'Relayed from the uplink, exactly as the ISP sent it.' : 'The router advertises itself.'));
-                if (rd.verdict === 'fault') { var fx = ui.say('A DNS server the router advertises is a link-local address that is not this router — devices cannot reach it and some reconnect every few seconds. Pin the router’s own address.', 'bad'); fx.appendChild(ui.act('Fix', 'primary sm', function (b) { G.act(b, SET, { action: 'ra6fix' }, { ok: 'The router now advertises itself.', refresh: ['set'], delay: 2000 }); })); pane.appendChild(fx); }
+                if (rd.verdict === 'fault') { var fx = ui.say('The advertised DNS is a link-local address that is not this router.', 'bad'); fx.appendChild(ui.act('Fix', 'primary sm', function (b) { G.act(b, SET, { action: 'ra6fix' }, { ok: 'The router now advertises itself.', refresh: ['set'], delay: 2000 }); })); pane.appendChild(fx); }
             }
         }
         function drawAlerts() {
             var s = api.data.set; if (!s) { pane.appendChild(ui.wait(3)); return; }
             var n = s.notify; api.meta(n.enabled ? 'on' : 'off');
-            if (n.weak) pane.appendChild(ui.say('The stored address is guessable. Alerts can be switched off with it in place, but not back on until it is replaced — use the service’s generate button.', 'warn'));
-            if (n.queued > 0) pane.appendChild(ui.say(fmt.plural(n.queued, 'message') + ' waiting to be delivered — the router could not reach the service. They go as soon as it can.', 'warn'));
+            if (n.weak) pane.appendChild(ui.say('The address is guessable; replace it before switching alerts on.', 'warn'));
+            if (n.queued > 0) pane.appendChild(ui.say(fmt.plural(n.queued, 'message') + ' waiting for the service.', 'warn'));
             var f = form(api, { onApply: apply, onReset: draw }); isDirty = f.isDirty;
             var en = ui.check('Send me a message when something changes', n.enabled);
             var u = ui.input({ type: 'password', value: n.url, placeholder: 'https://ntfy.sh/your-private-topic', autocomplete: 'off' }); u.style.flex = '1 1 200px';
             var row = el('div', 'inline'); row.appendChild(u);
             row.appendChild(ui.act('Show', 'quiet sm', function (b) { var m = u.type === 'password'; u.type = m ? 'text' : 'password'; setTxt(b.lastChild, m ? 'Hide' : 'Show'); }));
             row.appendChild(ui.act('Copy', 'quiet sm', function () { var ok = false; try { var was = u.type; u.type = 'text'; u.select(); u.setSelectionRange(0, 99999); ok = document.execCommand('copy'); u.type = was; u.blur(); } catch (e) {} G.pop(ok ? 'Address copied.' : 'Could not copy — tap Show and copy by hand.', ok ? 'ok' : 'warn'); }));
-            f.root.appendChild(en.row); f.root.appendChild(ui.field('Where to send it', row, 'Install the ntfy app and subscribe to the topic at the end of this address. Treat it as a password.'));
-            f.root.appendChild(el('div', 'field__h', 'Sent: the internet link, IPv6, the firewall, encrypted DNS, traffic accounting, and Wi-Fi arrivals and departures — only when something changes. Never sent: addresses, keys, or anything you browse.'));
+            f.root.appendChild(en.row); f.root.appendChild(ui.field('Where to send it', row, 'An ntfy topic address. Treat it as a password.'));
             var test = ui.act('Send a test', 'quiet sm', function (b) { G.act(b, SET, { action: 'testnotify' }, { ok: 'Sent — check your phone.', failPrefix: 'Not sent' }); });
             f.row.insertBefore(test, f.row.firstChild); test.style.marginRight = 'auto';
             f.root.appendChild(f.row); pane.appendChild(f.root);
@@ -1017,7 +1019,7 @@ G.tile({
             var ZONES = ['Asia/Jakarta', 'Asia/Makassar', 'Asia/Jayapura', 'Asia/Singapore', 'Asia/Tokyo', 'Asia/Dubai', 'Europe/London', 'Europe/Amsterdam', 'America/New_York', 'America/Los_Angeles', 'Australia/Sydney', 'UTC'];
             var zopts = ZONES.map(function (z) { return { value: z, label: z.replace(/_/g, ' ') }; }); if (ZONES.indexOf(sys.zonename) < 0 && sys.zonename) zopts.unshift({ value: sys.zonename, label: sys.zonename + ' (as configured)', disabled: true });
             var hn = ui.input({ value: sys.hostname, maxlength: 24 }), tz = ui.select(zopts, sys.zonename);
-            f.root.appendChild(ui.field('Hostname', hn, 'Letters, digits and hyphens.')); f.root.appendChild(ui.field('Time zone', tz, 'Daily traffic totals roll over at midnight in this zone. Time sync ' + (sys.ntp ? 'on' : 'off') + ' · up ' + fmt.dur(sys.uptime)));
+            f.root.appendChild(ui.field('Hostname', hn)); f.root.appendChild(ui.field('Time zone', tz));
             f.root.appendChild(f.row); pane.appendChild(f.root);
             function apply(btn) { G.act(btn, SET, { action: 'setsys', hostname: hn.value.trim(), zonename: tz.value }, { ok: 'Saved.', refresh: ['set', 'dash'] }).then(function (j) { if (j && j.ok) f.clean(); }); }
             /* software */
@@ -1031,9 +1033,9 @@ G.tile({
             if (sw.owut) srow.appendChild(ui.act(c ? 'Check again' : 'Check for updates', null, function (b) { G.act(b, SET, { action: 'updcheck' }, { ok: 'Checked.', refresh: ['set'] }); }, 'refresh'));
             pane.appendChild(srow);
             if (c && c.packages && c.packages.length) {
-                pane.appendChild(ui.say(fmt.plural(c.packages.length, 'package') + ' out of date' + (hasUpd ? '; a firmware upgrade replaces files edited in place on this router, so it is deliberately not done from here.' : '.'), hasUpd ? 'warn' : null));
+                pane.appendChild(ui.say(fmt.plural(c.packages.length, 'package') + ' out of date.', hasUpd ? 'warn' : null));
                 pane.appendChild(ui.lines(c.packages.slice(0, 20).map(function (p) { var b = el('span'); b.appendChild(el('b', null, p.name)); b.appendChild(document.createTextNode('  ' + p.from + ' → ' + p.to)); return ui.line(null, b); })));
-                var upg = ui.act('Update ' + fmt.plural(c.packages.length, 'package'), 'primary', function (b) { confirm({ title: 'Update ' + fmt.plural(c.packages.length, 'package') + '?', body: 'apk upgrades exactly these. No reboot.', okText: 'Update' }).then(function (ok) { if (ok) G.act(b, SET, { action: 'pkgupgrade', names: c.packages.map(function (p) { return p.name; }).join(' ') }, { ok: 'Updated.', refresh: [] }).then(function (j) { if (j && j.ok) G.act(null, SET, { action: 'updcheck' }, { ok: false, refresh: ['set'] }); }); }); }); var urow = el('div', 'inline'); urow.appendChild(upg); pane.appendChild(urow);
+                var upg = ui.act('Update ' + fmt.plural(c.packages.length, 'package'), 'primary', function (b) { confirm({ title: 'Update ' + fmt.plural(c.packages.length, 'package') + '?', body: 'No reboot.', okText: 'Update' }).then(function (ok) { if (ok) G.act(b, SET, { action: 'pkgupgrade', names: c.packages.map(function (p) { return p.name; }).join(' ') }, { ok: 'Updated.', refresh: [] }).then(function (j) { if (j && j.ok) G.act(null, SET, { action: 'updcheck' }, { ok: false, refresh: ['set'] }); }); }); }); var urow = el('div', 'inline'); urow.appendChild(upg); pane.appendChild(urow);
             }
             var rb = ui.act('Restart router', 'danger', function (b) { confirm({ title: 'Restart the router?', body: 'Every Wi-Fi network and every tunnel drops for about a minute.', okText: 'Restart', danger: true }).then(function (ok) { if (!ok) return; G.act(b, SET, { action: 'reboot' }, { ok: 'Restarting — back in about a minute.', refresh: [] }).then(function (j) { if (!(j && j.ok)) return; for (var k in G.polls) G.polls[k].stop(); G.link.set('down', 'restarting'); setTimeout(function poll() { G.get(SET, 3000).then(function (jj) { if (jj && jj.ok) location.reload(); else setTimeout(poll, 3000); }, function () { setTimeout(poll, 3000); }); }, 25000); }); }); }, 'power');
             var lu = el('a', 'act act--quiet'); lu.href = '/cgi-bin/luci/'; lu.textContent = 'Open LuCI';
@@ -1104,16 +1106,15 @@ G.tile({
         function draw() {
             clear(body); var t = travelState(api.data);
             api.meta(t && t.on ? 'away' : 'home');
-            body.appendChild(ui.say(t && t.on ? 'Away since ' + fmt.ago(t.since) + '. Switching back puts everything below back the way it was.' : 'One switch for leaving the house with the router.', null, t && t.on ? 'plane' : 'home'));
+            body.appendChild(ui.say(t && t.on ? 'Away since ' + fmt.ago(t.since) + '.' : 'One switch for leaving the house.', null, t && t.on ? 'plane' : 'home'));
             var g = secondary(api.data, 'guest'), i = secondary(api.data, 'iot'), v = api.data.vpn;
             body.appendChild(el('div', 'field__l', 'What Away does'));
             body.appendChild(ui.lines([
-                ui.line(null, textB('Guest Wi-Fi off', ' — a hotel does not need your guest network' + (g ? ' · now ' + (g.disabled ? 'off' : 'on') : ' · none on this router'))),
-                ui.line(null, textB('IoT network off', ' — the plugs stayed at home' + (i ? ' · now ' + (i.disabled ? 'off' : 'on') : ' · none on this router'))),
-                ui.line(null, textB('VPN fails open', ' — a hotel that blocks WireGuard must not leave a routed device with no internet' + (v ? ' · now ' + (v.failmode === 'open' ? 'open' : 'closed') : ''))),
-                ui.line(null, textB('Travel DNS', ' — automatic: on a Wi-Fi or USB uplink, DNS goes plain so captive portals appear'))
+                ui.line(null, textB('Guest Wi-Fi off', g ? '  now ' + (g.disabled ? 'off' : 'on') : '  none')),
+                ui.line(null, textB('IoT off', i ? '  now ' + (i.disabled ? 'off' : 'on') : '  none')),
+                ui.line(null, textB('VPN fails open', v ? '  now ' + (v.failmode === 'open' ? 'open' : 'closed') : '')),
+                ui.line(null, textB('Travel DNS', '  automatic on a Wi-Fi or USB uplink'))
             ]));
-            body.appendChild(el('div', 'field__h', 'Home puts back only what Away changed. Each step is one of the console’s ordinary actions; if one fails, the others still stand and the tiles show what is actually true.'));
         }
         draw(); api.on('tools', draw); api.on('set', draw); api.on('vpn', draw);
     }
@@ -1179,7 +1180,7 @@ G.tile({
             var run = ui.act(running ? 'Measuring' : 'Run a speed test', 'primary', start, 'bolt');
             if (running) { run.disabled = true; run.classList.add('is-busy'); }
             var rrow = el('div', 'inline'); rrow.appendChild(run); res.appendChild(rrow);
-            res.appendChild(el('div', 'field__h', 'What fast.com does, from the router: four parallel streams from the nearest test server that answers (Singapore mirrors, then Cloudflare) for ten seconds, read off the uplink’s own counters with the first two seconds discarded — so anything else using the uplink counts too. Download only: an honest upload figure needs a server near you, and the nearest free public one read a sixth of what this line does, so it is left out rather than shown wrong. It measures the uplink, not your Wi-Fi; for that, use iPerf below.'));
+            res.appendChild(el('div', 'field__h', 'Four streams, ten seconds, from the router. Download only.'));
         }
         function start() {
             if (running) return;
@@ -1203,14 +1204,14 @@ G.tile({
         function drawIperf() {
             clear(ip); var s = api.data.set, p = s && s.iperf; if (!p) return;
             ip.appendChild(el('div', 'field__l', 'iPerf server'));
-            if (!p.installed) { ip.appendChild(ui.say('Needs the iperf3 package: apk add iperf3 over SSH.', null)); return; }
+            if (!p.installed) { ip.appendChild(ui.say('Needs iperf3: apk add iperf3', null)); return; }
             var w = p.running ? ['Listening', 'ok'] : p.enabled ? ['Not listening', 'warn'] : ['Off', null];
             var sw = ui.switchEl(p.enabled, function (v, s_) { ui.setSwitch(s_, !v, true); G.act(null, SET, { action: 'setiperf', enabled: v ? '1' : '0', port: port.value }, { ok: v ? 'Listening on ' + p.ip + ':' + port.value : 'iPerf off.', refresh: ['set'] }).then(function () { s_.disabled = false; }); }, 'iPerf server');
             var port = ui.input({ type: 'number', value: p.port, min: 1024, max: 65535, inputmode: 'numeric', inline: true, label: 'Port' }); port.style.maxWidth = '120px';
             var row = el('div', 'inline'); row.appendChild(sw); row.appendChild(ui.mark(w[0], w[1])); row.appendChild(port);
             ip.appendChild(row);
             ip.appendChild(ui.kv([['Listening on', p.ip + ':' + p.port], ['From a laptop', 'iperf3 -c ' + p.ip + ' -p ' + p.port]]));
-            ip.appendChild(el('div', 'field__h', 'Reachable from the main network; guest and IoT are kept out by the firewall. Measures your Wi-Fi or cable to the router, not the internet.'));
+            ip.appendChild(el('div', 'field__h', 'Main network only. Tests your Wi-Fi to the router.'));
         }
         drawRes(); drawIperf(); api.on('tools', function () { if (!running) drawRes(); }); api.on('set', drawIperf);
     }

@@ -205,3 +205,9 @@ Every component is a constructor on `G.ui` in `core.js` and a class family in `c
 ## Not canonized
 
 Inline `style.cssText` in `tiles.js` (lines 138, 216, 435, 522: margins, flex alignment, a mono log block) and the off-token sizes in §4 (11px, 11.5px, 13px) are carried as build details, not as system rules; a future surface should reach for a class or a token instead. The `Speed` label is recorded as shipped; PRODUCT.md's terminology list does not yet include it.
+
+## Revision 2026-09-15 evening — the neutral ground
+
+The owner attached a reference (near-white / near-black field with fine geometric line-art) and asked for the console to feel like the iPhone's own screens. The ground lost its coloured bands: `--ground` is `#f2f1ee` / `#0c0c0f`, the three gradients sit at .07–.18 alpha, and a `--motif` token (an inline SVG of concentric hairline circles with four spokes, stroke ≈ .08 alpha) is laid twice, off the top-right and bottom-left corners, as the only pattern. Panes gained body (`--pane` .58 light / .05 dark) with hairline edges (.09 / .10); the on-face tint fell to 16 % / 20 % accent. The Path strip's border is solid, not dashed.
+
+Copy rule, from the same request: no explanatory paragraphs anywhere in the UI. A caption is one short clause; a note is one sentence; long lists (saved probe addresses) fold behind a `.disc` disclosure, closed by default. Nothing is ever truncated with an ellipsis.
