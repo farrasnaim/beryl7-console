@@ -393,7 +393,7 @@ G.tile({
     },
     sheet: function (body, api) {
         var seg = 'sources';
-        var pick = ui.pick([{ value: 'sources', label: 'Sources' }, { value: 'wifi', label: 'Wi-Fi uplink' }, { value: 'usb', label: 'USB' }], seg, function (v) { seg = v; draw(); }, true);
+        var pick = ui.pick([{ value: 'sources', label: 'Sources' }, { value: 'wifi', label: 'Wi-Fi Tethering' }, { value: 'usb', label: 'USB Tethering' }], seg, function (v) { seg = v; draw(); }, true);
         body.appendChild(pick);
         var pane = el('div'); body.appendChild(pane);
         var scanResults = null, scanAt = 0, formLive = null;

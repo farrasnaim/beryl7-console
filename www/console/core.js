@@ -11,7 +11,7 @@
 (function () {
 'use strict';
 
-var CONSOLE_VERSION = 'ceea5923aa';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
+var CONSOLE_VERSION = 'daa0282318';   /* rewritten by bump-assets.sh; 'dev' means "do not compare" */
 
 var G = window.G = {};
 
