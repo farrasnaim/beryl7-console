@@ -488,6 +488,15 @@ if [ "$ACTION" = "add" ]; then
     uci set wireless.uplink.encryption="$ENCV"
     [ "$ENCV" != "none" ] && uci set wireless.uplink.key="$KEY"
     uci set wireless.uplink.disabled='0'
+    # This section is deleted and rebuilt on every join, so a MAC set once by
+    # beryl-stealth would survive exactly until the next network — and the join
+    # after that would put the GL.iNet OUI back on the air with no sign that
+    # anything had lapsed. Asking the helper here is what makes stealth hold
+    # across a change of uplink.
+    if [ -x /usr/sbin/beryl-stealth ]; then
+        SMAC=$(/usr/sbin/beryl-stealth persona wwan 2>/dev/null)
+        [ -n "$SMAC" ] && uci set wireless.uplink.macaddr="$SMAC"
+    fi
     uci commit wireless
     # `wifi reload` alone is NOT enough: after a failed association netifd marks
     # wwan disabled and never retries, so the STA interface is never recreated
