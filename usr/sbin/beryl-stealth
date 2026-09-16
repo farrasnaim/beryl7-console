@@ -1,0 +1,421 @@
+#!/bin/sh
+# /usr/sbin/beryl-stealth  —  present the router as an ordinary client while away.
+#
+# WHAT THIS IS FOR
+#
+# Plugged into someone else's network, a travel router announces itself several
+# times over before it forwards a single packet: the WAN MAC carries GL.iNet's
+# OUI, DHCP option 12 says "Beryl-7", option 61 carries netifd's RFC 4361
+# client-id, option 60 says "udhcp 1.37.0", the NTP queries spell openwrt, every
+# forwarded packet leaves with TTL 63 instead of 64, and the LAN's relayed IPv6
+# makes one device look like six. Each of those is a separate tell with a
+# separate fix; there is no single switch, which is why this file exists.
+#
+# The personas are not decoration. `wan` is a cable, and a cable in an office or
+# a hotel room is overwhelmingly a laptop, so it presents as Windows. `wwan` and
+# `tethering` are Wi-Fi and USB, where a phone is the unremarkable thing, so they
+# present as an iPhone. Matching the medium is the point: a Windows DHCP
+# fingerprint arriving over a phone's USB link is an anomaly in its own right.
+#
+# WHY IT RECORDS BEFORE IT WRITES
+#
+# Every value this script changes is written to the state file FIRST, so `off`
+# restores what was actually there rather than what the defaults are assumed to
+# be. Several of the options involved have no default on this router at all;
+# "restore" for those means delete, and only a record taken beforehand can tell
+# "was empty" apart from "was never set".
+#
+# THE ONE THING THAT CAN HURT
+#
+# fw4 loads /etc/nftables.d/*.nft as one transaction. A syntax error in our file
+# does not skip our rules, it aborts the WHOLE ruleset and the router comes up
+# with no firewall. So the file is written, `fw4 check` is asked whether the
+# complete ruleset still parses, and the file is removed again if it does not.
+# Same contract as beryl-vpndns, which fronts the same hazard.
+#
+# Usage: beryl-stealth on | off | status | persona wwan
+#   `persona wwan` prints the MAC repeater-api stamps on a fresh uplink join,
+#   and exits 1 when stealth is off. Without it that section — rewritten from
+#   scratch on every join — would silently lose its MAC on the next network.
+
+STATE=/etc/dashboard/stealth.conf
+NFT=/etc/nftables.d/20-beryl-stealth.nft
+LIB=/usr/share/beryl/cgi-lib.sh
+LANNET=lan
+IFACES="wan wwan tethering"
+# The options a persona sets, and therefore the options that must be recorded
+# and put back. One list, so the two halves cannot drift apart.
+IFOPTS="hostname vendorid sendclientid reqopts defaultreqopts sendopts ipv6 classlessroute"
+# sendopts is the only one of these netifd declares as a real array, so it is
+# the only one uci must hold as a list. reqopts looks like a list and is NOT:
+# netifd declares it as a string whose value happens to be space-separated, and
+# stored as a uci list it reads back empty, so every requested option vanishes
+# with no error anywhere. Measured on this router, both ways.
+LISTOPTS=" sendopts "
+
+[ -r "$LIB" ] || { printf '{"ok":false,"error":"missing %s"}\n' "$LIB"; exit 1; }
+. "$LIB"
+
+up() { printf '%s' "$1" | tr 'a-z' 'A-Z'; }
+
+# A locally-administered unicast address: clear the multicast bit, set the local
+# bit. Deliberately NOT a borrowed vendor OUI — iOS Private Wi-Fi Address and
+# Android randomisation both produce locally-administered MACs, so a random one
+# IS what a modern phone looks like, whereas a stolen Apple OUI paired with a
+# non-Apple DHCP fingerprint would be a louder tell than the GL.iNet one.
+rand_mac() {
+    _r=$(hexdump -n 6 -e '6/1 "%02x "' /dev/urandom 2>/dev/null)
+    set -- $_r
+    [ $# -eq 6 ] || return 1
+    printf '%02x:%s:%s:%s:%s:%s' $(( (0x$1 & 0xfc) | 0x02 )) "$2" "$3" "$4" "$5" "$6"
+}
+
+ap_sections() { uci -q show wireless 2>/dev/null | sed -n "s/^wireless\.\([^.=]*\)\.mode='ap'$/\1/p"; }
+sta_section() { uci -q show wireless 2>/dev/null | sed -n "s/^wireless\.\([^.=]*\)\.mode='sta'$/\1/p" | head -n1; }
+
+# Read the bridges from the kernel, not from uci: br-guest and br-iot have no
+# @device section here, so a config-derived list would miss them and their
+# traffic would get the uplink's TTL rewrite on the way to a LAN client.
+bridges() {
+    for _d in /sys/class/net/*/bridge; do
+        [ -d "$_d" ] || continue
+        _b=${_d%/bridge}
+        printf '%s\n' "${_b##*/}"
+    done
+}
+
+# The device section carrying the WAN port's MAC, found by name rather than by a
+# remembered index: uci renumbers anonymous sections, and deleting the wrong
+# index here would delete the LAN bridge.
+wan_dev_idx() {
+    _w=$(uci -q get network.wan.device 2>/dev/null)
+    [ -n "$_w" ] || return 1
+    _i=0
+    while [ "$_i" -lt 32 ]; do
+        _n=$(uci -q get network.@device[$_i].name 2>/dev/null)
+        [ -n "$_n" ] || break
+        [ "$_n" = "$_w" ] && { printf '%s' "$_i"; return 0; }
+        _i=$((_i+1))
+    done
+    return 1
+}
+
+# ------------------------------------------------------------------ state ---
+# Same write shape as the console's other state files: build beside the target,
+# check it is non-empty, then rename. A half-written state file is worse than
+# none, because `off` would restore some values and delete the rest.
+save() {
+    mkdir -p /etc/dashboard 2>/dev/null
+    cat > "$STATE.tmp" 2>/dev/null || return 1
+    [ -s "$STATE.tmp" ] || { rm -f "$STATE.tmp"; return 1; }
+    mv -f "$STATE.tmp" "$STATE"
+}
+load() { [ -r "$STATE" ] && conf_load "$STATE"; return 0; }
+is_on() { [ "$STEALTH_ON" = "1" ]; }
+
+# Only options that are actually PRESENT get a line. An absent option therefore
+# leaves its variable unset after conf_load and `off` deletes rather than
+# restores — the correct reversal, and one that cannot be inferred from a value.
+rec_opt() {
+    _v=$(uci -q get network.$1.$2 2>/dev/null) || return 0
+    [ -n "$_v" ] || return 0
+    printf 'STEALTH_%s_%s="%s"\n' "$(up $1)" "$(up $2)" "$(printf '%s' "$_v" | tr -d '"')"
+}
+rst_opt() {
+    eval "_v=\${STEALTH_$(up $1)_$(up $2)}"
+    uci -q delete network.$1.$2 2>/dev/null
+    [ -n "$_v" ] || return 0
+    case "$LISTOPTS" in
+        *" $2 "*) for _t in $_v; do uci add_list network.$1.$2="$_t"; done ;;
+        *)        uci set network.$1.$2="$_v" ;;
+    esac
+}
+
+# ---------------------------------------------------------------- the TTL ---
+# Why this matters more than the MAC: a hotspot or hotel gateway that counts
+# devices does it by watching TTL, because a MAC identifies only the one box in
+# front of it while TTL betrays everything behind. A packet from a phone leaves
+# with 64; the same packet forwarded by us leaves one short of whatever the
+# client started at - measured here, a Windows client's 128 arrived as 127 -
+# and the far end reads "there is a router here" out of that one number.
+#
+# The value FOLLOWS THE PERSONA, which is the whole reason it is not one
+# constant. Windows starts its packets at 128; Linux, macOS and iOS at 64. A
+# cable uplink that introduces itself as "MSFT 5.0" and then emits packets
+# whose initial TTL is 64 contradicts its own DHCP, and that mismatch points
+# straight at a router pretending to be something. So the cable gets 128 to
+# match the laptop it claims to be, and every other uplink gets 64 to match
+# the phone.
+#
+# Rewritten at postrouting so it lands after the routing decrement, and only on
+# the way out: LAN-facing bridges return early, because a client on br-lan is
+# entitled to the real hop count to its own gateway, and so do wg* interfaces,
+# where the encapsulated packet's TTL belongs to the tunnel.
+write_ttl() {
+    _wd=$(uci -q get network.wan.device 2>/dev/null)
+    { printf 'chain beryl_stealth_ttl {\n'
+      printf '\ttype filter hook postrouting priority -150; policy accept;\n'
+      for _b in $(bridges); do printf '\toifname "%s" return\n' "$_b"; done
+      printf '\toifname "lo" return\n'
+      printf '\toifname "wg*" return\n'
+      [ -n "$_wd" ] && {
+          printf '\toifname "%s" ip ttl set 128\n' "$_wd"
+          printf '\toifname "%s" ip6 hoplimit set 128\n' "$_wd"
+          printf '\toifname "%s" return\n' "$_wd"
+      }
+      printf '\tip ttl set 64\n'
+      printf '\tip6 hoplimit set 64\n}\n'
+    } > "$NFT" 2>/dev/null || { printf 'failed'; return 0; }
+    if fw4 check >/dev/null 2>&1; then
+        /etc/init.d/firewall reload >/dev/null 2>&1
+        # Ask the kernel, not the file. fw4 can accept a ruleset and still be
+        # carrying an older one if the reload itself failed, and a status that
+        # reports the file is a status that lies.
+        if nft list chain inet fw4 beryl_stealth_ttl >/dev/null 2>&1; then
+            printf 'ok'
+        else
+            logger -t stealth "TTL chain accepted by fw4 but not present in the kernel"
+            printf 'failed'
+        fi
+    else
+        rm -f "$NFT"
+        /etc/init.d/firewall reload >/dev/null 2>&1
+        logger -t stealth "fw4 rejected the TTL ruleset - removed it, everything else stands"
+        printf 'failed'
+    fi
+}
+
+# -------------------------------------------------------------------- on ----
+do_on() {
+    load
+    is_on && { do_status; return 0; }
+
+    WANDEV=$(uci -q get network.wan.device 2>/dev/null)
+    STA=$(sta_section)
+    NEWMAC_WAN=$(rand_mac)  || { printf '{"ok":false,"error":"no entropy for a MAC"}\n'; return 1; }
+    NEWMAC_WWAN=$(rand_mac) || { printf '{"ok":false,"error":"no entropy for a MAC"}\n'; return 1; }
+    HOSTN="DESKTOP-$(hexdump -n 3 -e '3/1 "%02X"' /dev/urandom 2>/dev/null)"
+    V6WAS=$(v6_mode_now)
+    if DEVI=$(wan_dev_idx); then
+        DEVCREATED=0; MACWAS=$(uci -q get network.@device[$DEVI].macaddr 2>/dev/null)
+    else
+        DEVCREATED=1; MACWAS=""
+    fi
+
+    # AP restore data as one packed line. The section names are whatever the
+    # wireless config holds, so a key per AP would mean generating shell
+    # variable names from uci section names — including anonymous ones like
+    # @wifi-iface[0], which are not valid shell names at all.
+    APWAS=""
+    for _s in $(ap_sections); do
+        APWAS="$APWAS $_s=$(uci -q get wireless.$_s.macaddr 2>/dev/null)"
+    done
+
+    { printf 'STEALTH_ON=1\n'
+      printf 'STEALTH_SINCE=%s\n' "$(date +%s 2>/dev/null)"
+      printf 'STEALTH_HOSTN="%s"\n' "$HOSTN"
+      printf 'STEALTH_WAN_MAC="%s"\n' "$NEWMAC_WAN"
+      printf 'STEALTH_WWAN_MAC="%s"\n' "$NEWMAC_WWAN"
+      printf 'STEALTH_WAN_MAC_WAS="%s"\n' "$MACWAS"
+      printf 'STEALTH_WAN_DEVSEC_CREATED=%s\n' "$DEVCREATED"
+      printf 'STEALTH_V6MODE_WAS="%s"\n' "$V6WAS"
+      printf 'STEALTH_WAN6_DISABLED_WAS="%s"\n' "$(uci -q get network.wan6.disabled 2>/dev/null)"
+      printf 'STEALTH_NTP_WAS="%s"\n' "$(uci -q get system.ntp.server 2>/dev/null)"
+      printf 'STEALTH_AP_WAS="%s"\n' "$APWAS"
+      printf 'STEALTH_UPLINK_SEC="%s"\n' "$STA"
+      printf 'STEALTH_UPLINK_MAC_WAS="%s"\n' "${STA:+$(uci -q get wireless.$STA.macaddr 2>/dev/null)}"
+      for _i in $IFACES; do for _o in $IFOPTS; do rec_opt "$_i" "$_o"; done; done
+    } | save || { printf '{"ok":false,"error":"could not write the stealth state"}\n'; return 1; }
+
+    # Clear first, then set. Without this an existing list option would be
+    # appended to rather than replaced, and the persona would carry the old
+    # request list along with the new one.
+    for _i in $IFACES; do
+        for _o in $IFOPTS; do uci -q delete network.$_i.$_o 2>/dev/null; done
+    done
+
+    # Cable => Windows. The request list is Windows 10/11's, in Windows's order;
+    # the order is part of the fingerprint, not just the contents.
+    uci set network.wan.hostname="$HOSTN"
+    uci set network.wan.vendorid='MSFT 5.0'
+    uci set network.wan.sendclientid='hardware'
+    uci set network.wan.defaultreqopts='0'
+    uci set network.wan.reqopts='1 3 6 15 31 33 43 44 46 47 119 121 249 252'
+    # netifd appends its own -O 121 unless this is off, which would both
+    # duplicate the option and move it to the end of a list whose ORDER is part
+    # of the fingerprint. 121 is already in the list above, at Windows's
+    # position for it, so nothing is actually stopped being requested.
+    uci set network.wan.classlessroute='0'
+
+    # Wi-Fi and USB => iPhone. iOS sends NO option 60, and simply leaving
+    # `vendorid` unset does not achieve that: netifd passes udhcpc `-V ""` only
+    # when it already sees a vendor option in the argument list, and without
+    # `-V ""` busybox falls back to its own default and announces
+    # "udhcp 1.37.0" — a louder tell than the one we came to remove. A
+    # `sendopts` entry for option 60 is what trips that branch, and the
+    # zero-length option it also asks for is dropped rather than emitted.
+    # All three variants were measured on this router before this was written.
+    for _i in wwan tethering; do
+        uci set network.$_i.hostname='iPhone'
+        uci set network.$_i.sendclientid='hardware'
+        uci set network.$_i.defaultreqopts='0'
+        uci set network.$_i.ipv6='0'
+        uci add_list network.$_i.sendopts='60:'
+        uci set network.$_i.reqopts='1 121 3 6 15 108 114 119 252 95 44 46'
+        uci set network.$_i.classlessroute='0'
+    done
+
+    if [ "$DEVCREATED" = 1 ]; then
+        uci add network device >/dev/null 2>&1
+        uci set network.@device[-1].name="$WANDEV"
+        uci set network.@device[-1].macaddr="$NEWMAC_WAN"
+    else
+        uci set network.@device[$DEVI].macaddr="$NEWMAC_WAN"
+    fi
+    [ -n "$STA" ] && uci set wireless.$STA.macaddr="$NEWMAC_WWAN"
+    # Every BSS on one phy needs a distinct address, so each AP gets its own
+    # draw rather than a shared one.
+    for _s in $(ap_sections); do uci set wireless.$_s.macaddr="$(rand_mac)"; done
+
+    # IPv6 off rather than disguised. Relayed IPv6 hands every LAN client its
+    # own address out of the upstream prefix, so the network counts devices
+    # directly and no amount of IPv4 persona hides that; there is no cheap way
+    # to make N clients look like one over v6.
+    uci set network.wan6.disabled='1'
+    v6_apply_mode "$LANNET" off
+
+    uci -q delete system.ntp.server 2>/dev/null
+    uci add_list system.ntp.server='time.apple.com'
+    uci add_list system.ntp.server='time.cloudflare.com'
+
+    uci commit network; uci commit wireless; uci commit dhcp
+    uci commit firewall; uci commit system
+
+    TTL=$(write_ttl)
+    [ "$TTL" = ok ] || printf 'STEALTH_TTL=failed\n' >> "$STATE" 2>/dev/null
+    apply_and_log "on: wan=laptop($HOSTN) wwan/tethering=iphone, APs randomised, ipv6 off, ttl=$TTL"
+    do_status
+}
+
+# ------------------------------------------------------------------- off ----
+do_off() {
+    load
+    is_on || { printf '{"on":false}\n'; return 0; }
+
+    for _i in $IFACES; do
+        for _o in $IFOPTS; do rst_opt "$_i" "$_o"; done
+    done
+
+    if [ "$STEALTH_WAN_DEVSEC_CREATED" = "1" ]; then
+        # Found again by name rather than trusting the index recorded at `on`:
+        # anything that added or removed a device section since would have
+        # shifted it, and the section at that index now could be the LAN bridge.
+        if DEVI=$(wan_dev_idx); then uci -q delete network.@device[$DEVI]; fi
+    elif DEVI=$(wan_dev_idx); then
+        if [ -n "$STEALTH_WAN_MAC_WAS" ]; then
+            uci set network.@device[$DEVI].macaddr="$STEALTH_WAN_MAC_WAS"
+        else
+            uci -q delete network.@device[$DEVI].macaddr
+        fi
+    fi
+
+    for _e in $STEALTH_AP_WAS; do
+        _s=${_e%%=*}; _m=${_e#*=}
+        [ -n "$_s" ] || continue
+        if [ -n "$_m" ] && [ "$_m" != "$_s" ]; then
+            uci set wireless.$_s.macaddr="$_m"
+        else
+            uci -q delete wireless.$_s.macaddr
+        fi
+    done
+    # The STA section is read live: repeater-api may have replaced it since, and
+    # the replacement is the one now carrying a stealth MAC.
+    _sta=$(sta_section)
+    [ -z "$_sta" ] && _sta="$STEALTH_UPLINK_SEC"
+    if [ -n "$_sta" ]; then
+        if [ -n "$STEALTH_UPLINK_MAC_WAS" ]; then
+            uci set wireless.$_sta.macaddr="$STEALTH_UPLINK_MAC_WAS"
+        else
+            uci -q delete wireless.$_sta.macaddr
+        fi
+    fi
+
+    if [ -n "$STEALTH_WAN6_DISABLED_WAS" ]; then
+        uci set network.wan6.disabled="$STEALTH_WAN6_DISABLED_WAS"
+    else
+        uci -q delete network.wan6.disabled
+    fi
+    [ -n "$STEALTH_V6MODE_WAS" ] && v6_apply_mode "$LANNET" "$STEALTH_V6MODE_WAS"
+
+    uci -q delete system.ntp.server 2>/dev/null
+    for _t in $STEALTH_NTP_WAS; do uci add_list system.ntp.server="$_t"; done
+
+    uci commit network; uci commit wireless; uci commit dhcp
+    uci commit firewall; uci commit system
+
+    rm -f "$NFT"
+    /etc/init.d/firewall reload >/dev/null 2>&1
+    apply_and_log "off: identity restored"
+    rm -f "$STATE"
+    printf '{"on":false}\n'
+}
+
+# What both directions have to do once uci is committed. Kept together so `off`
+# cannot quietly skip a step `on` performs; a restore that leaves the old MAC in
+# the config but not on the wire is the failure that looks like success.
+apply_and_log() {
+    /etc/init.d/odhcpd restart >/dev/null 2>&1
+    /etc/init.d/sysntpd restart >/dev/null 2>&1
+    ubus call network reload >/dev/null 2>&1
+    # A MAC only reaches the wire when the device is next brought up, and a
+    # config reload does not do that for an interface already running.
+    ifdown wan >/dev/null 2>&1; ifup wan >/dev/null 2>&1
+    # `wifi reload` is NOT enough. It re-reads hostapd's config but does not
+    # recreate the netdevs, and a BSS address is fixed at creation — measured
+    # here, a reload moved the secondary BSS's MAC and left both primaries on
+    # the GL.iNet OUI, which is the one address that had to change. Only a full
+    # down/up recreates them. br-iot and br-guest survive it because both carry
+    # bridge_empty; without that a wifi-only bridge goes NO_DEVICE here.
+    wifi down >/dev/null 2>&1; sleep 3; wifi up >/dev/null 2>&1
+    logger -t stealth "$1"
+}
+
+# v6_mode lives in settings-api, which is a CGI this script must not run. The
+# read is three lines, so it is repeated here rather than moving a CGI's
+# reporting logic into the shared library for one caller.
+v6_mode_now() {
+    _ra=$(uci -q get dhcp.$LANNET.ra 2>/dev/null)
+    _zi=$(wan_zone_idx); _m6=""
+    [ -n "$_zi" ] && _m6=$(uci -q get firewall.@zone[$_zi].masq6 2>/dev/null)
+    case "$_ra" in
+        relay)  printf 'passthrough' ;;
+        server) [ "$_m6" = "1" ] && printf 'nat6' || printf 'native' ;;
+        *)      printf 'off' ;;
+    esac
+}
+
+# ---------------------------------------------------------------- status ----
+do_status() {
+    load
+    is_on || { printf '{"on":false}\n'; return 0; }
+    _aps=0; for _s in $(ap_sections); do _aps=$((_aps+1)); done
+    printf '{"on":true,"since":%s,"wan":{"persona":"laptop","mac":"%s","hostname":"%s"},' \
+        "$(jnum "$STEALTH_SINCE")" "$(esc "$STEALTH_WAN_MAC")" "$(esc "$STEALTH_HOSTN")"
+    printf '"wwan":{"persona":"iphone","mac":"%s"},"aps":%s,"ipv6":"off","ttl":"%s","ntp":"apple"}\n' \
+        "$(esc "$STEALTH_WWAN_MAC")" "$_aps" "$([ "$STEALTH_TTL" = failed ] && printf failed || printf ok)"
+}
+
+case "$1" in
+    on)      do_on ;;
+    off)     do_off ;;
+    status)  do_status ;;
+    persona)
+        load
+        is_on || exit 1
+        case "$2" in
+            wwan) [ -n "$STEALTH_WWAN_MAC" ] || exit 1; printf '%s\n' "$STEALTH_WWAN_MAC" ;;
+            *)    exit 1 ;;
+        esac
+        ;;
+    *) printf 'usage: beryl-stealth on|off|status|persona wwan\n' >&2; exit 2 ;;
+esac

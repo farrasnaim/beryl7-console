@@ -1019,6 +1019,26 @@ if [ "$ACTION" = "fwrestart" ]; then
     exit 0
 fi
 
+# ---- stealth uplink ----------------------------------------------------------
+# Every uci write behind this lives in beryl-stealth, not here. The helper is
+# the only thing that records the previous values, so a second writer would be a
+# second opinion about what "off" restores — and the one that wrote last would
+# win silently. This endpoint does the two things a CGI is for: check the
+# request is a real one, and turn the helper's answer into JSON.
+if [ "$ACTION" = "setstealth" ]; then
+    [ -x /usr/sbin/beryl-stealth ] || fail "beryl-stealth is not installed"
+    case "$(qs_get on)" in
+        1) OUT=$(/usr/sbin/beryl-stealth on 2>/dev/null) ;;
+        0) OUT=$(/usr/sbin/beryl-stealth off 2>/dev/null) ;;
+        *) fail "stealth takes on=0 or on=1" ;;
+    esac
+    case "$OUT" in
+        '{'*) printf '{"ok":true,"stealth":%s}' "$OUT" ;;
+        *)    fail "the stealth helper returned nothing" ;;
+    esac
+    exit 0
+fi
+
 # ---- IPv6 mode ---------------------------------------------------------------
 # Validation is here rather than only in the browser, for the usual reason: the
 # UI greys out a mode the uplink cannot deliver, but nothing stops a hand-made
@@ -1561,6 +1581,13 @@ printf '"ipv6":{"mode":"%s","can_native":%s,"uplink":%s,"master":"%s","ula":"%s"
     "$(v6_mode)" "$(v6_can_native)" "$(v6_uplink_up)" \
     "$(esc "$(v6_master)")" "$(esc "$(uci -q get network.globals.ula_prefix)")" \
     "$(ra6_json)"
+
+# Read from the helper rather than from the state file: the file records what
+# was changed, the helper knows what is actually in force, and only one of those
+# is worth putting on a screen. `{"on":false}` when stealth is off or absent.
+STEALTHJ=$([ -x /usr/sbin/beryl-stealth ] && /usr/sbin/beryl-stealth status 2>/dev/null)
+case "$STEALTHJ" in '{'*) ;; *) STEALTHJ='{"on":false}' ;; esac
+printf '"stealth":%s,' "$STEALTHJ"
 
 # Whatever the last check found, plus the running firmware read locally so the
 # panel can state that much even if nothing has ever been checked. `null` means
