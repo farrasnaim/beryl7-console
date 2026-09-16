@@ -156,17 +156,6 @@ PHY=$(phy_of "$(printf '%s' "$RADIOS" | head -n1)")
 v6_master() {
     uci -q show dhcp 2>/dev/null | sed -n "s/^dhcp\.\([^.=]*\)\.master='1'$/\1/p" | head -n1
 }
-wan_zone_idx() {
-    _i=0
-    while :; do
-        _zn=$(uci -q get firewall.@zone[$_i].name 2>/dev/null)
-        [ -n "$_zn" ] || break
-        [ "$_zn" = "wan" ] && { printf '%s' "$_i"; return 0; }
-        _i=$((_i+1))
-        [ "$_i" -gt 32 ] && break
-    done
-    printf ''
-}
 lan_dev() {
     _d=$(ubus call network.interface.$LANNET status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
     [ -n "$_d" ] && printf '%s' "$_d" || printf 'br-%s' "$LANNET"
@@ -1038,44 +1027,15 @@ fi
 # long after anyone remembers changing this.
 if [ "$ACTION" = "setipv6" ]; then
     MODE=$(qs_get mode)
-    ZI=$(wan_zone_idx)
-    case "$MODE" in
-        off)
-            uci set dhcp.$LANNET.ra='disabled'
-            uci set dhcp.$LANNET.dhcpv6='disabled'
-            uci set dhcp.$LANNET.ndp='disabled'
-            uci -q delete dhcp.$LANNET.ra_default
-            [ -n "$ZI" ] && uci -q delete firewall.@zone[$ZI].masq6
-            ;;
-        passthrough)
-            uci set dhcp.$LANNET.ra='relay'
-            uci set dhcp.$LANNET.dhcpv6='relay'
-            uci set dhcp.$LANNET.ndp='relay'
-            uci -q delete dhcp.$LANNET.ra_default
-            [ -n "$ZI" ] && uci -q delete firewall.@zone[$ZI].masq6
-            ;;
-        native)
-            [ "$(v6_can_native)" = "true" ] || \
-                fail "this uplink delegates no prefix, so native would leave your devices without a route out"
-            uci set dhcp.$LANNET.ra='server'
-            uci set dhcp.$LANNET.dhcpv6='server'
-            uci -q delete dhcp.$LANNET.ndp
-            uci -q delete dhcp.$LANNET.ra_default
-            [ -n "$ZI" ] && uci -q delete firewall.@zone[$ZI].masq6
-            ;;
-        nat6)
-            uci set dhcp.$LANNET.ra='server'
-            uci set dhcp.$LANNET.dhcpv6='server'
-            uci -q delete dhcp.$LANNET.ndp
-            # Without ra_default odhcpd advertises no default route when the
-            # only prefix it serves is a ULA, and the LAN gets addresses that
-            # go nowhere. This is what makes nat6 differ from a broken native.
-            uci set dhcp.$LANNET.ra_default='1'
-            [ -n "$ZI" ] || fail "no firewall zone named 'wan' — cannot masquerade IPv6"
-            uci set firewall.@zone[$ZI].masq6='1'
-            ;;
-        *) fail "unknown IPv6 mode" ;;
-    esac
+    # The guards stay here, where there is a browser to answer. v6_apply_mode
+    # performs the writes but deliberately judges nothing.
+    if [ "$MODE" = native ] && [ "$(v6_can_native)" != "true" ]; then
+        fail "this uplink delegates no prefix, so native would leave your devices without a route out"
+    fi
+    v6_apply_mode "$LANNET" "$MODE" || {
+        [ "$MODE" = nat6 ] && fail "no firewall zone named 'wan' — cannot masquerade IPv6"
+        fail "unknown IPv6 mode"
+    }
     uci commit dhcp
     uci commit firewall
     # odhcpd is the ipv6-only build here, so this cannot disturb IPv4 DHCP —

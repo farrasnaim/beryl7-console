@@ -576,6 +576,74 @@ guard_post() {
 #
 # Moved verbatim rather than retyped: the closed-period arithmetic below is the
 # subtlest code in this project and had already been got wrong twice.
+wan_zone_idx() {
+    _i=0
+    while :; do
+        _zn=$(uci -q get firewall.@zone[$_i].name 2>/dev/null)
+        [ -n "$_zn" ] || break
+        [ "$_zn" = "wan" ] && { printf '%s' "$_i"; return 0; }
+        _i=$((_i+1))
+        [ "$_i" -gt 32 ] && break
+    done
+    printf ''
+}
+
+# ------------------------------------------------------------------- IPv6 ---
+# The uci writes behind an IPv6 mode, in ONE place.
+#
+# They used to live only in settings-api's setipv6. beryl-stealth also has to
+# turn IPv6 off and put it back, and a second copy of a four-line recipe is
+# exactly the kind of duplication that survives long enough to disagree: the
+# reason `nat6` sets ra_default and the others delete it is not obvious from
+# either copy, so a later fix applied to one would look complete.
+#
+# Guards are deliberately NOT here. Whether this uplink can carry `native`, and
+# what to tell the caller when it cannot, is a policy question with a different
+# answer for a CGI (fail with a message the browser shows) than for a helper
+# script (log it and carry on), so each caller keeps its own.
+#
+# $1 = the LAN network name, $2 = off | passthrough | native | nat6
+# Returns 1 for an unknown mode, or for nat6 with no wan zone to masquerade on.
+v6_apply_mode() {
+    _ln="$1"; _md="$2"; _zi=$(wan_zone_idx)
+    case "$_md" in
+        off)
+            uci set dhcp.$_ln.ra='disabled'
+            uci set dhcp.$_ln.dhcpv6='disabled'
+            uci set dhcp.$_ln.ndp='disabled'
+            uci -q delete dhcp.$_ln.ra_default
+            [ -n "$_zi" ] && uci -q delete firewall.@zone[$_zi].masq6
+            ;;
+        passthrough)
+            uci set dhcp.$_ln.ra='relay'
+            uci set dhcp.$_ln.dhcpv6='relay'
+            uci set dhcp.$_ln.ndp='relay'
+            uci -q delete dhcp.$_ln.ra_default
+            [ -n "$_zi" ] && uci -q delete firewall.@zone[$_zi].masq6
+            ;;
+        native)
+            uci set dhcp.$_ln.ra='server'
+            uci set dhcp.$_ln.dhcpv6='server'
+            uci -q delete dhcp.$_ln.ndp
+            uci -q delete dhcp.$_ln.ra_default
+            [ -n "$_zi" ] && uci -q delete firewall.@zone[$_zi].masq6
+            ;;
+        nat6)
+            [ -n "$_zi" ] || return 1
+            uci set dhcp.$_ln.ra='server'
+            uci set dhcp.$_ln.dhcpv6='server'
+            uci -q delete dhcp.$_ln.ndp
+            # Without ra_default odhcpd advertises no default route when the
+            # only prefix it serves is a ULA, and the LAN gets addresses that
+            # go nowhere. This is what makes nat6 differ from a broken native.
+            uci set dhcp.$_ln.ra_default='1'
+            uci set firewall.@zone[$_zi].masq6='1'
+            ;;
+        *) return 1 ;;
+    esac
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 nlbw_today() {
     NLLIST=$(nlbw -c list 2>/dev/null); NLOK=$?
