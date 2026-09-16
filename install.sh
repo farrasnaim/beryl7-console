@@ -339,6 +339,8 @@ for p in /www/console \
          /www/cgi-bin/version-api \
          /etc/init.d/beryl-vpndns \
          /etc/nftables.d/30-beryl-vpndns.nft \
+         /usr/sbin/beryl-stealth \
+         /etc/nftables.d/20-beryl-stealth.nft \
          /etc/dnsmasq.conf /etc/nlbwmon \
          /etc/adguardhome; do
     grep -qxF "$p" /etc/sysupgrade.conf || echo "$p" >> /etc/sysupgrade.conf

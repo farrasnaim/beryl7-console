@@ -58,3 +58,5 @@
 /etc/init.d/beryl-iperf
 /www/console
 /www/cgi-bin/tools-api
+/usr/sbin/beryl-stealth
+/etc/nftables.d/20-beryl-stealth.nft
