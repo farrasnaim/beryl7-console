@@ -34,7 +34,7 @@ Read [Security model](#security-model) before putting this on a network you don'
 
 | Page | Path | What it does |
 |---|---|---|
-| **Console** | `/console/` | The current console: a single Control Center grid. A Path strip (Internet · Uplink · VPN, each node opening its sheet) and eight tiles — Devices, Radios, Speed test, Throughput, System, Travel, IoT, Guest Wi-Fi — each a one-glance instrument that opens a sheet for the rest. Wi-Fi uplink and USB tethering are one Uplink surface. Guest and IoT carry switches; Travel is one switch that turns guest and IoT off, sets the VPN to fail open, and makes the router present itself upstream as an ordinary client (a Windows laptop on the cable, an iPhone over Wi-Fi and USB) instead of as a GL.iNet router, then puts all of it back exactly as it was. Speed test is fast.com-style download, run from the router: four parallel streams from Cloudflare for ten seconds read off the uplink's counters, with a live figure while it runs (download only — see `tools-api` for why upload is deliberately absent); the iPerf server switch sits beside it. Installable to an iPhone home screen (standalone, safe-area aware). Backed by the CGIs under `www/cgi-bin/`. |
+| **Console** | `/console/` | The current console: a single Control Center grid. A Path strip (Internet · Uplink · VPN, each node opening its sheet) and eight tiles — Devices, Radios, Speed test, Throughput, System, Travel, IoT, Guest Wi-Fi — each a one-glance instrument that opens a sheet for the rest. Wi-Fi Tethering and USB Tethering are one Uplink surface. Guest and IoT carry switches; Travel is one switch that turns guest and IoT off, sets the VPN to fail open, and makes the router present itself upstream as an ordinary client (a Windows laptop on Ethernet, an iPhone over Wi-Fi or USB Tethering) instead of as a GL.iNet router, then puts all of it back exactly as it was. Speed test is fast.com-style download, run from the router: four parallel streams from Cloudflare for ten seconds read off the uplink's counters, with a live figure while it runs (download only — see `tools-api` for why upload is deliberately absent); the iPerf server switch sits beside it. Installable to an iPhone home screen (standalone, safe-area aware). Backed by the CGIs under `www/cgi-bin/`. |
 
 Every page works from 360 px phones to desktop, in light and dark - system-following by default, pinned by the toggle in the sidebar.
 
@@ -332,11 +332,11 @@ it changes it, so `off` restores what was actually there.
 | Tell | At home | While away |
 |---|---|---|
 | WAN and BSSID MACs | GL.iNet OUI | locally-administered random, redrawn each session |
-| DHCP hostname | `Beryl-7` | `DESKTOP-xxxxxx` on the cable, `iPhone` on Wi-Fi and USB |
+| DHCP hostname | `Beryl-7` | `DESKTOP-xxxxxx` on Ethernet, `iPhone` on Wi-Fi and USB Tethering |
 | DHCP client-id (61) | netifd's RFC 4361 DUID | plain `ether <mac>`, as Windows and phones send |
-| DHCP vendor class (60) | `udhcp 1.37.0` | `MSFT 5.0` on the cable, absent on Wi-Fi and USB |
+| DHCP vendor class (60) | `udhcp 1.37.0` | `MSFT 5.0` on Ethernet, absent on Wi-Fi and USB Tethering |
 | DHCP request list (55) | busybox default | the persona's own list, in the persona's order |
-| Egress TTL | one below the client's | 128 on the cable, 64 elsewhere |
+| Egress TTL | one below the client's | 128 on Ethernet, 64 elsewhere |
 | IPv6 | relayed to every LAN client | off, and restored on return |
 | NTP | `*.openwrt.pool.ntp.org` | Apple and Cloudflare |
 
@@ -394,7 +394,7 @@ Nothing about your addressing, SSID naming, or radio layout is written into the 
 | Radios and their bands | enumerated from UCI `wifi-device` sections; band comes from the radio, so `radio0` need not be 2.4 GHz |
 | Each radio's AP section | the `wifi-iface` pointing at that radio — `default_radio0`, `main2g`, or whatever yours is called |
 | Restarting a radio | the page names the radio; the API checks that name against the router's own list rather than mapping a band onto `radio0`/`radio1` |
-| A Wi-Fi uplink's band | read from that radio's `band` and sent to the page, so the label is never inferred from the radio's name |
+| Wi-Fi Tethering's band | read from that radio's `band` and sent to the page, so the label is never inferred from the radio's name |
 | A secondary SSID (IoT/guest) | the first AP on a network other than `lan`; the panel disappears when there is none |
 | Which network an address is on | matched against the interfaces UCI actually defines |
 | The LAN bridge | `network.lan.device` |

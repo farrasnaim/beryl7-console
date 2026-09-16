@@ -8,7 +8,10 @@ var el = G.el, $ = G.$, $$ = G.$$, clear = G.clear, setTxt = G.setTxt, ui = G.ui
 var DASH = '/cgi-bin/dashboard-api', RATE = '/cgi-bin/rate-api', VPN = '/cgi-bin/vpn-api', WG = '/cgi-bin/wireguard-api',
     REP = '/cgi-bin/repeater-api', USB = '/cgi-bin/tethering-api', SET = '/cgi-bin/settings-api', TOOLS = '/cgi-bin/tools-api',
     PROBE = '/cgi-bin/probe-api';
-var UPLABEL = { wan: 'Ethernet', wwan: 'Wi-Fi', tethering: 'USB', none: 'None' };
+// One name per medium, used by the Path node, the tile face and the sheet
+// header alike. They are read in all three places, so a short form kept for
+// one of them is the whole reason a rename ends up half applied.
+var UPLABEL = { wan: 'Ethernet', wwan: 'Wi-Fi Tethering', tethering: 'USB Tethering', none: 'None' };
 var UPICON = { wan: 'ethernet', wwan: 'wifi', tethering: 'usb', none: 'link' };
 var now = function () { return Math.floor(Date.now() / 1000); };
 function D() { return G.data; }
@@ -415,8 +418,8 @@ G.tile({
             })));
             var t = ups.filter(function (u) { return u.name === 'tethering'; })[0] || {}, w = ups.filter(function (u) { return u.name === 'wwan'; })[0] || {};
             var prefersUsb = (t.metric || 99) <= (w.metric || 99);
-            pane.appendChild(ui.field('When both a USB device and a Wi-Fi uplink are connected', ui.pick([{ value: 'modem', label: 'USB first' }, { value: 'wifi', label: 'Wi-Fi first' }], prefersUsb ? 'modem' : 'wifi', function (v) {
-                G.act(null, USB, { action: 'priority', pref: v }, { ok: (v === 'modem' ? 'USB' : 'Wi-Fi') + ' first from now on.', refresh: ['rep', 'usb', 'dash'], delay: 1500 });
+            pane.appendChild(ui.field('When both are connected', ui.pick([{ value: 'modem', label: 'USB Tethering first' }, { value: 'wifi', label: 'Wi-Fi Tethering first' }], prefersUsb ? 'modem' : 'wifi', function (v) {
+                G.act(null, USB, { action: 'priority', pref: v }, { ok: (v === 'modem' ? 'USB Tethering' : 'Wi-Fi Tethering') + ' first from now on.', refresh: ['rep', 'usb', 'dash'], delay: 1500 });
             }, true)));
             if (p.width && p.width.original !== p.width.current) pane.appendChild(ui.say('The ' + G.bandLabel(p.width.band) + ' radio narrowed to ' + p.width.current.replace(/^[A-Z]+/, '') + ' MHz to match the uplink.', 'warn'));
             if (p.uplink && p.last_error) pane.appendChild(ui.say(p.last_error, 'bad'));
@@ -1085,7 +1088,7 @@ G.tile({
         write: function (v, ctx) {
             var X = ctx.data, g = secondary(X, 'guest'), i = secondary(X, 'iot'), vp = X.vpn, t = travelState(X) || {}, steps = [];
             if (v) {
-                steps.push('present as a laptop on the cable and an iPhone on Wi-Fi');
+                steps.push('present as a laptop on Ethernet and an iPhone on tethering');
                 if (g && !g.disabled) steps.push('turn Guest Wi-Fi off'); if (i && !i.disabled) steps.push('turn IoT off');
                 if (vp && vp.failmode !== 'open') steps.push('set the VPN to fail open');
             } else {
@@ -1118,13 +1121,13 @@ G.tile({
                 ui.line(null, textB('Guest Wi-Fi off', g ? '  now ' + (g.disabled ? 'off' : 'on') : '  none')),
                 ui.line(null, textB('IoT off', i ? '  now ' + (i.disabled ? 'off' : 'on') : '  none')),
                 ui.line(null, textB('VPN fails open', v ? '  now ' + (v.failmode === 'open' ? 'open' : 'closed') : '')),
-                ui.line(null, textB('Travel DNS', '  automatic on a Wi-Fi or USB uplink'))
+                ui.line(null, textB('Travel DNS', '  automatic on Wi-Fi or USB Tethering'))
             ]));
             var st = api.data.set && api.data.set.stealth;
             body.appendChild(el('div', 'field__l', 'What the network sees'));
             body.appendChild(ui.lines([
-                ui.line(null, textB('Cable', st && st.on ? '  ' + st.wan.hostname : '  a Windows laptop')),
-                ui.line(null, textB('Wi-Fi and USB', '  an iPhone')),
+                ui.line(null, textB('Ethernet', st && st.on ? '  ' + st.wan.hostname : '  a Windows laptop')),
+                ui.line(null, textB('Wi-Fi and USB Tethering', '  an iPhone')),
                 ui.line(null, textB('IPv6', '  off while away'))
             ]));
         }
