@@ -1085,14 +1085,15 @@ G.tile({
         write: function (v, ctx) {
             var X = ctx.data, g = secondary(X, 'guest'), i = secondary(X, 'iot'), vp = X.vpn, t = travelState(X) || {}, steps = [];
             if (v) {
+                steps.push('present as a laptop on the cable and an iPhone on Wi-Fi');
                 if (g && !g.disabled) steps.push('turn Guest Wi-Fi off'); if (i && !i.disabled) steps.push('turn IoT off');
                 if (vp && vp.failmode !== 'open') steps.push('set the VPN to fail open');
             } else {
+                steps.push('put the router\u2019s own identity back');
                 if (t.guest_was === '1' && g) steps.push('turn Guest Wi-Fi back on'); if (t.iot_was === '1' && i) steps.push('turn IoT back on');
                 if (t.vpn_was === '1') steps.push('set the VPN back to fail closed');
             }
-            var wifi = steps.some(function (x) { return /Wi-Fi|IoT/.test(x); });
-            return confirm({ title: v ? 'Leave home?' : 'Back home?', body: steps.length ? 'This will ' + steps.join(', ') + '.' + (wifi ? ' Wi-Fi reloads once per network — give it half a minute.' : '') : 'Nothing needs changing; only the flag flips.', okText: v ? 'Away' : 'Home' })
+            return confirm({ title: v ? 'Leave home?' : 'Back home?', body: 'This will ' + steps.join(', ') + '. Wi-Fi reloads once per network — give it half a minute.', okText: v ? 'Away' : 'Home' })
                 .then(function (ok) { if (!ok) return; return v ? goAway(X) : comeHome(X); });
         }
     },
@@ -1101,7 +1102,9 @@ G.tile({
         G.face.hd(frag, X.tools && X.tools.travel && X.tools.travel.on ? 'plane' : 'home', 'Travel');
         if (!t) { G.face.value(frag, '—'); return; }
         G.face.value(frag, t.on ? 'Away' : 'Home');
-        G.face.sub(frag, t.on ? 'since ' + fmt.ago(t.since) + ' · guest and IoT off, VPN fails open' : 'guest and IoT as set, VPN fails closed');
+        var st = X.set && X.set.stealth;
+        var bad = t.on && st && st.on && st.ttl === 'failed';
+        G.face.sub(frag, t.on ? 'since ' + fmt.ago(t.since) + (bad ? ' · TTL rule failed' : ' · stealth on') : 'home identity', bad ? 'warn' : null);
         return { on: !!t.on };
     },
     sheet: function (body, api) {
@@ -1117,6 +1120,13 @@ G.tile({
                 ui.line(null, textB('VPN fails open', v ? '  now ' + (v.failmode === 'open' ? 'open' : 'closed') : '')),
                 ui.line(null, textB('Travel DNS', '  automatic on a Wi-Fi or USB uplink'))
             ]));
+            var st = api.data.set && api.data.set.stealth;
+            body.appendChild(el('div', 'field__l', 'What the network sees'));
+            body.appendChild(ui.lines([
+                ui.line(null, textB('Cable', st && st.on ? '  ' + st.wan.hostname : '  a Windows laptop')),
+                ui.line(null, textB('Wi-Fi and USB', '  an iPhone')),
+                ui.line(null, textB('IPv6', '  off while away'))
+            ]));
         }
         draw(); api.on('tools', draw); api.on('set', draw); api.on('vpn', draw);
     }
@@ -1125,13 +1135,13 @@ function textB(b, rest) { var s = el('span'); s.appendChild(el('b', null, b)); s
 function goAway(X) {
     var g = secondary(X, 'guest'), i = secondary(X, 'iot'), v = X.vpn;
     var gw = g ? (g.disabled ? '0' : '1') : '0', iw = i ? (i.disabled ? '0' : '1') : '0', vw = v ? (v.failmode === 'open' ? '0' : '1') : '0';
-    var steps = [];
+    var steps = [function () { return G.post(SET, { action: 'setstealth', on: '1' }, 60000); }];
     if (g && !g.disabled) steps.push(function () { return G.post(SET, { action: 'setiot', network: 'guest', enabled: '0', ssid: g.ssid, key: '' }); });
     if (i && !i.disabled) steps.push(function () { return G.post(SET, { action: 'setiot', network: 'iot', enabled: '0', ssid: i.ssid, key: '' }); });
     if (v && v.failmode !== 'open') steps.push(function () { return G.post(VPN, { action: 'failmode', mode: 'open' }); });
     return runSteps(steps).then(function (fails) {
         return G.post(TOOLS, { action: 'travel', on: '1', guest_was: gw, iot_was: iw, vpn_was: vw }).then(function () {
-            G.pop(fails ? 'Away, but ' + fails + ' step(s) failed — check the tiles.' : 'Away. Guest and IoT off, VPN fails open.', fails ? 'warn' : 'ok');
+            G.pop(fails ? 'Away, but ' + fails + ' step(s) failed — check the tiles.' : 'Away. The router reads as an ordinary client.', fails ? 'warn' : 'ok');
             ['set', 'vpn', 'tools', 'dash'].forEach(function (k) { G.polls[k].refresh(fails ? 700 : 8000); }); G.polls.tools.refresh(300);
         });
     });
@@ -1142,6 +1152,7 @@ function comeHome(X) {
     if (t.guest_was === '1' && g) steps.push(function () { return G.post(SET, { action: 'setiot', network: 'guest', enabled: '1', ssid: g.ssid, key: '' }); });
     if (t.iot_was === '1' && i) steps.push(function () { return G.post(SET, { action: 'setiot', network: 'iot', enabled: '1', ssid: i.ssid, key: '' }); });
     if (t.vpn_was === '1') steps.push(function () { return G.post(VPN, { action: 'failmode', mode: 'closed' }); });
+    steps.push(function () { return G.post(SET, { action: 'setstealth', on: '0' }, 60000); });
     return runSteps(steps).then(function (fails) {
         return G.post(TOOLS, { action: 'travel', on: '0' }).then(function () {
             G.pop(fails ? 'Home, but ' + fails + ' step(s) failed — check the tiles.' : 'Home. Everything is back as it was.', fails ? 'warn' : 'ok');
