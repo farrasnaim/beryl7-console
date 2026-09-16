@@ -34,7 +34,7 @@ Read [Security model](#security-model) before putting this on a network you don'
 
 | Page | Path | What it does |
 |---|---|---|
-| **Console** | `/console/` | The current console: a single Control Center grid. A Path strip (Internet · Uplink · VPN, each node opening its sheet) and eight tiles — Devices, Radios, Speed test, Throughput, System, Travel, IoT, Guest Wi-Fi — each a one-glance instrument that opens a sheet for the rest. Wi-Fi uplink and USB tethering are one Uplink surface. Guest and IoT carry switches; Travel is one switch that turns guest and IoT off and sets the VPN to fail open, then puts them back exactly as they were. Speed test is fast.com-style download, run from the router: four parallel streams from Cloudflare for ten seconds read off the uplink's counters, with a live figure while it runs (download only — see `tools-api` for why upload is deliberately absent); the iPerf server switch sits beside it. Installable to an iPhone home screen (standalone, safe-area aware). Backed by the CGIs under `www/cgi-bin/`. |
+| **Console** | `/console/` | The current console: a single Control Center grid. A Path strip (Internet · Uplink · VPN, each node opening its sheet) and eight tiles — Devices, Radios, Speed test, Throughput, System, Travel, IoT, Guest Wi-Fi — each a one-glance instrument that opens a sheet for the rest. Wi-Fi uplink and USB tethering are one Uplink surface. Guest and IoT carry switches; Travel is one switch that turns guest and IoT off, sets the VPN to fail open, and makes the router present itself upstream as an ordinary client (a Windows laptop on the cable, an iPhone over Wi-Fi and USB) instead of as a GL.iNet router, then puts all of it back exactly as it was. Speed test is fast.com-style download, run from the router: four parallel streams from Cloudflare for ten seconds read off the uplink's counters, with a live figure while it runs (download only — see `tools-api` for why upload is deliberately absent); the iPerf server switch sits beside it. Installable to an iPhone home screen (standalone, safe-area aware). Backed by the CGIs under `www/cgi-bin/`. |
 
 Every page works from 360 px phones to desktop, in light and dark - system-following by default, pinned by the toggle in the sidebar.
 
@@ -322,6 +322,30 @@ Two things worth knowing before you spend time on this:
   add it. So there is no way to command a client to roam from here; confirmation
   has to come from a real one.
 
+
+## Stealth uplink
+
+`Travel` calls `/usr/sbin/beryl-stealth`, which changes what the network on the
+other side of the uplink can tell about this box. It records every value before
+it changes it, so `off` restores what was actually there.
+
+| Tell | At home | While away |
+|---|---|---|
+| WAN and BSSID MACs | GL.iNet OUI | locally-administered random, redrawn each session |
+| DHCP hostname | `Beryl-7` | `DESKTOP-xxxxxx` on the cable, `iPhone` on Wi-Fi and USB |
+| DHCP client-id (61) | netifd's RFC 4361 DUID | plain `ether <mac>`, as Windows and phones send |
+| DHCP vendor class (60) | `udhcp 1.37.0` | `MSFT 5.0` on the cable, absent on Wi-Fi and USB |
+| DHCP request list (55) | busybox default | the persona's own list, in the persona's order |
+| Egress TTL | one below the client's | 128 on the cable, 64 elsewhere |
+| IPv6 | relayed to every LAN client | off, and restored on return |
+| NTP | `*.openwrt.pool.ntp.org` | Apple and Cloudflare |
+
+What it does **not** do, stated plainly because the gap matters: a beacon is
+still a beacon, so an office WIDS logs an unknown AP whatever its BSSID says;
+several client OSes browsing through one address still have different TCP
+fingerprints, which a p0f-style inspection can read as NAT; there is no 802.1X,
+so a NAC-protected port will refuse it regardless; and the DHCP maximum message
+size stays at busybox's 576 where Windows sends 1500.
 
 ## Security model
 
